@@ -1,0 +1,28 @@
+# Local configuration
+.env
+.env.*
+!.env.example
+!.env.*.example
+.DS_Store
+
+# Python environments and caches
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+build/
+dist/
+*.egg-info/
+
+# Generated benchmark assets and execution evidence
+/artifacts/
+/snapshots/
+/jobs/
+/results/
+/.cache/
+.firecrawl/
