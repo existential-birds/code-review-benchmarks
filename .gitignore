@@ -4,6 +4,7 @@
 !.env.example
 !.env.*.example
 .DS_Store
+,vscode/
 
 # Python environments and caches
 .venv/
