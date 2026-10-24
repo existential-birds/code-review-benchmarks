@@ -1,7 +1,8 @@
 # Code Review Benchmarks
 
-Harbor-based evaluation suite for [Daydream](https://github.com/existential-birds/daydream)
-and other code-review agents.
+Harbor-based evaluation suite for measuring the effects of changes to
+[Daydream](https://github.com/existential-birds/daydream). Other code-review
+agents can provide comparison points.
 
 The first integration will port [AACR-Bench](https://github.com/alibaba/aacr-bench)
 to Harbor. This repository currently contains the project scaffold; the AACR
@@ -14,23 +15,55 @@ As integrations are added, the suite will use this layout:
 ```text
 benchmarks/
   aacr/           # AACR conversion, task definitions, verifier, and metrics
-shared/           # Snapshot preparation, manifests, artifacts, and reporting
-experiments/      # Pinned agent configurations and reproducible comparisons
+experiments/      # Native Harbor job configurations
 ```
 
 Each benchmark retains its own reference data, scoring rules, and reported
-metrics. Shared tooling handles execution and evidence collection. Daydream's
-execution adapter stays in the Daydream repository; experiments select a pinned
-Daydream build.
+metrics. Add shared utilities when integrations actually need the same behavior.
+Use Harbor's built-in job configuration, task selection, attempt counts,
+concurrency, timeouts, retries, result storage, and aggregation where supported.
+Project-specific code covers benchmark conversion and verification plus the
+Daydream and subscription-judge adapters required to connect them.
 
-## Reproducibility
+Reuse Daydream's existing ReviewBench integration where practical, with Harbor
+owning execution behavior.
+ReviewBench benchmark tooling currently lives in Daydream and will eventually
+move into this suite.
 
-- Pin upstream dataset and scorer revisions, with checksums and provenance.
-- Freeze repository snapshots, agent builds, model settings, judge settings, and
-  execution budgets for each experiment.
-- Preserve raw findings and per-task results so runs can be rescored.
-- Validate imported scoring against upstream before reporting results.
-- Report benchmark scores, completion rate, cost, and latency separately.
+## Evaluation scope
+
+Evaluate Daydream's complete review pipeline, including exploration,
+adjudication, and filtering. Use review-only mode so the output is the findings
+a user would receive before any fixes are applied.
+
+The primary goal is deciding whether a Daydream version or configuration
+improves review quality at an acceptable cost and latency. This is an internal
+measurement tool. Leaderboard submissions, exact upstream score equivalence,
+and third-party reproduction are outside the current scope.
+
+## Initial delivery
+
+- Establish one baseline of Daydream's review pipeline; a candidate build is
+  not needed yet.
+- Use Daydream's Codex backend with its current default deep-review profile
+  and model settings, including precision mode off.
+- Validate execution and scoring on 10 AACR pull requests before running the
+  full available AACR set.
+- Reuse the existing AACR scorer with Codex as the sole judge, authenticated
+  through the operator's subscription.
+- Add other judges only when there is a concrete need; additional scoring modes
+  and upstream compatibility checks are outside the initial scope.
+- Run evaluations manually on demand, with the operator choosing which cases
+  to run or rerun. Configure attempts per case through Harbor's native
+  `-k` / `--n-attempts` option or `n_attempts` job setting, using Harbor's default
+  when omitted. CI integration is outside the initial scope.
+
+## Comparison discipline
+
+- Keep benchmark cases and scoring settings consistent within a comparison.
+- Save raw findings, per-case results, and the settings needed to interpret them.
+- Report benchmark scores, completion rate, usage, and latency separately;
+  include monetary cost when it is available.
 - Keep evaluation inputs and results separate from training data.
 
 AACR reference agreement measures agreement with annotated comments. Any claim
