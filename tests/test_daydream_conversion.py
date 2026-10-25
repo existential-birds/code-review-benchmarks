@@ -6,6 +6,7 @@ import subprocess
 import tomllib
 import zipfile
 
+import pytest
 import yaml
 
 from benchmarks.aacr import convert
@@ -40,6 +41,11 @@ def test_daydream_task_freezes_runtime_comparison_and_keeps_oracle_separate(tmp_
         archive.writestr('daydream/benchmark/reviewbench/harbor_entrypoint.py', '')
     monkeypatch.setattr(convert, 'DAYDREAM_BUILD', dict(convert.DAYDREAM_BUILD,
         wheel_sha256=hashlib.sha256(wheel.read_bytes()).hexdigest()))
+    renamed_wheel = wheel.with_name('daydream-0.30.1-py3-none-any.whl')
+    renamed_wheel.write_bytes(wheel.read_bytes())
+    with pytest.raises(ValueError, match='Daydream wheel filename differs from the baseline build'):
+        convert.configure_daydream_task(task, renamed_wheel)
+    assert not (task / 'environment/aacr').exists()
     convert.configure_daydream_task(task, wheel)
     comparison = json.loads((task / 'environment/aacr/comparison.json').read_text())
     patch = (task / 'environment/aacr/diff.patch').read_bytes()

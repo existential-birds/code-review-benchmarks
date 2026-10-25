@@ -271,25 +271,29 @@ def test_daydream_missing_proof_fails_before_judging(tmp_path, missing):
     assert not (paths[2] / 'reward.json').exists()
 
 
-@pytest.mark.parametrize('location,key', [
-    ('expected', 'base_sha'), ('expected', 'head_sha'),
-    ('analyzed_comparison', 'merge_base_sha'), ('analyzed_comparison', 'patch_sha256'),
-    ('post_comparison', 'head_sha'), ('post_comparison', 'diff_key'),
-    ('terminal_result', 'head_sha'), ('terminal_result', 'merge_base_sha'),
-    ('terminal_result', 'diff_key'),
+@pytest.mark.parametrize('location,key,value', [
+    ('expected', 'base_sha', 'mismatched'), ('expected', 'head_sha', 'mismatched'),
+    ('expected', 'base_sha', 'e' * 40), ('expected', 'head_sha', 'e' * 40),
+    ('analyzed_comparison', 'merge_base_sha', 'mismatched'),
+    ('analyzed_comparison', 'patch_sha256', 'mismatched'),
+    ('post_comparison', 'head_sha', 'mismatched'), ('post_comparison', 'diff_key', 'mismatched'),
+    ('terminal_result', 'head_sha', 'mismatched'), ('terminal_result', 'merge_base_sha', 'mismatched'),
+    ('terminal_result', 'diff_key', 'mismatched'),
 ])
-def test_daydream_comparison_mismatch_fails_before_judging(tmp_path, location, key):
+def test_daydream_comparison_mismatch_fails_before_judging(tmp_path, location, key, value):
     paths, proof, expected, host_receipt = daydream_artifacts(tmp_path, [finding()])
     path = expected if location == 'expected' else proof / 'execution.json'
     document = json.loads(path.read_text())
     target = (document if location == 'expected' else document['terminal_result']['analyzed_revision']
               if location == 'terminal_result' else document[location])
-    target[key] = 'mismatched'
+    target[key] = value
     path.write_text(json.dumps(document))
     client = JudgeTransport('[1]')
-    with pytest.raises(score.VerificationError):
+    with pytest.raises(score.VerificationError) as error:
         asyncio.run(score.score_case(*paths, client=client,
                     daydream_proof=proof, comparison_path=expected, host_receipt_path=host_receipt))
+    if location == 'expected':
+        assert str(error.value.__cause__) == 'Daydream expected comparison does not match the review case'
     assert not client.requests
     assert not (paths[2] / 'reward.json').exists()
 

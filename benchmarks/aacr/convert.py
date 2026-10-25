@@ -91,6 +91,8 @@ def configure_daydream_task(task: Path, wheel: Path) -> None:
 
     if hashlib.sha256(wheel.read_bytes()).hexdigest() != DAYDREAM_BUILD['wheel_sha256']:
         raise ValueError('Daydream wheel SHA-256 differs from the baseline build')
+    if wheel.name != DAYDREAM_BUILD['wheel_name']:
+        raise ValueError('Daydream wheel filename differs from the baseline build')
     suffix, assets, identity = reviewer_build(wheel, platform='linux/arm64')
     identity.update(DAYDREAM_BUILD)
     identity['harbor_revision'] = '6099b8cf2bfbbb3e7ff1eb2163bfc4524dbd9ba5'
