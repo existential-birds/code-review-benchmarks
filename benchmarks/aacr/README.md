@@ -116,16 +116,17 @@ callback usage and top-level token totals include sibling reviews; Harbor's
 backfilled per-model map covers the root trajectory only. Monetary estimates are
 API-equivalent, not subscription charges.
 
-Accepted Daydream run: `jobs/aacr-daydream-issue3-verified`, trial
-`laravel-framework-56591__vDRZh7Z`: **1/1 completed, zero errors**, with complete
-analysis and successful separate scoring. It retained zero findings against one
-reference, so both match counts and all three agreement scores are **0.0**; no
-judge completion calls were needed. This retained run predates receipt hardening;
-the protected host-to-verifier boundary has deterministic tests rather than a
-new live subscription trial. Reviewer usage was 362,454 input tokens
-(299,008 cached) and 2,558 output tokens over 94.2 seconds. The Oracle run remains
-the live subscription-judge inference evidence. Agreement scores do not establish
-actual bug precision.
+Accepted Daydream run at benchmark revision `810b5f5b1e6f55157dcc0692149861588be700c7`:
+`jobs/aacr-daydream-issue3-final-810b5f5`, trial
+`laravel-framework-56591__eKQiJJw`: **1/1 completed, zero errors**, with complete
+analysis and successful separate scoring through the protected host-to-verifier
+receipt boundary. The task was freshly generated from the pinned AACR source;
+its reviewer/scorer assets match that revision. It retained zero findings against
+one reference, so both match counts and all three agreement scores are **0.0**;
+no judge completion calls were needed. Reviewer usage was 328,222 input tokens
+(260,352 cached) and 1,890 output tokens over 43.5 seconds; total Harbor job time
+was 2 minutes 41 seconds. The Oracle run remains the live subscription-judge
+inference evidence. Agreement scores do not establish actual bug precision.
 
 Run deterministic checks with `.venv/bin/python -m pytest tests` and
 `node --test tests/pi_judge.test.mjs`. Daydream adapter and completion tests need
