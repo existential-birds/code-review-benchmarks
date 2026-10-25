@@ -144,16 +144,12 @@ def configure_daydream_task(task: Path, wheel: Path) -> None:
         'COPY . /tests/\nRUN uv pip install --no-deps --python /opt/daydream/bin/python /tests/suite '
         '&& npm ci --omit=dev --prefix /tests/suite/benchmarks/aacr\nWORKDIR /tests/suite\n')
     script = (task / 'tests/test.sh').read_text().replace(
-        '--output /logs/verifier', '--output /logs/verifier \\\n  --daydream-proof /logs/artifacts/daydream \\\n  --comparison /tests/comparison.json --host-receipt /logs/agent/host-receipt.json')
+        '--output /logs/verifier', '--output /logs/verifier \\\n  --daydream-proof /logs/artifacts/daydream \\\n  --comparison /tests/comparison.json --host-receipt /tmp/aacr-host-receipt.json')
     (task / 'tests/test.sh').write_text(script)
     config = (task / 'task.toml').read_text().replace('timeout_sec = 60.0', 'timeout_sec = 5400.0')
     config = config.replace('network_mode = "no-network"', 'network_mode = "public"')
     config = config.replace('cpus = 1', 'cpus = 4').replace('memory_mb = 2048', 'memory_mb = 8192')
     config = config.replace('fixed Oracle reviewer', 'complete Daydream reviewer').replace('"oracle"', '"daydream"')
-    # Transfer only this nonsecret log document so host cancellation remains
-    # authoritative even if the sandbox receipt upload fails. Harbor lint's
-    # artifact-log-overlap warning is intentional for this single file.
-    config = 'artifacts = ["/logs/agent/host-receipt.json"]\n' + config
     config += ''.join(f'daydream_{key} = {json.dumps(identity[key])}\n'
         for key in ('source_commit', 'wheel_sha256', 'codex_cli', 'reviewer_runtime_lock_sha256'))
     (task / 'task.toml').write_text(config)

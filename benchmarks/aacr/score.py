@@ -60,8 +60,8 @@ def _validate_daydream_completion(instance, findings_path: Path, findings: dict,
     request = json.loads((proof / 'request.json').read_text())
     receipt = json.loads((proof / 'host-receipt.json').read_text())
     host_receipt = json.loads(host_receipt_path.read_text())
-    # The declared native artifact comes from the host's agent log directory.
-    # It can record cancellation after a sandbox receipt upload already finished.
+    # DaydreamVerifier transfers host-only process state directly to this
+    # isolated verifier; the reviewer cannot author this copy.
     if (host_receipt_path.resolve() == (proof / 'host-receipt.json').resolve()
             or host_receipt != receipt or type(host_receipt.get('return_code')) is not int):
         raise VerificationError('Daydream native host receipt is missing or differs from sandbox evidence')

@@ -9,6 +9,8 @@ agents:
   - import_path: benchmarks.aacr.daydream_agent:DaydreamAgent
     kwargs:
       version: 0.30.0
+verifier:
+  import_path: benchmarks.aacr.daydream_verifier:DaydreamVerifier
 environment:
   type: docker
   delete: true

@@ -273,6 +273,11 @@ def test_installed_agent_requires_process_success_and_populates_usage(tmp_path, 
     assert context.n_output_tokens == 11
     assert context.cost_usd is None
     assert context.metadata['elapsed_seconds'] == 5
+    # A residual sandbox process can rewrite its bind-mounted agent logs after
+    # the host observes cancellation; this must not replace host process state.
+    (logs / 'host-receipt.json').write_text(json.dumps(dict(receipt, status='succeeded', return_code=0)))
+    authoritative = json.loads((logs.parent / 'daydream-receipt.json').read_text())
+    assert authoritative == receipt
 
 
 @pytest.mark.parametrize('phase', ['install', 'run'])

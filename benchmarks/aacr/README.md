@@ -71,20 +71,34 @@ PY
   -k 1 -n 1 -r 0 --job-name <fresh-name>
 ```
 
-The experiment requires native `auto_mounting: true` so the host's cancellation
-receipt reaches the verifier. The reviewer Compose service permits nested
+The experiment uses native `auto_mounting: true` for agent logs. Process
+completion is recorded separately in the trial-root `daydream-receipt.json`,
+outside reviewer-writable mounts. The configured `DaydreamVerifier` uploads
+that host-owned document directly to the separate verifier before delegating
+to Harbor's default verifier. Keep `verifier.import_path` from the experiment
+configuration when overriding other job settings. Regenerate Daydream tasks
+created before this receipt boundary changed: their verifier scripts still read
+the old reviewer-writable path. Use a fresh output directory with the conversion
+command above; the converter intentionally refuses to replace existing tasks.
+The reviewer Compose service permits nested
 read-only Codex sandbox namespaces with `seccomp=unconfined`; installation checks
 namespace support before inference. Its native task settings provide public
 networking, four CPUs, 8 GiB memory, and a 5,400-second review deadline. Lint's
-credential-bind findings and `artifact-log-overlap` for the single nonsecret host
-receipt are intentional. Investigate additional findings.
+credential-bind findings are intentional. Investigate additional findings.
 
 Harbor-first inspection at `6099b8c` covered `agents/installed/base.py`,
 `agents/factory.py`, `agents/installed/codex.py`, `trial/trial.py`,
 `trial/artifact_handler.py`, the custom-agent/job docs, and separate-verifier
-tests. Harbor already owns execution controls and artifact transfer; its Codex
-agent invokes Codex directly. The custom installed agent covers only invoking
-Daydream once and exporting its finalized findings.
+tests. Receipt hardening additionally inspected `verifier/base.py`,
+`verifier/factory.py`, `verifier/verifier.py`, `models/trial/paths.py`,
+`tests/unit/test_verifier_factory.py`, `tests/unit/test_trial_verifier_separate.py`,
+and the custom-verifier docs. Harbor already owns execution controls, artifact
+transfer, and the separate verifier; its Codex agent invokes Codex directly.
+The custom installed agent invokes Daydream once and exports finalized findings;
+the small native verifier subclass supplies the missing host-owned receipt
+boundary. It rejects missing/unsuccessful receipts and reviewer-shared environments,
+then retains native test upload, execution, reward cleanup, and result parsing.
+The custom-verifier factory reuploads the trusted baked tests from their source.
 
 Daydream uses packaged default review settings, precision mode off, empty file
 configuration, and isolated execution inputs. It applies no fixes, publication,
@@ -96,7 +110,8 @@ findings and AACR's existing matching/count semantics are preserved.
 
 Inspect job/trial `result.json` and `lock.json`, `agent/trajectory.json`, joined
 native evidence under `agent/daydream/`, findings and completion proof under
-`artifacts/logs/artifacts/`, and `verifier/` scores and judge evidence. Native
+`artifacts/logs/artifacts/`, the trial-root `daydream-receipt.json`, and
+`verifier/` scores and judge evidence. Native
 callback usage and top-level token totals include sibling reviews; Harbor's
 backfilled per-model map covers the root trajectory only. Monetary estimates are
 API-equivalent, not subscription charges.
@@ -105,7 +120,9 @@ Accepted Daydream run: `jobs/aacr-daydream-issue3-verified`, trial
 `laravel-framework-56591__vDRZh7Z`: **1/1 completed, zero errors**, with complete
 analysis and successful separate scoring. It retained zero findings against one
 reference, so both match counts and all three agreement scores are **0.0**; no
-judge completion calls were needed. Reviewer usage was 362,454 input tokens
+judge completion calls were needed. This retained run predates receipt hardening;
+the protected host-to-verifier boundary has deterministic tests rather than a
+new live subscription trial. Reviewer usage was 362,454 input tokens
 (299,008 cached) and 2,558 output tokens over 94.2 seconds. The Oracle run remains
 the live subscription-judge inference evidence. Agreement scores do not establish
 actual bug precision.

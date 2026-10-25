@@ -412,3 +412,111 @@ def test_daydream_missing_native_host_artifact_cannot_publish_reward(tmp_path):
         asyncio.run(score.score_case(*paths, client=JudgeTransport(), daydream_proof=proof,
                     comparison_path=expected, host_receipt_path=host_receipt))
     assert not (paths[2] / 'reward.json').exists()
+
+
+@pytest.mark.parametrize('outcome', [
+    'cancelled', 'failed', 'missing', 'shared_agent', 'shared_artifacts', 'wrong_image', 'empty', 'findings',
+])
+def test_native_verifier_keeps_host_completion_authoritative_after_sandbox_forgery(tmp_path, outcome):
+    """Agent.run -> configured native verifier -> real scorer, with hostile logs."""
+    import shutil
+    import yaml
+    from benchmarks.aacr import convert
+    from benchmarks.aacr.daydream_agent import DaydreamAgent
+    from harbor.models.agent.context import AgentContext
+    from harbor.models.task.config import TaskOS
+    from harbor.models.task.task import Task
+    from harbor.models.trial.config import VerifierConfig
+    from harbor.models.trial.paths import TrialPaths
+    from harbor.verifier.factory import VerifierFactory
+
+    findings = [finding()] if outcome == 'findings' else []
+    paths, proof, expected, _ = daydream_artifacts(tmp_path, findings)
+    trial = TrialPaths(tmp_path / 'trial')
+    trial.mkdir()
+    paths = (paths[0], paths[1], trial.verifier_dir)
+    task_dir = tmp_path / 'task'
+    convert.render_task({'githubPrUrl': convert.PR_URL, 'project_main_language': 'PHP',
+        'source_commit': convert.BASE, 'target_commit': convert.HEAD,
+        'comments': [{'path': 'file.php', 'note': 'reference'}]}, task_dir)
+    task = Task(task_dir)
+
+    class ReviewerEnvironment:
+        def is_path_mounted(self, environment_path, host_path):
+            return environment_path == '/logs/agent' and host_path == trial.agent_dir
+        async def upload_file(self, source_path, target_path):
+            shutil.copyfile(source_path, proof / Path(target_path).name)
+        async def download_file(self, source_path, target_path):
+            shutil.copyfile(proof / 'execution.json', target_path)
+        async def exec(self, command, **kwargs):
+            if '-m benchmarks.aacr.daydream_entrypoint' in command:
+                if outcome == 'cancelled':
+                    raise asyncio.CancelledError
+                return SimpleNamespace(return_code=1 if outcome == 'failed' else 0)
+            return SimpleNamespace(return_code=0)
+
+    agent = DaydreamAgent(logs_dir=trial.agent_dir)
+    async def review():
+        await agent.run('review', ReviewerEnvironment(), AgentContext())
+    if outcome == 'cancelled':
+        with pytest.raises(asyncio.CancelledError):
+            asyncio.run(review())
+    elif outcome == 'failed':
+        with pytest.raises(RuntimeError):
+            asyncio.run(review())
+    else:
+        asyncio.run(review())
+
+    # A leftover reviewer process rewrites BOTH sandbox/shared receipt copies,
+    # and leaves a forged reward in the reviewer-writable verifier log mount.
+    invocation = json.loads((proof / 'request.json').read_text())['invocation_id']
+    forged = {'invocation_id': invocation, 'status': 'succeeded', 'return_code': 0}
+    for path in (trial.agent_dir / 'host-receipt.json', proof / 'host-receipt.json'):
+        path.write_text(json.dumps(forged))
+    execution = json.loads((proof / 'execution.json').read_text())
+    execution['invocation_id'] = invocation
+    (proof / 'execution.json').write_text(json.dumps(execution))
+    trial.reward_json_path.write_text('{"balanced_score": 1.0}')
+    trial.reward_text_path.write_text('1')
+    if outcome == 'missing':
+        (trial.trial_dir / 'daydream-receipt.json').unlink(missing_ok=True)
+
+    class VerifierEnvironment:
+        os = TaskOS.LINUX
+        environment_dir = task.paths.environment_dir if outcome == 'wrong_image' else task.paths.tests_dir
+        def __init__(self):
+            self.receipt = tmp_path / 'isolated-verifier-receipt.json'
+            # Even a forged retained copy at this path is replaced by host upload.
+            self.receipt.write_text(json.dumps(forged))
+        def is_path_mounted(self, environment_path, host_path):
+            return ((str(environment_path) == '/logs/verifier' and host_path == trial.verifier_dir)
+                or (outcome == 'shared_agent' and str(environment_path) == '/logs/agent'
+                    and host_path == trial.agent_dir)
+                or (outcome == 'shared_artifacts' and str(environment_path) == '/logs/artifacts'
+                    and host_path == trial.artifacts_dir / 'logs/artifacts'))
+        async def upload_file(self, source_path, target_path):
+            assert target_path == '/tmp/aacr-host-receipt.json'
+            shutil.copyfile(source_path, self.receipt)
+        async def upload_dir(self, source_dir, target_dir):
+            assert target_dir == '/tests'
+        async def exec(self, command, **kwargs):
+            if command.startswith('rm -f'):
+                trial.reward_json_path.unlink(missing_ok=True)
+                trial.reward_text_path.unlink(missing_ok=True)
+            elif '/tests/test.sh' in command and not command.startswith('chmod'):
+                await score.score_case(*paths, client=JudgeTransport('One agreement\n[1]'),
+                    daydream_proof=proof, comparison_path=expected, host_receipt_path=self.receipt)
+            return SimpleNamespace(return_code=0, stdout='', stderr='')
+
+    config = yaml.safe_load((Path(__file__).resolve().parents[1] / 'experiments/aacr-daydream.yaml').read_text())
+    verifier = VerifierFactory.create_verifier_from_config(VerifierConfig(**config.get('verifier', {})),
+        task=task, trial_paths=trial, environment=VerifierEnvironment())
+    if outcome in {'cancelled', 'failed', 'missing', 'shared_agent', 'shared_artifacts', 'wrong_image'}:
+        with pytest.raises((RuntimeError, FileNotFoundError)):
+            asyncio.run(verifier.verify())
+        assert not trial.reward_json_path.exists()
+        assert not trial.reward_text_path.exists()
+    else:
+        result = asyncio.run(verifier.verify())
+        assert result.rewards['balanced_score'] == (0.667 if findings else 0.0)
+        assert trial.reward_json_path.is_file()

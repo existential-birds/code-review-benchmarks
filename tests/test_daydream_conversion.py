@@ -64,10 +64,10 @@ def test_daydream_task_freezes_runtime_comparison_and_keeps_oracle_separate(tmp_
     assert config['environment']['network_mode'] == 'public'
     compose = yaml.safe_load((task / 'environment/docker-compose.yaml').read_text())
     assert compose['services']['main']['security_opt'] == ['seccomp=unconfined']
-    assert config['artifacts'] == ['/logs/agent/host-receipt.json']
+    assert config.get('artifacts', []) == []
     assert config['metadata']['daydream_wheel_sha256'] == hashlib.sha256(wheel.read_bytes()).hexdigest()
     assert '--daydream-proof /logs/artifacts/daydream' in (task / 'tests/test.sh').read_text()
-    assert '--host-receipt /logs/agent/host-receipt.json' in (task / 'tests/test.sh').read_text()
+    assert '--host-receipt /tmp/aacr-host-receipt.json' in (task / 'tests/test.sh').read_text()
     assert not (task / 'solution').exists()
     assert 'verifier only annotation' not in ''.join(p.read_text() for p in (task / 'environment/aacr').glob('*.json'))
     assert 'oracle' in (convert.PACKAGE / 'templates/task.toml').read_text()

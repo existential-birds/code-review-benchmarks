@@ -42,7 +42,8 @@ class DaydreamAgent(BaseInstalledAgent):
             raise ValueError('AACR baseline configuration uses the baked runtime and dedicated credential mount')
         invocation = str(uuid.uuid4())
         receipt = {'invocation_id': invocation, 'status': 'failed', 'return_code': None}
-        receipt_path = self.logs_dir / 'host-receipt.json'
+        # Trial root is outside Harbor's reviewer-writable log/artifact mounts.
+        receipt_path = self.logs_dir.parent / 'daydream-receipt.json'
         receipt_path.write_text(json.dumps(receipt) + '\n')
         request_path = self.logs_dir / 'request.json'
         request_path.write_text(json.dumps({'invocation_id': invocation}) + '\n')
@@ -70,8 +71,8 @@ class DaydreamAgent(BaseInstalledAgent):
             await environment.upload_file(receipt_path, '/logs/artifacts/daydream/host-receipt.json')
         except BaseException as error:
             receipt['status'] = 'cancelled' if isinstance(error, asyncio.CancelledError) else 'failed'
-            # Native artifact transfer retains this host document even when the
-            # interrupted exec transport cannot accept the remote invalidation.
+            # The separate verifier reads this host-only document even when the
+            # interrupted reviewer transport cannot accept remote invalidation.
             receipt_path.write_text(json.dumps(receipt) + '\n')
             with suppress(Exception, asyncio.CancelledError):
                 await asyncio.wait_for(asyncio.shield(environment.upload_file(
