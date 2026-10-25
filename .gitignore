@@ -31,3 +31,6 @@ dist/
 .agents/skills/
 .hermes/
 docs/agents/
+
+# Node dependencies
+node_modules/

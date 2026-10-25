@@ -1,0 +1,13 @@
+{
+  "repository": "https://github.com/alibaba/aacr-bench.git",
+  "revision": "ee9d7fef70ef31acea2ff7ae316ce0a9575fe4df",
+  "files": {
+    "config.py": "f6a68c5abbf8bea5d9c6e5632401ba731f2fafd2b834487b74567e8d9faee604",
+    "schema.py": "55310e814bbb649170a17acd5f76889ff032b81ce9722f5f3c26e04a809cb68f",
+    "repo_utils.py": "994e04b94cb969eaba298ba40da3ace8dbf02b574ac806b2d53174c489aae2d9",
+    "judge.py": "4d72721ea0d4ab83950633b69a941b6a9911a48e648a0a6e73fd664138aa614c",
+    "evaluate.py": "50b4f787509b46b5f4b4255085baae8727a43b6ce0841b1fda39ad876e60b51b",
+    "converters/aacr_bench.py": "ff91d08efbfc72ad39d7b863eebeecb9bc653ab4f46dfed7ab1352fc479582d3",
+    "LICENSE": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+  }
+}

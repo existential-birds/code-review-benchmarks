@@ -4,13 +4,13 @@ Harbor-based evaluation suite for measuring the effects of changes to
 [Daydream](https://github.com/existential-birds/daydream). Other code-review
 agents can provide comparison points.
 
-The first integration will port [AACR-Bench](https://github.com/alibaba/aacr-bench)
-to Harbor. This repository currently contains the project scaffold; the AACR
-converter and runnable tasks are not implemented yet.
+The first integration is a single-case [AACR Oracle verification fixture](benchmarks/aacr/README.md)
+using native Harbor execution and a Pi Codex subscription judge. It validates
+conversion and scoring; the Daydream baseline remains future work.
 
 ## Structure
 
-As integrations are added, the suite will use this layout:
+The suite uses this layout:
 
 ```text
 benchmarks/

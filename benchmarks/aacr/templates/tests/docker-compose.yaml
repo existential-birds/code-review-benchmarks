@@ -1,0 +1,8 @@
+services:
+  main:
+    volumes:
+      - type: bind
+        source: ${AACR_PI_AUTH_DIR:?set the native Pi judge directory}
+        target: /run/aacr-pi
+        bind:
+          create_host_path: false
