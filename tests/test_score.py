@@ -259,6 +259,25 @@ def test_daydream_partial_stale_or_nonzero_output_cannot_be_empty_success(tmp_pa
     assert json.loads((paths[2] / 'diagnostic.json').read_text())['status'] == 'failed'
 
 
+@pytest.mark.parametrize('field,value', [
+    ('status', 'failed'), ('status', 'cancelled'), ('return_code', 1),
+])
+def test_daydream_matching_unsuccessful_receipts_cannot_be_empty_success(tmp_path, field, value):
+    paths, proof, expected, host_receipt = daydream_artifacts(tmp_path, [])
+    document = json.loads(host_receipt.read_text())
+    document[field] = value
+    for path in (host_receipt, proof / 'host-receipt.json'):
+        path.write_text(json.dumps(document))
+    client = JudgeTransport()
+    with pytest.raises(score.VerificationError) as error:
+        asyncio.run(score.score_case(*paths, client=client, daydream_proof=proof,
+                    comparison_path=expected, host_receipt_path=host_receipt))
+    assert str(error.value.__cause__) == 'Daydream invocation did not finish successfully'
+    assert not client.requests
+    assert not (paths[2] / 'reward.json').exists()
+    assert not (paths[2] / 'reward.txt').exists()
+
+
 @pytest.mark.parametrize('missing', ['request.json', 'host-receipt.json', 'execution.json', 'comparison.json'])
 def test_daydream_missing_proof_fails_before_judging(tmp_path, missing):
     paths, proof, expected, host_receipt = daydream_artifacts(tmp_path, [finding()])
