@@ -25,3 +25,7 @@ failure; use a fresh named job when rerunning.
 The vendored evaluator comes from [Alibaba AACR-Bench](https://github.com/alibaba/aacr-bench)
 and shares the root [Apache-2.0 license](../../LICENSE). Generated Laravel
 repository context retains its own license.
+
+The vendored converter has one local correction: an existing raw-data file whose
+SHA-256 differs from its metadata is rejected when no download URL is available.
+The pinned task generator retains its independent dataset checksum check.

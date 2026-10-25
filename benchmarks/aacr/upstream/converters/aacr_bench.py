@@ -100,7 +100,10 @@ def ensure_raw_file(input_path: Path) -> Path:
     url = meta.get("url")
     if not url:
         if data_path.exists():
-            return data_path
+            raise SystemExit(
+                f"Local file checksum failed and no download URL is available: {data_path}\n"
+                f"Expected sha256={expected_sha}\n  meta: {meta_path}"
+            )
         raise SystemExit(
             f"Input file is missing and no download metadata is available: {data_path}\n"
             f"Expected matching .meta.json: {meta_path}"

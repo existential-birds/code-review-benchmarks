@@ -130,6 +130,28 @@ def test_judge_full_response_is_retained_beyond_upstream_truncation(tmp_path):
     assert evidence[0]['response'] == response
 
 
+@pytest.mark.parametrize('response', ['Matched\n[1]', RuntimeError('judge call failed')])
+def test_verdict_evidence_write_failure_withholds_reward(tmp_path, monkeypatch, response):
+    paths = fixture(tmp_path, [finding()], references=1)
+    write_text = Path.write_text
+
+    def fail_verdict_write(path, *args, **kwargs):
+        if path == paths[2] / 'verdicts.json.tmp':
+            raise PermissionError('Cannot write verdict evidence')
+        return write_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, 'write_text', fail_verdict_write)
+    with pytest.raises(score.VerificationError):
+        run(paths, JudgeTransport(response))
+    diagnostic = json.loads((paths[2] / 'diagnostic.json').read_text())
+    assert diagnostic['status'] == 'failed'
+    assert {'category': 'evidence_write', 'error_type': 'PermissionError'} in diagnostic['failures']
+    if isinstance(response, Exception):
+        assert {'category': 'judge_call', 'error_type': 'RuntimeError'} in diagnostic['failures']
+    assert not (paths[2] / 'reward.json').exists()
+    assert not (paths[2] / 'reward.txt').exists()
+
+
 def test_upstream_missing_case_cannot_publish_reward(tmp_path, monkeypatch):
     paths = fixture(tmp_path, [])
     from benchmarks.aacr.upstream import evaluate

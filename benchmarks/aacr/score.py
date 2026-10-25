@@ -74,7 +74,11 @@ class _VerdictGuard:
             evidence['failure'] = failure
             raise
         finally:
-            _write_json(self.output / 'verdicts.json', self.verdicts)
+            try:
+                _write_json(self.output / 'verdicts.json', self.verdicts)
+            except Exception as error:
+                self.failures.append({'category': 'evidence_write', 'error_type': type(error).__name__})
+                raise
 
 
 async def score_case(instance_path: Path, findings_path: Path, output_dir: Path, *, client=None) -> dict:

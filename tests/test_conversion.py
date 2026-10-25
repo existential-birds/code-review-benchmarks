@@ -1,4 +1,5 @@
 """AACR conversion contracts; synthetic references stay in test fixtures."""
+import hashlib
 import json
 from pathlib import Path
 import subprocess
@@ -9,6 +10,7 @@ from unittest.mock import patch
 
 from benchmarks.aacr import convert
 from benchmarks.aacr.upstream import evaluate, schema
+from benchmarks.aacr.upstream.converters import aacr_bench
 
 
 class ConversionTests(unittest.TestCase):
@@ -24,6 +26,35 @@ class ConversionTests(unittest.TestCase):
             'comments': [{'path': 'file.php', 'note': 'synthetic verifier-only reference',
                           'from_line': None, 'to_line': None}],
         }
+
+    def test_raw_checksum_mismatch_without_url_stops_conversion(self):
+        raw = self.root / 'raw.json'
+        raw.write_text(json.dumps([self.record]))
+        raw.with_suffix('.meta.json').write_text(json.dumps({'sha256': '0' * 64}))
+        output = self.root / 'instances.jsonl'
+        with self.assertRaisesRegex(SystemExit, 'checksum'):
+            aacr_bench.convert_file(raw, output, limit=None)
+        self.assertFalse(output.exists())
+
+    def test_valid_raw_cache_without_url_remains_convertible(self):
+        raw = self.root / 'raw.json'
+        raw.write_text(json.dumps([self.record]))
+        for metadata in ({'sha256': hashlib.sha256(raw.read_bytes()).hexdigest()}, {}):
+            with self.subTest(metadata=metadata):
+                raw.with_suffix('.meta.json').write_text(json.dumps(metadata))
+                output = self.root / 'instances.jsonl'
+                self.assertEqual(aacr_bench.convert_file(raw, output, limit=None), 1)
+                instance, = schema.load_instances(output)
+                self.assertEqual(instance.repo, 'laravel/framework')
+                self.assertEqual(instance.reference_comments[0].text, 'synthetic verifier-only reference')
+
+    def test_missing_raw_file_without_url_still_reports_missing_input(self):
+        raw = self.root / 'raw.json'
+        raw.with_suffix('.meta.json').write_text(json.dumps({'sha256': '0' * 64}))
+        output = self.root / 'instances.jsonl'
+        with self.assertRaisesRegex(SystemExit, 'Input file is missing'):
+            aacr_bench.convert_file(raw, output, limit=None)
+        self.assertFalse(output.exists())
 
     def test_render_uses_upstream_conversion_and_confines_references(self):
         task = self.root / 'task'
