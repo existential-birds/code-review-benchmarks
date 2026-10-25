@@ -1,19 +1,21 @@
-"""评测核心：参考评论与生成评论的匹配 + 指标统计 + 语义判定。
+"""Evaluation core: match reference and generated comments, compute metrics, and judge semantics.
 
-本模块自包含，不依赖框架外的任何资源。语义匹配支持两种模式：
-- LLM 模式：调用裁判模型判断评论是否表达同一关注点 / 建议；
-- Mock 模式：用本地文本相似度近似（零依赖、零成本，仅用于流程验证）。
+This module is self-contained and requires no resources outside the framework.
+Semantic matching supports two modes:
+- LLM: ask a judge whether comments express the same concern or suggestion.
+- Mock: approximate with local text similarity (no dependencies or cost; for workflow validation only).
 
-配置变量名统一由 config 提供（JUDGE_BASE_URL / JUDGE_API_KEY / JUDGE_MODEL /
-JUDGE_USE_MOCK），本模块直接读取，不再经过中间映射：
-  JUDGE_USE_MOCK=true 或缺少 JUDGE_API_KEY  -> Mock 模式
-  否则                                       -> LLM 模式（JUDGE_BASE_URL / JUDGE_API_KEY / JUDGE_MODEL）
+Configuration variable names come from config (JUDGE_BASE_URL / JUDGE_API_KEY /
+JUDGE_MODEL / JUDGE_USE_MOCK) and are read directly without intermediate mapping:
+  JUDGE_USE_MOCK=true or missing JUDGE_API_KEY -> Mock mode
+  Otherwise -> LLM mode (JUDGE_BASE_URL / JUDGE_API_KEY / JUDGE_MODEL)
 
-两条匹配通道：
-- evaluate_file_level_semantics（当前默认）：按文件分组，每条生成评论打包同文件
-  全部参考评论调用一次裁判模型判断覆盖关系，支持一对多。
-- evaluate_comments（Deprecated）：path -> side -> line(k) -> semantic 四阶段
-  逐条匹配，仅在 --use-deprecated-score 时使用。
+Two matching paths:
+- evaluate_file_level_semantics (current default): group by file and send each
+  generated comment with all reference comments in that file to the judge in one
+  call to determine coverage, supporting one-to-many matches.
+- evaluate_comments (deprecated): match comments individually through four stages,
+  path -> side -> line(k) -> semantic; used only with --use-deprecated-score.
 """
 from __future__ import annotations
 
@@ -30,17 +32,18 @@ from typing_extensions import deprecated
 
 import config
 
-# 缺少 JUDGE_API_KEY 时自动启用本地 Mock 语义匹配，便于零配置验证流程
+# Enable local mock semantic matching when JUDGE_API_KEY is missing for zero-configuration validation.
 USE_MOCK_LLM = (
     os.getenv(config.JUDGE_USE_MOCK_VAR, "").lower() == "true"
     or not os.getenv(config.JUDGE_API_KEY_VAR)
 )
 
-# 语义匹配请求计数（含 Mock 与 LLM）
+# Semantic matching request count (both mock and LLM).
 llm_request_count = 0
 
-# 文件级匹配通道用 asyncio.gather 并发调用裁判模型，限制并发避免突发打满；
-# 并发度由 JUDGE_CONCURRENCY 配置（默认 3），非法值回退默认
+# File-level matching calls the judge concurrently with asyncio.gather; cap
+# concurrency to prevent bursts. JUDGE_CONCURRENCY sets the limit (default 3),
+# with invalid values falling back to the default.
 def _judge_concurrency() -> int:
     try:
         return max(1, int(os.getenv(config.JUDGE_CONCURRENCY_VAR, "3")))
@@ -50,7 +53,7 @@ def _judge_concurrency() -> int:
 
 _llm_semaphore = asyncio.Semaphore(_judge_concurrency())
 
-# LLM 客户端延迟初始化，避免 Mock 模式下强依赖网络配置
+# Initialize the LLM client lazily so mock mode does not require network configuration.
 _llm_client = None
 
 
@@ -67,7 +70,7 @@ def _get_llm_client():
 
 
 def _mock_semantic_match(reference_note: str, generated_note: str) -> bool:
-    """本地近似语义匹配：综合序列相似度与词汇重叠度，不依赖外部 LLM。"""
+    """Approximate semantics locally using sequence similarity and word overlap, without an external LLM."""
     sequence_ratio = difflib.SequenceMatcher(
         None, reference_note.lower(), generated_note.lower()
     ).ratio()
@@ -83,14 +86,14 @@ def _mock_semantic_match(reference_note: str, generated_note: str) -> bool:
 
 
 @deprecated(
-    "旧逐条匹配通道的判定函数，仅在 --use-deprecated-score 时使用；"
-    "文件级通道用 match_llm_file_level"
+    "Legacy per-comment matching function, used only with --use-deprecated-score; "
+    "file-level matching uses match_llm_file_level"
 )
 async def match_semantic(reference_note: str, generated_note: str) -> Dict[str, Any]:
-    """判断两条评论是否表达相同的关注点或建议。
+    """Determine whether two comments express the same concern or suggestion.
 
-    Deprecated: 旧逐条匹配通道的判定函数，仅被 evaluate_comments 使用；
-    文件级通道的判定见 match_llm_file_level。
+    Deprecated: legacy per-comment matching function, used only by evaluate_comments.
+    See match_llm_file_level for file-level matching.
     """
     global llm_request_count
     llm_request_count += 1
@@ -136,15 +139,15 @@ async def match_semantic(reference_note: str, generated_note: str) -> Dict[str, 
             or "equivalent" in result_text
         ) and ("no" not in result_text.split("yes")[0] if "yes" in result_text else True)
         return {"is_similar": is_similar, "reason": result_text}
-    except Exception as error:  # noqa: BLE001 - 单条判定失败不应中断整体评测
-        logging.error("裁判模型调用失败: %s", error)
-        return {"is_similar": False, "reason": f"评估过程出错: {error}"}
+    except Exception as error:  # noqa: BLE001 - A single judgment failure must not abort evaluation.
+        logging.error("Judge call failed: %s", error)
+        return {"is_similar": False, "reason": f"Evaluation error: {error}"}
 
 
 def diff_location_is_same(
     from_line1: int, from_line2: int, to_line1: int, to_line2: int, k: int = 1
 ) -> bool:
-    """判断两个行号范围是否重叠，或最小距离在 k 范围内。"""
+    """Check whether two line ranges overlap or their minimum distance is at most k."""
     has_overlap = not (from_line1 > to_line2 or from_line2 < to_line1)
     if has_overlap:
         min_distance = 0
@@ -154,14 +157,14 @@ def diff_location_is_same(
 
 
 def _normalize_path(path: str) -> str:
-    """归一化路径，统一分隔符为 /。"""
+    """Normalize a path to use / separators."""
     if not path:
         return ""
     return path.replace("\\/", "/").replace("\\", "/")
 
 
 def _strip_thinking_tags(text: str) -> str:
-    """去除评论中的思考过程标签（如 <details>...</details>）。"""
+    """Remove reasoning tags from a comment (e.g. <details>...</details>)."""
     if not text:
         return ""
     cleaned = re.sub(r"<details>.*?</details>", "", text, flags=re.DOTALL)
@@ -170,23 +173,26 @@ def _strip_thinking_tags(text: str) -> str:
 
 
 @deprecated(
-    "旧逐条匹配通道，仅在 --use-deprecated-score 时使用，将在后续版本移除；"
-    "请改用 evaluate_file_level_semantics"
+    "Legacy per-comment matching, used only with --use-deprecated-score and slated "
+    "for removal in a future version; use evaluate_file_level_semantics instead"
 )
 async def evaluate_comments(
     reference_comments: List[Dict[str, Any]],
     generated_comments: List[Dict[str, Any]],
     k: int = 1,
 ) -> List[Dict[str, Any]]:
-    """对单个样本的参考评论逐条评测。
+    """Evaluate reference comments individually for a single review case.
 
-    Deprecated: 旧逐条匹配通道，仅在 --use-deprecated-score 时使用，将在后续
-    版本移除；当前默认使用 evaluate_file_level_semantics。
+    Deprecated: legacy per-comment matching, used only with --use-deprecated-score
+    and slated for removal in a future version. The current default is
+    evaluate_file_level_semantics.
 
-    遍历每条参考评论，在生成评论中按 path -> side -> line(k) -> semantic 依次过滤，
-    原地写入参考评论的 line_match / semantic_match / matched_note 字段。
+    For each reference comment, filter generated comments by path -> side -> line(k)
+    -> semantic, updating the reference's line_match / semantic_match / matched_note
+    fields in place.
 
-    去重：每条生成评论最多被行号匹配一次、语义匹配一次。
+    Deduplication: each generated comment can contribute at most one line match and
+    one semantic match.
     """
     matched_gen_ids_by_line: set = set()
     matched_gen_ids_by_semantic: set = set()
@@ -194,7 +200,8 @@ async def evaluate_comments(
     for ref_comment in reference_comments:
         if not isinstance(ref_comment, dict):
             continue
-        # 本通道产出的字段由本通道初始化（含无 note 被跳过的评论），构造器不预置
+        # Initialize this path's fields here, including for comments skipped for missing note.
+        # Constructors do not prepopulate them.
         ref_comment["line_match"] = False
         ref_comment["semantic_match"] = False
         ref_comment["matched_note"] = ""
@@ -229,31 +236,31 @@ async def evaluate_comments(
             gen_from_line = gen_comment.get("from_line")
             gen_to_line = gen_comment.get("to_line")
 
-            # 阶段 1：文件路径匹配
+            # Stage 1: file path matching.
             if ref_path and gen_path and ref_path != gen_path:
                 continue
 
-            # 阶段 2：side 匹配
+            # Stage 2: diff side matching.
             if ref_side is not None and gen_side is not None and ref_side != gen_side:
                 continue
 
-            # 阶段 3：行号匹配 line(k)
+            # Stage 3: line matching, line(k).
             if all(x is not None for x in [ref_from_line, ref_to_line, gen_from_line, gen_to_line]):
                 if not diff_location_is_same(
                     ref_from_line, ref_to_line, gen_from_line, gen_to_line, k
                 ):
                     continue
 
-            # 行号匹配成功（一条生成评论只能贡献一次行号匹配）
+            # Line match found; each generated comment can contribute only once.
             if not line_matched and gen_idx not in matched_gen_ids_by_line:
                 line_matched = True
                 matched_gen_ids_by_line.add(gen_idx)
 
-            # 已被语义匹配过的生成评论跳过
+            # Skip generated comments already matched semantically.
             if gen_idx in matched_gen_ids_by_semantic:
                 continue
 
-            # 阶段 4：语义匹配
+            # Stage 4: semantic matching.
             similarity = await match_semantic(ref_note_cleaned, gen_note_cleaned)
             if similarity.get("is_similar", False):
                 semantic_matched = True
@@ -275,10 +282,10 @@ async def match_llm_file_level(
     ref_lines: List[str],
     file_path: str,
 ) -> Dict[str, Any]:
-    """文件级语义匹配：一条生成评论对同文件全部参考评论，返回覆盖的参考编号。
+    """Match one generated comment against all references in a file; return covered indices.
 
-    返回 {"matched": [1-based 编号...], "reason": str}；Mock 模式下退化为
-    同文件内逐对本地相似度判定，不调用 LLM。
+    Return {"matched": [1-based indices...], "reason": str}. In mock mode, use
+    pairwise local similarity within the file without calling an LLM.
     """
     global llm_request_count
     llm_request_count += 1
@@ -348,29 +355,32 @@ Your answer:
                 ]
                 return {"matched": valid_indices, "reason": result_text}
             return {"matched": [], "reason": result_text}
-        except Exception as error:  # noqa: BLE001 - 单条判定失败不应中断整体评测
-            logging.error("文件级裁判模型调用失败: %s", error)
-            return {"matched": [], "reason": f"评估过程出错: {error}"}
+        except Exception as error:  # noqa: BLE001 - A single judgment failure must not abort evaluation.
+            logging.error("File-level judge call failed: %s", error)
+            return {"matched": [], "reason": f"Evaluation error: {error}"}
 
 
 async def evaluate_file_level_semantics(
     reference_comments: List[Dict[str, Any]],
     generated_comments: List[Dict[str, Any]],
 ) -> tuple[int, int, List[Dict[str, Any]]]:
-    """文件级语义匹配通道（当前默认指标体系）。
+    """File-level semantic matching (the current default metric system).
 
-    按文件路径分组，每条生成评论打包同文件全部参考评论调用一次裁判模型判断
-    覆盖关系，支持一对多（一条生成评论可覆盖多条参考评论）。原地写入参考评论
-    的 file_semantic_match 字段。
+    Group by file path. Send each generated comment with all reference comments
+    from that file to the judge in one call to determine coverage, allowing one
+    generated comment to cover multiple references. Update each reference's
+    file_semantic_match field in place.
 
     Returns:
-        (被覆盖的参考评论总数（去重）, 命中未被覆盖 GT 的生成评论数,
-        生成评论命中记录列表)。每条记录包含 note / path / from_line / to_line /
-        matched_gt_indices / judge_reason / hit_new_gt，matched_gt_indices 指向
-        reference_comments 的下标；hit_new_gt 为 False 表示其命中的 GT 已全部被
-        此前（按生成顺序）的评论覆盖，属重复命中，不计入第二个返回值。落在无参考
-        评论文件下的生成评论也会记录（matched_gt_indices 为空，不调用裁判模型）；
-        无 note 或无 path 的生成评论不参与评测也不记录。
+        (unique covered reference count, count of generated comments hitting
+        previously uncovered ground truth, generated-comment match records). Each record has
+        note / path / from_line / to_line / matched_gt_indices / judge_reason /
+        hit_new_gt. matched_gt_indices indexes reference_comments. hit_new_gt is
+        False when all matched references were already covered by earlier comments
+        in generation order; these duplicate hits do not count in the second return
+        value. Also record generated comments in files without references (empty
+        matched_gt_indices, no judge call). Generated comments without note or path
+        are neither evaluated nor recorded.
     """
     ref_by_path: Dict[str, List] = defaultdict(list)
     for idx, ref in enumerate(reference_comments):
@@ -431,7 +441,7 @@ async def evaluate_file_level_semantics(
             [lines for _, _, lines in ref_list],
             path,
         )
-        # LLM 返回的编号是 ref_list 内的 1-based 序号，映射回 reference_comments 下标
+        # Map the LLM's 1-based ref_list indices back to reference_comments indices.
         matched = [ref_list[num - 1][0] for num in result["matched"]]
         return entry["record"], matched, str(result.get("reason", ""))
 
@@ -453,8 +463,8 @@ async def evaluate_file_level_semantics(
         entry["record"] for entries in gen_by_path.values() for entry in entries
     ]
 
-    # 贪心去重：按生成顺序，评论命中的 GT 若已全部被此前评论覆盖则为重复命中，
-    # 不计入命中数（precision 分子），避免重复命中虚高
+    # Greedy deduplication in generation order: if all matched references were
+    # already covered, exclude the duplicate hit from the precision numerator.
     covered_gt_indices: set = set()
     matched_generated_count = 0
     for record in gen_records:
@@ -472,13 +482,15 @@ def compute_cr_statistics(
     generated_count: int,
     matched_generated_count: int = 0,
 ) -> Dict[str, Any]:
-    """根据评测后的 comments 计算单个样本的统计指标。
+    """Compute statistics for a single review case from evaluated comments.
 
-    file_semantic_* 为当前默认指标（文件级语义匹配）：准确率 = 命中未被覆盖 GT 的
-    生成评论数 / 生成评论总数（重复命中不计，分子由 matched_generated_count 传入），
-    召回率 = 被覆盖的 GT 数 / GT 总数（file_semantic_match_count）。
-    Deprecated: line_* / semantic_* 字段属于旧逐条匹配指标，仅在
-    --use-deprecated-score 模式下由 evaluate_comments 写入后才有意义。
+    file_semantic_* are the current default metrics (file-level semantic matching):
+    precision = generated comments hitting previously uncovered ground truth /
+    total generated comments. Duplicate hits do not contribute to the numerator,
+    supplied by matched_generated_count. Recall = covered references
+    (file_semantic_match_count) / total references.
+    Deprecated: line_* / semantic_* belong to the legacy per-comment metrics and
+    are meaningful only after evaluate_comments writes them in --use-deprecated-score mode.
     """
     total_expected = len([c for c in comments if isinstance(c, dict) and c.get("note")])
     line_match_count = sum(
@@ -516,10 +528,10 @@ def compute_cr_statistics(
 
 
 def print_llm_request_statistics() -> None:
-    """打印语义匹配请求统计信息。"""
+    """Print semantic matching request statistics."""
     print("\n" + "=" * 50)
-    print("语义匹配请求统计")
+    print("Semantic matching request statistics")
     print("=" * 50)
-    print(f"模式: {'Mock（本地相似度）' if USE_MOCK_LLM else 'LLM（真实裁判模型）'}")
-    print(f"总请求数: {llm_request_count}")
+    print(f"Mode: {'Mock (local similarity)' if USE_MOCK_LLM else 'LLM (live judge)'}")
+    print(f"Total requests: {llm_request_count}")
     print("=" * 50 + "\n")

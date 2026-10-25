@@ -1,4 +1,4 @@
-"""Unmodified pinned AACR modules, whose imports use a flat module namespace."""
+"""Pinned AACR modules with English text, whose imports use a flat module namespace."""
 
 import importlib
 import sys

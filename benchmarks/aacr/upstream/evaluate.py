@@ -1,25 +1,26 @@
-"""评测阶段：把标准参考数据与评审结果逐样本比对，计算评测指标。
+"""Evaluation stage: compare standard reference data with review results for each case.
 
-默认使用文件级语义匹配指标体系（准确率 / 召回率 / 平衡分数），由 judge 模块的
-evaluate_file_level_semantics 完成匹配；传入 --use-deprecated-score 时改用旧
-逐条匹配指标体系（path -> side -> line(k) -> semantic 四阶段的 P/R/F1，已弃用）。
+Compute file-level semantic matching metrics (precision / recall / balanced score)
+by default, using judge.evaluate_file_level_semantics. With --use-deprecated-score,
+use legacy per-comment metrics (P/R/F1 through path -> side -> line(k) -> semantic;
+deprecated).
 
-裁判模型（LLM as a Judge）与 OCR/Claude 解耦：在 evaluation/.env 用
-JUDGE_BASE_URL / JUDGE_API_KEY / JUDGE_MODEL / JUDGE_USE_MOCK 配置，
-judge 模块直接读取这些（由 config 统一定义的）变量名，本模块只负责在
-import judge 之前加载 .env 使它们就位。
+The judge (LLM as a Judge) is independent of OCR/Claude. Configure it in
+evaluation/.env with JUDGE_BASE_URL / JUDGE_API_KEY / JUDGE_MODEL / JUDGE_USE_MOCK.
+The judge module reads these names directly from config; this module only loads
+.env before importing judge so the variables are available.
 
-行号统一规则（便于统一比对）：
-- 参考：标准格式已是闭区间 [start_line, end_line]。
-- Claude：单个 line 作为起始=终止。
-- OCR：start_line / end_line 直接作为起始 / 终止。
-- Codex：start_line / end_line 直接作为起始 / 终止（与 OCR 同构）。
+Line-number normalization for consistent comparison:
+- Reference: the standard format already uses inclusive [start_line, end_line] ranges.
+- Claude: a single line is both the start and end.
+- OCR: use start_line / end_line directly as the start / end.
+- Codex: use start_line / end_line directly, as with OCR.
 
-note（语义比对文本）映射：
-- 参考：text
-- OCR：content
-- Claude：summary + "\n" + failure_scenario
-- Codex：summary + "\n" + description
+Mapping to note (text for semantic comparison):
+- Reference: text
+- OCR: content
+- Claude: summary + "\n" + failure_scenario
+- Codex: summary + "\n" + description
 """
 from __future__ import annotations
 
@@ -36,11 +37,12 @@ from typing_extensions import deprecated
 
 
 def _bootstrap_judge_env() -> None:
-    """在 import judge 之前加载 evaluation/.env，使 JUDGE_* 变量就位。
+    """Load evaluation/.env before importing judge so JUDGE_* variables are available.
 
-    必须在 import judge 之前调用：judge 的 USE_MOCK_LLM 与 LLM 客户端在导入时
-    就根据环境变量固化，导入后再设置将不再生效。judge 直接读取 config 定义的
-    JUDGE_* 变量名，无需再做中间映射。
+    Call before importing judge: its USE_MOCK_LLM and LLM client configuration
+    are fixed from environment variables at import time; setting them later has
+    no effect. judge reads the JUDGE_* names defined by config directly, without
+    intermediate mapping.
     """
     try:
         from dotenv import load_dotenv
@@ -53,7 +55,7 @@ def _bootstrap_judge_env() -> None:
 
 _bootstrap_judge_env()
 
-# 本地评测核心（在 Judge env 注入之后导入）
+# Local evaluation core (imported after loading the judge environment).
 from judge import (  # noqa: E402
     USE_MOCK_LLM,
     compute_cr_statistics,
@@ -84,7 +86,7 @@ def _normalize_line_range(
 
 
 def build_reference_comments(instance: ReviewInstance) -> List[Dict[str, Any]]:
-    """标准参考评论 -> judge 模块需要的比对格式。"""
+    """Convert standard reference comments to the judge's comparison format."""
     comments = []
     for ref in instance.reference_comments:
         line_range = _normalize_line_range(ref.start_line, ref.end_line)
@@ -101,7 +103,7 @@ def build_reference_comments(instance: ReviewInstance) -> List[Dict[str, Any]]:
 
 
 def build_target_comments_from_claude(result: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """Claude 结果 review_output -> 待评测评论；line 作为起始=终止。"""
+    """Convert Claude review_output to comments for evaluation; line is both start and end."""
     comments = []
     for finding in result.get("review_output", []) or []:
         if not isinstance(finding, dict):
@@ -116,7 +118,7 @@ def build_target_comments_from_claude(result: Dict[str, Any]) -> List[Dict[str, 
             {
                 "note": note,
                 "path": finding.get("file", ""),
-                # 这三个评审系统均面向 diff 右侧（新代码）进行评审，side 硬编码为 "right"
+                # All three reviewers inspect the right side (new code), so side is fixed to "right".
                 "side": "right",
                 "from_line": line_range["from_line"],
                 "to_line": line_range["to_line"],
@@ -126,10 +128,11 @@ def build_target_comments_from_claude(result: Dict[str, Any]) -> List[Dict[str, 
 
 
 def build_target_comments_from_codex(result: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """codex 结果 review_output -> 待评测评论；start_line/end_line 直接用。
+    """Convert Codex review_output to comments, using start_line/end_line directly.
 
-    与 Claude 版的差异：note 用 description（而非 failure_scenario）；
-    行号读 start_line/end_line 闭区间（而非 line 单值）；severity 忽略（仅存档）。
+    Unlike Claude, note uses description instead of failure_scenario, and line
+    numbers use an inclusive start_line/end_line range instead of a single line.
+    Ignore severity (retained only in the archived result).
     """
     comments = []
     for finding in result.get("review_output", []) or []:
@@ -147,7 +150,7 @@ def build_target_comments_from_codex(result: Dict[str, Any]) -> List[Dict[str, A
             {
                 "note": note,
                 "path": finding.get("file", ""),
-                # 这三个评审系统均面向 diff 右侧（新代码）进行评审，side 硬编码为 "right"
+                # All three reviewers inspect the right side (new code), so side is fixed to "right".
                 "side": "right",
                 "from_line": line_range["from_line"],
                 "to_line": line_range["to_line"],
@@ -157,7 +160,7 @@ def build_target_comments_from_codex(result: Dict[str, Any]) -> List[Dict[str, A
 
 
 def build_target_comments_from_ocr(result: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """OCR 结果 review.comments -> 待评测评论；start_line/end_line 直接用。"""
+    """Convert OCR review.comments to comments for evaluation, using start_line/end_line directly."""
     review = result.get("review")
     if not isinstance(review, dict):
         return []
@@ -173,7 +176,7 @@ def build_target_comments_from_ocr(result: Dict[str, Any]) -> List[Dict[str, Any
             {
                 "note": note,
                 "path": finding.get("path", ""),
-                # 这三个评审系统均面向 diff 右侧（新代码）进行评审，side 硬编码为 "right"
+                # All three reviewers inspect the right side (new code), so side is fixed to "right".
                 "side": "right",
                 "from_line": line_range["from_line"],
                 "to_line": line_range["to_line"],
@@ -185,7 +188,7 @@ def build_target_comments_from_ocr(result: Dict[str, Any]) -> List[Dict[str, Any
 def load_target_comments(
     results_dir: Path, reviewer: str, instance_id: str
 ) -> Optional[List[Dict[str, Any]]]:
-    """按 instance_id 精确定位结果文件并构建待评测评论；缺文件返回 None。"""
+    """Find the result by exact instance_id and build comments; return None if the file is missing."""
     path = config.result_path(results_dir, instance_id)
     if not path.is_file():
         return None
@@ -193,14 +196,14 @@ def load_target_comments(
         with path.open("r", encoding="utf-8") as handle:
             result = json.load(handle)
     except (json.JSONDecodeError, OSError) as error:
-        logging.warning("跳过无法解析的结果文件 %s: %s", path.name, error)
+        logging.warning("Skipping unreadable or unparseable result file %s: %s", path.name, error)
         return None
     if not isinstance(result, dict):
-        logging.warning("跳过结构异常的结果文件（顶层非对象）: %s", path.name)
+        logging.warning("Skipping malformed result file (top level is not an object): %s", path.name)
         return None
     builder = {
         "claude": build_target_comments_from_claude,
-        "codex": build_target_comments_from_codex,  # 独立实现，非别名
+        "codex": build_target_comments_from_codex,  # Separate implementation, not an alias.
     }.get(reviewer, build_target_comments_from_ocr)
     return builder(result)
 
@@ -208,15 +211,15 @@ def load_target_comments(
 def _extract_usage_from_result(
     results_dir: Path, reviewer: str, instance_id: str,
 ) -> Optional[Dict[str, Any]]:
-    """从结果文件中提取执行用时和 token 消耗量。
+    """Extract execution duration and token usage from a result file.
 
     Claude Code: duration_seconds, token_usage.{input_tokens, output_tokens,
                  cache_read_input_tokens, cache_creation_input_tokens}
-                 input_tokens 不含缓存，total_input = 三者之和。
+                 input_tokens excludes cached tokens; total_input sums all three input fields.
     Codex:       duration_seconds, token_usage.{input_tokens, output_tokens,
                  cached_input_tokens (=cache_read_input_tokens), reasoning_output_tokens}
-                 input_tokens 已含 cached（OpenAI 口径），不可再叠 cache_read。
-                 reasoning tokens 不累加到 total（与 Claude 不可比，仅存档）。
+                 input_tokens includes cached tokens (OpenAI convention); do not add cache_read again.
+                 Do not add reasoning tokens to the total (not comparable with Claude; archived only).
     OCR:         duration_seconds, review.summary.{input_tokens, output_tokens}
     """
     path = config.result_path(results_dir, instance_id)
@@ -232,12 +235,13 @@ def _extract_usage_from_result(
 
     duration = data.get("duration_seconds", 0) or 0
 
-    # claude 与 codex 共用 token_usage 字段命名，但缓存口径相反，必须分提：
-    # - Claude（Anthropic 口径）：input_tokens 不含缓存，需把 cache_read +
-    #   cache_creation 叠加进来才是完整输入。
-    # - Codex（OpenAI 口径）：input_tokens 已含 cached（reviewers/codex.py 把
-    #   cached_input_tokens 镜像成了 cache_read_input_tokens 仅作命名对齐），
-    #   再加 cache_read 会把整个 cached 重复计一次。
+    # Claude and Codex share token_usage field names but account for cached tokens
+    # differently, so extract them separately:
+    # - Claude (Anthropic): input_tokens excludes cached tokens; add cache_read +
+    #   cache_creation to get the full input count.
+    # - Codex (OpenAI): input_tokens already includes cached tokens. reviewers/codex.py
+    #   mirrors cached_input_tokens as cache_read_input_tokens only to align names;
+    #   adding cache_read again would double-count all cached tokens.
     if reviewer == "claude":
         token_usage = data.get("token_usage") or {}
         input_tokens = (
@@ -264,14 +268,14 @@ def _extract_usage_from_result(
 
 
 def _compute_balanced_score(precision: float, recall: float) -> float:
-    """准确率与召回率的调和平均（即 F1 公式，新指标体系称平衡分数）。"""
+    """Harmonic mean of precision and recall (F1, called balanced score in the new metrics)."""
     if (precision + recall) <= 0:
         return 0.0
     return round(2 * precision * recall / (precision + recall), 3)
 
 
 def _base_summary(stats: Dict[str, Any]) -> Dict[str, Any]:
-    """两套指标体系共用的样本量与用量统计字段。"""
+    """Case counts and usage statistics shared by both metric systems."""
     evaluated = stats["evaluated_instances"]
     total_duration = stats.get("total_duration_seconds", 0)
     total_input_tokens = stats.get("total_input_tokens", 0)
@@ -294,10 +298,11 @@ def _base_summary(stats: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _compute_summary(stats: Dict[str, Any]) -> Dict[str, Any]:
-    """文件级语义匹配指标体系（当前默认）：准确率 / 召回率 / 平衡分数。
+    """File-level semantic metrics (current default): precision / recall / balanced score.
 
-    准确率 = 命中了此前未被覆盖 GT 的生成评论数 / 生成评论总数（重复命中不计）；
-    召回率 = 被覆盖的 GT 数 / GT 总数（一对多下同一 GT 去重）。
+    Precision = generated comments hitting previously uncovered ground truth /
+    total generated comments (duplicate hits excluded).
+    Recall = covered references / total references (deduplicated for one-to-many matches).
     """
     expected = stats["expected_notes"]
     generated = stats["generated_notes"]
@@ -317,14 +322,14 @@ def _compute_summary(stats: Dict[str, Any]) -> Dict[str, Any]:
 
 
 @deprecated(
-    "旧逐条匹配指标体系（语义/行号 P/R/F1），仅在 --use-deprecated-score 时使用，"
-    "将在后续版本移除；请改用 _compute_summary"
+    "Legacy per-comment metrics (semantic/line P/R/F1), used only with --use-deprecated-score "
+    "and slated for removal in a future version; use _compute_summary instead"
 )
 def _compute_summary_deprecated(stats: Dict[str, Any]) -> Dict[str, Any]:
-    """Deprecated: 旧逐条匹配指标体系（语义/行号 P/R/F1）。
+    """Deprecated: legacy per-comment metrics (semantic/line P/R/F1).
 
-    仅在 --use-deprecated-score 时使用，将在后续版本移除；新流程用
-    _compute_summary（文件级语义匹配指标）。
+    Used only with --use-deprecated-score and slated for removal in a future version.
+    The new workflow uses _compute_summary (file-level semantic matching metrics).
     """
     expected = stats["expected_notes"]
     generated = stats["generated_notes"]
@@ -356,14 +361,15 @@ async def evaluate(
     round_label: str = "",
     use_deprecated_score: bool = False,
 ) -> Dict[str, Any]:
-    """对某个评审器的结果目录计算评测指标，返回并落盘结果数据。
+    """Compute metrics for a reviewer's results directory, returning and saving the data.
 
-    round_label: 多轮评测时传入如 "_round_1" 用于区分文件名；单轮为空串。
-    use_deprecated_score: True 时使用旧逐条匹配指标体系（已弃用）；
-        默认 False，使用文件级语义匹配指标体系（准确率/召回率/平衡分数）。
+    round_label: use a suffix such as "_round_1" to distinguish filenames across
+        multiple evaluation rounds; use an empty string for a single round.
+    use_deprecated_score: True selects legacy per-comment metrics (deprecated).
+        Defaults to False for file-level semantic metrics (precision/recall/balanced score).
     """
     if not Path(results_dir).is_dir():
-        raise FileNotFoundError(f"结果目录不存在: {results_dir}")
+        raise FileNotFoundError(f"Results directory does not exist: {results_dir}")
     Path(output_dir).mkdir(parents=True, exist_ok=True)
 
     candidate = instances[:limit] if limit is not None else instances
@@ -386,7 +392,7 @@ async def evaluate(
     eval_results: List[Dict[str, Any]] = []
     missing_ids: List[str] = []
 
-    for instance in tqdm(candidate, desc=f"评估 {reviewer}", unit="inst"):
+    for instance in tqdm(candidate, desc=f"Evaluating {reviewer}", unit="inst"):
         generated = load_target_comments(results_dir, reviewer, instance.instance_id)
         if generated is None:
             missing_ids.append(instance.instance_id)
@@ -401,7 +407,8 @@ async def evaluate(
             if reference:
                 await evaluate_comments(reference, generated, k=line_k)
         else:
-            # 准确率分子由 judge 返回：命中了未被覆盖 GT 的生成评论数（重复命中不计）
+            # The judge returns the precision numerator: generated comments hitting
+            # previously uncovered references, excluding duplicate hits.
             _, matched_generated_count, gen_match_records = (
                 await evaluate_file_level_semantics(reference, generated)
             )
@@ -421,7 +428,7 @@ async def evaluate(
             ]
             stats["matched_generated_notes"] += matched_generated_count
 
-        # 累计执行用时和 token 消耗
+        # Accumulate execution duration and token usage.
         usage = _extract_usage_from_result(results_dir, reviewer, instance.instance_id)
         if usage:
             stats["total_duration_seconds"] += usage["duration_seconds"]
@@ -440,7 +447,7 @@ async def evaluate(
     stats["missing_instances"] = len(missing_ids)
     if missing_ids:
         logging.info(
-            "[%s] 候选 %d 条中有 %d 条在结果目录无对应文件（已跳过，不计入指标）",
+            "[%s] Of %d candidate cases, %d have no matching result file (skipped, excluded from metrics)",
             reviewer,
             len(candidate),
             len(missing_ids),
@@ -469,7 +476,7 @@ async def evaluate(
     out_path = Path(output_dir) / f"metrics_{reviewer}_{timestamp}{round_label}.json"
     with out_path.open("w", encoding="utf-8") as handle:
         json.dump(result_data, handle, ensure_ascii=False, indent=2)
-    print(f"\n评测结果已保存到: {out_path}")
+    print(f"\nEvaluation results saved to: {out_path}")
     return result_data
 
 
@@ -478,46 +485,46 @@ def print_summary(reviewer: str, result_data: Dict[str, Any]) -> None:
     score_mode = result_data.get("ex_info", {}).get("score_mode", "file_semantic")
     deprecated = score_mode == "deprecated"
     print("\n" + "=" * 56)
-    print(f"评测汇总（{reviewer}）" + (" [deprecated 评分模式]" if deprecated else ""))
+    print(f"Evaluation summary ({reviewer})" + (" [deprecated scoring mode]" if deprecated else ""))
     print("=" * 56)
-    print(f"数据集总样本 (total_instances):     {summary.get('total_instances')}")
-    print(f"候选样本数   (candidate_instances): {summary.get('candidate_instances')}")
-    print(f"实际评测样本 (evaluated_instances): {summary.get('evaluated_instances')}")
-    print(f"缺失样本数   (missing_instances):   {summary.get('missing_instances')}")
-    print(f"参考评论总数 (expected_notes):      {summary.get('expected_notes')}")
-    print(f"生成评论总数 (generated_notes):     {summary.get('generated_notes')}")
+    print(f"Dataset cases   (total_instances):     {summary.get('total_instances')}")
+    print(f"Candidate cases (candidate_instances): {summary.get('candidate_instances')}")
+    print(f"Evaluated cases (evaluated_instances): {summary.get('evaluated_instances')}")
+    print(f"Missing cases   (missing_instances):   {summary.get('missing_instances')}")
+    print(f"Reference comments (expected_notes):   {summary.get('expected_notes')}")
+    print(f"Generated comments (generated_notes):  {summary.get('generated_notes')}")
     print("-" * 56)
     if deprecated:
-        print(f"语义匹配数:                         {summary.get('matched_semantic_notes')}")
-        print(f"行号匹配数:                         {summary.get('matched_line_notes')}")
+        print(f"Semantic matches:                     {summary.get('matched_semantic_notes')}")
+        print(f"Line matches:                         {summary.get('matched_line_notes')}")
         print("-" * 56)
-        print(f"语义 Precision:  {summary.get('semantic_match_rate')}")
-        print(f"语义 Recall:     {summary.get('semantic_recall_rate')}")
-        print(f"语义 F1:         {summary.get('semantic_f1')}")
-        print(f"行号 Precision:  {summary.get('line_match_rate')}")
-        print(f"行号 Recall:     {summary.get('line_recall_rate')}")
-        print(f"行号 F1:         {summary.get('line_f1')}")
+        print(f"Semantic precision:  {summary.get('semantic_match_rate')}")
+        print(f"Semantic recall:     {summary.get('semantic_recall_rate')}")
+        print(f"Semantic F1:         {summary.get('semantic_f1')}")
+        print(f"Line precision:      {summary.get('line_match_rate')}")
+        print(f"Line recall:         {summary.get('line_recall_rate')}")
+        print(f"Line F1:             {summary.get('line_f1')}")
     else:
-        print(f"命中生成评论数 (precision 分子):    {summary.get('matched_generated_notes')}")
-        print(f"被覆盖参考评论数 (recall 分子):     {summary.get('matched_file_semantic_notes')}")
+        print(f"Matched generated comments (precision numerator): {summary.get('matched_generated_notes')}")
+        print(f"Covered reference comments (recall numerator):    {summary.get('matched_file_semantic_notes')}")
         print("-" * 56)
-        print(f"准确率 (Precision):  {summary.get('file_semantic_match_rate')}")
-        print(f"召回率 (Recall):     {summary.get('file_semantic_recall_rate')}")
-        print(f"平衡分数:            {summary.get('balanced_score')}")
+        print(f"Precision:       {summary.get('file_semantic_match_rate')}")
+        print(f"Recall:          {summary.get('file_semantic_recall_rate')}")
+        print(f"Balanced score:  {summary.get('balanced_score')}")
     print("-" * 56)
     total_dur = summary.get("total_duration_seconds", 0)
     avg_dur = summary.get("avg_duration_seconds", 0)
-    print(f"总执行用时:      {total_dur}s ({total_dur/60:.1f}min)")
-    print(f"平均执行用时:    {avg_dur}s ({avg_dur/60:.1f}min)")
-    print(f"总输入 token:    {summary.get('total_input_tokens', 0):,}")
-    print(f"总输出 token:    {summary.get('total_output_tokens', 0):,}")
-    print(f"总 token:        {summary.get('total_tokens', 0):,}")
-    print(f"平均输入 token:  {summary.get('avg_input_tokens', 0):,}")
-    print(f"平均输出 token:  {summary.get('avg_output_tokens', 0):,}")
+    print(f"Total execution time:    {total_dur}s ({total_dur/60:.1f}min)")
+    print(f"Average execution time:  {avg_dur}s ({avg_dur/60:.1f}min)")
+    print(f"Total input tokens:      {summary.get('total_input_tokens', 0):,}")
+    print(f"Total output tokens:     {summary.get('total_output_tokens', 0):,}")
+    print(f"Total tokens:            {summary.get('total_tokens', 0):,}")
+    print(f"Average input tokens:    {summary.get('avg_input_tokens', 0):,}")
+    print(f"Average output tokens:   {summary.get('avg_output_tokens', 0):,}")
     print("=" * 56)
 
 
 def judge_mode_description() -> str:
     if USE_MOCK_LLM:
-        return "Mock（本地相似度）"
-    return f"LLM（真实裁判模型）| 模型: {os.getenv(config.JUDGE_MODEL_VAR, '')}"
+        return "Mock (local similarity)"
+    return f"LLM (live judge) | Model: {os.getenv(config.JUDGE_MODEL_VAR, '')}"

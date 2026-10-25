@@ -1,7 +1,7 @@
-"""统一评测框架的路径与环境变量配置集中管理。
+"""Centralized path and environment-variable configuration for the evaluation framework.
 
-把所有"约定"集中到一处：默认目录、各阶段所需环境变量名、命名规则等，
-避免散落到各模块产生隐式耦合。
+Keep conventions such as default directories, environment-variable names for each
+stage, and naming rules in one place to avoid implicit coupling between modules.
 """
 from __future__ import annotations
 
@@ -11,13 +11,13 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 
-# 目录布局（相对本文件解析，保证脚本位置稳定）
+# Directory layout (resolved relative to this file for stable script locations).
 EVALUATION_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = EVALUATION_DIR.parent
 
-# 默认数据 / 产物目录（全部落在 evaluation/ 内，保持目录自洽）
-# 原始数据约定：每个 benchmark 的原始文件放在 benchmark/<benchmark名>/ 下，
-# 转换器读取后产出标准格式到 data/<benchmark名>.jsonl（按 benchmark 命名，避免覆盖）。
+# Default data and output directories (all under evaluation/ for a consistent layout).
+# Store each benchmark's raw files under benchmark/<benchmark_name>/; converters
+# write the standard format to data/<benchmark_name>.jsonl to avoid overwrites.
 BENCHMARK_DIR = EVALUATION_DIR / "benchmark"
 DATA_DIR = EVALUATION_DIR / "data"
 DEFAULT_REPO_DIR = EVALUATION_DIR / "repo"
@@ -26,40 +26,41 @@ DEFAULT_METRICS_DIR = EVALUATION_DIR / "metrics"
 
 
 def benchmark_raw_dir(benchmark_name: str) -> Path:
-    """某 benchmark 的原始数据目录：benchmark/<benchmark名>/。"""
+    """Raw data directory for a benchmark: benchmark/<benchmark_name>/."""
     return BENCHMARK_DIR / benchmark_name
 
 
 def dataset_path(benchmark_key: str) -> Path:
-    """某 benchmark 转换后的标准数据集路径：data/<benchmark_key>.jsonl。
+    """Converted standard dataset path for a benchmark: data/<benchmark_key>.jsonl.
 
-    benchmark_key 用小写下划线形式（如 aacr_bench），与转换器模块名对应。
+    benchmark_key uses lowercase with underscores (e.g. aacr_bench), matching the converter module.
     """
     return DATA_DIR / f"{benchmark_key}.jsonl"
 
 
 def benchmark_name_from_dataset(dataset_path_value: Path) -> str:
-    """从数据集路径推导 benchmark 名（取文件名去扩展名）。
+    """Derive the benchmark name from the dataset filename without its extension.
 
-    例：data/aacr_bench.jsonl -> aacr_bench，用作 results / metrics 的分类子目录。
+    Example: data/aacr_bench.jsonl -> aacr_bench, used as a results/metrics subdirectory.
     """
     return Path(dataset_path_value).stem
 
 
 def reviewer_results_dir(benchmark_name: str, reviewer: str) -> Path:
-    """某 benchmark + reviewer 的结果根目录：results/<benchmark>/<reviewer>/。
+    """Results root for a benchmark and reviewer: results/<benchmark>/<reviewer>/.
 
-    其下每次评审会创建一个独立的 run 子目录（见 make_run_id / run_dir），
-    避免多次评测互相覆盖。
+    Each review creates a separate run subdirectory (see make_run_id / run_dir)
+    to prevent evaluations from overwriting one another.
     """
     return DEFAULT_RESULTS_DIR / benchmark_name / reviewer
 
 
 def make_run_id(run_id: Optional[str] = None) -> str:
-    """确定本次 run 的目录名。
+    """Determine the directory name for this run.
 
-    传入 run_id 时直接使用（清洗非法字符）；不传则自动生成时间戳 YYYYmmdd_HHMMSS。
-    用户可随意命名（如 baseline、v2），后续 eval 用同名即可找到。
+    Use the supplied run_id after sanitizing invalid characters, or generate a
+    YYYYmmdd_HHMMSS timestamp. Users can choose names such as baseline or v2 and
+    use the same name to locate the run for later evaluation.
     """
     if run_id:
         cleaned = re.sub(r"[^A-Za-z0-9._-]+", "-", run_id.strip())
@@ -68,16 +69,16 @@ def make_run_id(run_id: Optional[str] = None) -> str:
 
 
 def run_dir(benchmark_name: str, reviewer: str, run_id: str) -> Path:
-    """某次 run 的目录：results/<benchmark>/<reviewer>/<run_id>/。
+    """Directory for a run: results/<benchmark>/<reviewer>/<run_id>/.
 
-    评审结果（<safe_id>.json）与评测指标（metrics_<reviewer>_<ts>.json）都落在这里，
-    使同一次 run 的产物一一对应。
+    Review results (<safe_id>.json) and evaluation metrics (metrics_<reviewer>_<ts>.json)
+    are stored here so outputs from the same run stay together.
     """
     return reviewer_results_dir(benchmark_name, reviewer) / run_id
 
 
 def list_run_dirs(benchmark_name: str, reviewer: str) -> List[Path]:
-    """列出某 benchmark + reviewer 下的所有 run 目录，按名称（即时间）升序。"""
+    """List runs for a benchmark and reviewer in ascending name (timestamp) order."""
     base = reviewer_results_dir(benchmark_name, reviewer)
     if not base.is_dir():
         return []
@@ -85,87 +86,89 @@ def list_run_dirs(benchmark_name: str, reviewer: str) -> List[Path]:
 
 
 def latest_run_dir(benchmark_name: str, reviewer: str) -> Optional[Path]:
-    """返回最新的一个 run 目录（按名称排序取最大）；无则返回 None。"""
+    """Return the latest run directory by name, or None if there are no runs."""
     runs = list_run_dirs(benchmark_name, reviewer)
     return runs[-1] if runs else None
 
 
 def metrics_run_dir(benchmark_name: str, reviewer: str, run_id: str) -> Path:
-    """评测指标目录：metrics/<benchmark>/<reviewer>/<run_id>/。
+    """Evaluation metrics directory: metrics/<benchmark>/<reviewer>/<run_id>/.
 
-    与 results 目录结构镜像对齐（同 run_id），产物分开但关联清晰。
+    Mirrors the results layout with the same run_id, keeping outputs separate but linked.
     """
     return DEFAULT_METRICS_DIR / benchmark_name / reviewer / run_id
 
-# 评审结果文件命名规则：<safe_id>.json，safe_id = instance_id.replace("/", "__")
+# Review result filenames: <safe_id>.json, where safe_id = instance_id.replace("/", "__").
 RESULT_FILE_SUFFIX = ".json"
 PARTIAL_FILE_SUFFIX = ".partial.json"
 
-# OCR 评审器所需环境变量
+# Environment variables required by the OCR reviewer.
 OCR_URL_VAR = "OCR_LLM_URL"
 OCR_TOKEN_VAR = "OCR_LLM_TOKEN"
 OCR_MODEL_VAR = "OCR_LLM_MODEL"
 OCR_USE_ANTHROPIC_VAR = "OCR_USE_ANTHROPIC"
 OCR_REQUIRED_ENV_VARS: List[str] = [OCR_URL_VAR, OCR_TOKEN_VAR, OCR_MODEL_VAR]
 
-# Claude 评审器所需环境变量
+# Environment variables required by the Claude reviewer.
 CLAUDE_URL_VAR = "ANTHROPIC_BASE_URL"
 CLAUDE_TOKEN_VAR = "ANTHROPIC_AUTH_TOKEN"
 CLAUDE_MODEL_VAR = "ANTHROPIC_MODEL"
 CLAUDE_REQUIRED_ENV_VARS: List[str] = [CLAUDE_URL_VAR, CLAUDE_TOKEN_VAR, CLAUDE_MODEL_VAR]
 
-# Claude Code 内置 API retry 配置
+# Claude Code built-in API retry configuration.
 CLAUDE_MAX_RETRIES_VAR = "CLAUDE_CODE_MAX_RETRIES"
 CLAUDE_MAX_RETRIES_DEFAULT = 10
 
-# StopFailure hook 配置
+# StopFailure hook configuration.
 HOOKS_DIR = EVALUATION_DIR / "hooks"
 STOP_FAILURE_HOOK_SCRIPT = HOOKS_DIR / "on_stop_failure.py"
 RETRY_EXHAUSTED_LOG = "retry_exhausted.jsonl"
 
-# Claude 评审用的 MCP findings server
+# MCP findings server for Claude reviews.
 MCP_SERVER_SCRIPT = EVALUATION_DIR / "mcp_finding_server.py"
 MCP_SERVER_NAME = "findings"
 MCP_RESULTS_DIR_ENV_VAR = "REVIEW_RESULTS_DIR"
 MCP_INSTANCE_ID_ENV_VAR = "REVIEW_INSTANCE_ID"
 MCP_REPORT_TOOL = f"mcp__{MCP_SERVER_NAME}__report"
 
-# Codex 评审器所需环境变量
-# codex 非交互模式文档明确："CODEX_API_KEY 仅在 codex exec 中受支持"，
-# 本框架全程用 codex exec，因此直接使用 CODEX_API_KEY；不要用 OPENAI_API_KEY。
+# Environment variables required by the Codex reviewer.
+# The Codex non-interactive mode docs state that CODEX_API_KEY is supported only
+# in codex exec. This framework uses codex exec throughout, so use CODEX_API_KEY
+# rather than OPENAI_API_KEY.
 CODEX_API_KEY_VAR = "CODEX_API_KEY"
 CODEX_REQUIRED_ENV_VARS: List[str] = [CODEX_API_KEY_VAR]
 
-# 模型名（可选）：写入临时 config.toml 顶级 model = "..." 行
-# 不填则省略该行，用 codex 默认 provider 的默认模型
+# Optional model name: written as a top-level model = "..." in the temporary config.toml.
+# If unset, omit that line and use the default model of the default Codex provider.
 CODEX_MODEL_VAR = "CODEX_MODEL"
 
-# 自建网关 / 代理 base_url（可选）
-# 关键：codex 不存在 CODEX_BASE_URL 鉴权变量（已实测确认），
-# 自建网关必须走 model_providers 表 + 顶级 model_provider
+# Optional base_url for a custom gateway or proxy.
+# Codex has no CODEX_BASE_URL authentication variable (confirmed by testing);
+# custom gateways must use a model_providers table and the top-level model_provider.
 CODEX_GATEWAY_URL_VAR = "CODEX_GATEWAY_URL"
 
-# provider id 同时作为顶级 model_provider 取值与 [model_providers."<id>"] 表名；
-# 含特殊字符时 TOML 表名须加双引号（已在 write_codex_config 里处理）
+# The provider ID is both the top-level model_provider value and the table name
+# [model_providers."<id>"]. TOML table names with special characters need double
+# quotes (already handled in write_codex_config).
 CODEX_PROVIDER_ID = "gateway"
 
-# Codex 评审用的 MCP findings server（codex 专用，schema 与 Claude 版不同）
-# finding 字段：{file, start_line, end_line, severity, summary, description}
+# MCP findings server for Codex reviews (a Codex-specific schema, different from Claude's).
+# Finding fields: {file, start_line, end_line, severity, summary, description}
 CODEX_MCP_SERVER_SCRIPT = EVALUATION_DIR / "mcp_codex_finding_server.py"
-CODEX_MCP_SERVER_NAME = "findings"  # server 命名空间与 Claude 版同名无冲突（不同时跑）
+CODEX_MCP_SERVER_NAME = "findings"  # Shares Claude's namespace safely; they do not run together.
 
-# 评测（LLM as a Judge）专用配置，与 OCR/Claude 解耦；
-# 在 import judge 之前会被映射成 judge 模块读取的变量名。
+# Evaluation-specific configuration (LLM as a Judge), independent of OCR/Claude;
+# mapped to the variable names read by judge before importing that module.
 JUDGE_BASE_URL_VAR = "JUDGE_BASE_URL"
 JUDGE_API_KEY_VAR = "JUDGE_API_KEY"
 JUDGE_MODEL_VAR = "JUDGE_MODEL"
 JUDGE_USE_MOCK_VAR = "JUDGE_USE_MOCK"
-# 文件级语义匹配通道调用裁判模型的并发上限（judge 模块 import 时读取，默认 3）
+# Judge concurrency limit for file-level semantic matching (read at judge import; default 3).
 JUDGE_CONCURRENCY_VAR = "JUDGE_CONCURRENCY"
 
 
 def safe_id(instance_id: str) -> str:
-    """instance_id -> 结果文件名安全 id（把 / 替换为 __）。"""
+    """instance_id -> safe result filename ID (replace / with __)."""
     return instance_id.replace("/", "__")
 
 
@@ -178,10 +181,10 @@ def partial_path(results_dir: Path, instance_id: str) -> Path:
 
 
 def retry_exhausted_path(results_dir: Path) -> Path:
-    """重试耗尽的失败案例日志路径：<results_dir>/retry_exhausted.jsonl。"""
+    """Log path for cases that exhaust retries: <results_dir>/retry_exhausted.jsonl."""
     return Path(results_dir) / RETRY_EXHAUSTED_LOG
 
 
 def missing_env_vars(required: List[str]) -> List[str]:
-    """返回缺失的环境变量名列表（用于早报错）。"""
+    """Return missing environment-variable names so errors can be reported early."""
     return [name for name in required if not os.environ.get(name)]

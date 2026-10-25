@@ -1,27 +1,30 @@
-"""统一评测框架的标准数据格式（schema）与加载校验。
+"""Standard data schema and load-time validation for the evaluation framework.
 
-新 benchmark 接入流程：只要把原始数据转换成本文件定义的标准格式（JSONL，
-每行一个 ReviewInstance），即可直接被 review / evaluate 阶段消费，无需改动框架。
+To integrate a benchmark, convert its raw data to the standard format defined here
+(JSONL, one ReviewInstance per line). The review and evaluation stages can then
+consume it directly without framework changes.
 
-为什么用 dataclass + 加载时校验：
-- 字段与类型集中声明，避免各阶段对原始字段名硬编码、产生隐式耦合；
-- 加载时即校验必填字段与行号合法性，问题数据能在最早阶段报错，而不是
-  跑到评审/评测中途才暴露。
+Why use dataclasses and load-time validation:
+- Centralize field and type declarations to avoid hardcoded raw field names and
+  implicit coupling between stages.
+- Validate required fields and line numbers when loading so invalid data fails
+  early rather than partway through a review or evaluation.
 
-标准格式（每行一个 JSON 对象）：
+Standard format (one JSON object per line):
     {
       "instance_id": "psf__requests-5711@9484e13",
       "repo": "psf/requests",
       "base_commit": "5351469...",
       "head_commit": "9484e13...",
-      "clone_url": "https://github.com/psf/requests.git",   // 可选，缺省按 repo 推导
+      "clone_url": "https://github.com/psf/requests.git",   // Optional; derived from repo if omitted
       "reference_comments": [
         {"path": "setup.py", "start_line": 46, "end_line": 46, "text": "...", "side": "left"}
       ]
     }
 
-行号约定：reference_comments 的行号统一用闭区间 [start_line, end_line]。
-单点评论令 start_line == end_line。允许为 null（表示无明确行号）。
+Line numbers in reference_comments use inclusive ranges [start_line, end_line].
+For a single-line comment, start_line == end_line. null is allowed when no specific
+line number is available.
 """
 from __future__ import annotations
 
@@ -32,40 +35,40 @@ from typing import Any, Dict, List, Optional
 
 
 class SchemaError(ValueError):
-    """标准数据格式校验失败时抛出，附带行号/instance 定位信息。"""
+    """Raised when schema validation fails, with line or review-case location details."""
 
 
 @dataclass
 class ReferenceComment:
-    """一条人工标注的参考评审评论（标准格式）。"""
+    """A manually annotated reference finding in the standard format."""
 
     path: str
     text: str
     start_line: Optional[int] = None
     end_line: Optional[int] = None
-    side: Optional[str] = None  # "left" 或 "right"，表示评论附着在 diff 的哪一侧
+    side: Optional[str] = None  # "left" or "right": the side of the diff the comment refers to.
 
     @staticmethod
     def from_dict(data: Dict[str, Any], where: str) -> "ReferenceComment":
         if not isinstance(data, dict):
-            raise SchemaError(f"{where}: reference_comment 必须是对象，实际为 {type(data).__name__}")
+            raise SchemaError(f"{where}: reference_comment must be an object, got {type(data).__name__}")
 
         path = data.get("path")
         text = data.get("text")
         if not isinstance(path, str) or not path.strip():
-            raise SchemaError(f"{where}: reference_comment.path 必须是非空字符串")
+            raise SchemaError(f"{where}: reference_comment.path must be a non-empty string")
         if not isinstance(text, str) or not text.strip():
-            raise SchemaError(f"{where}: reference_comment.text 必须是非空字符串")
+            raise SchemaError(f"{where}: reference_comment.text must be a non-empty string")
 
         start_line = _validate_optional_line(data.get("start_line"), f"{where}.start_line")
         end_line = _validate_optional_line(data.get("end_line"), f"{where}.end_line")
-        # 行号统一为有序闭区间；任一缺失用另一个补齐
+        # Normalize to an ordered inclusive range; fill a missing endpoint with the other.
         start_line, end_line = _normalize_line_range(start_line, end_line)
 
         side = data.get("side")
         if side is not None:
             if not isinstance(side, str) or side.strip() not in ("left", "right"):
-                raise SchemaError(f"{where}.side: 若提供则必须是 'left' 或 'right'，实际为 {side!r}")
+                raise SchemaError(f"{where}.side: must be 'left' or 'right' if provided, got {side!r}")
             side = side.strip()
 
         return ReferenceComment(
@@ -90,7 +93,7 @@ class ReferenceComment:
 
 @dataclass
 class ReviewInstance:
-    """一个待评审 / 评测的样本（标准格式）。"""
+    """A review case to review or evaluate, in the standard format."""
 
     instance_id: str
     repo: str
@@ -101,12 +104,12 @@ class ReviewInstance:
 
     @property
     def safe_id(self) -> str:
-        """结果文件名所用的安全 id（与 eval/ 旧脚本规则一致）。"""
+        """Safe ID for result filenames, following the legacy eval/ scripts' convention."""
         return self.instance_id.replace("/", "__")
 
     @property
     def resolved_clone_url(self) -> str:
-        """clone 用的 URL：显式提供则用之，否则按 repo 推导 GitHub 地址。"""
+        """Clone URL: use the explicit value, or derive a GitHub URL from repo."""
         if self.clone_url:
             return self.clone_url
         return f"https://github.com/{self.repo}.git"
@@ -114,7 +117,7 @@ class ReviewInstance:
     @staticmethod
     def from_dict(data: Dict[str, Any], where: str) -> "ReviewInstance":
         if not isinstance(data, dict):
-            raise SchemaError(f"{where}: 每行必须是 JSON 对象，实际为 {type(data).__name__}")
+            raise SchemaError(f"{where}: each line must be a JSON object, got {type(data).__name__}")
 
         instance_id = data.get("instance_id")
         repo = data.get("repo")
@@ -128,11 +131,11 @@ class ReviewInstance:
 
         clone_url = data.get("clone_url")
         if clone_url is not None and (not isinstance(clone_url, str) or not clone_url.strip()):
-            raise SchemaError(f"{where}.clone_url: 若提供则必须是非空字符串")
+            raise SchemaError(f"{where}.clone_url: must be a non-empty string if provided")
 
         raw_comments = data.get("reference_comments", []) or []
         if not isinstance(raw_comments, list):
-            raise SchemaError(f"{where}.reference_comments: 必须是数组")
+            raise SchemaError(f"{where}.reference_comments: must be an array")
 
         reference_comments = [
             ReferenceComment.from_dict(item, f"{where}.reference_comments[{idx}]")
@@ -163,16 +166,16 @@ class ReviewInstance:
 
 def _require_non_empty_str(value: Any, where: str) -> None:
     if not isinstance(value, str) or not value.strip():
-        raise SchemaError(f"{where}: 必须是非空字符串")
+        raise SchemaError(f"{where}: must be a non-empty string")
 
 
 def _validate_optional_line(value: Any, where: str) -> Optional[int]:
     if value is None:
         return None
     if isinstance(value, bool) or not isinstance(value, int):
-        raise SchemaError(f"{where}: 行号必须是整数或 null，实际为 {value!r}")
+        raise SchemaError(f"{where}: line number must be an integer or null, got {value!r}")
     if value <= 0:
-        raise SchemaError(f"{where}: 行号必须为正整数，实际为 {value}")
+        raise SchemaError(f"{where}: line number must be a positive integer, got {value}")
     return value
 
 
@@ -191,14 +194,14 @@ def _normalize_line_range(
 
 
 def load_instances(dataset_path: Path, limit: Optional[int] = None) -> List[ReviewInstance]:
-    """加载标准格式 JSONL 数据集，逐行校验并返回 ReviewInstance 列表。
+    """Load a standard JSONL dataset, validate each line, and return ReviewInstances.
 
-    任何一行不合法都会抛出带行号定位的 SchemaError，确保问题数据尽早暴露。
-    重复的 instance_id 也会被拒绝，避免结果文件相互覆盖。
+    Invalid lines raise SchemaError with line numbers so bad data is caught early.
+    Duplicate instance_id values are also rejected to prevent result-file overwrites.
     """
     dataset_path = Path(dataset_path)
     if not dataset_path.exists():
-        raise SchemaError(f"数据集不存在: {dataset_path}")
+        raise SchemaError(f"Dataset does not exist: {dataset_path}")
 
     instances: List[ReviewInstance] = []
     seen_ids: set[str] = set()
@@ -212,11 +215,11 @@ def load_instances(dataset_path: Path, limit: Optional[int] = None) -> List[Revi
             try:
                 data = json.loads(stripped)
             except json.JSONDecodeError as error:
-                raise SchemaError(f"{where}: JSON 解析失败: {error}") from error
+                raise SchemaError(f"{where}: failed to parse JSON: {error}") from error
 
             instance = ReviewInstance.from_dict(data, where)
             if instance.instance_id in seen_ids:
-                raise SchemaError(f"{where}: 重复的 instance_id: {instance.instance_id}")
+                raise SchemaError(f"{where}: duplicate instance_id: {instance.instance_id}")
             seen_ids.add(instance.instance_id)
             instances.append(instance)
 
