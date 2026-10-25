@@ -1,0 +1,14 @@
+# One verification fixture, using only native Harbor execution controls.
+job_name: aacr-oracle
+jobs_dir: jobs
+n_attempts: 1
+n_concurrent_trials: 1
+retry:
+  max_retries: 0
+agents:
+  - name: oracle
+environment:
+  type: docker
+  delete: true
+tasks:
+  - path: artifacts/aacr/tasks/laravel-framework-56591

@@ -1,0 +1,11 @@
+{
+  "review_output": [
+    {
+      "file": "src/Illuminate/Database/Console/Migrations/MigrateMakeCommand.php",
+      "start_line": null,
+      "end_line": null,
+      "summary": "Prefer a platform-aware path abstraction",
+      "description": "Replacing Windows separators directly leaves path handling fragile and dependent on the operating system. Use a dedicated path utility that owns separator normalization instead of ad hoc string replacement."
+    }
+  ]
+}
