@@ -8,6 +8,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import tempfile
+import tomllib
 
 from benchmarks.aacr.upstream import repo_utils, schema
 from benchmarks.aacr.upstream.converters.aacr_bench import convert_record
@@ -19,6 +20,7 @@ BASE = '6d94b16fd5f4f72bb741f9b900b83179c8ab46c9'
 HEAD = '0a5238acfc4ca99c363283bf3bb16e20905f2a39'
 TASK_NAME = 'laravel-framework-56591'
 PACKAGE = Path(__file__).resolve().parent
+DAYDREAM_BUILD = json.loads((PACKAGE / 'daydream-build.json').read_text())
 
 
 def render_task(record: dict, destination: Path) -> schema.ReviewInstance:
@@ -81,7 +83,82 @@ def prepare_context(instance: schema.ReviewInstance, task: Path) -> Path:
     return repository
 
 
-def generate_task(upstream: Path, output: Path) -> Path:
+def configure_daydream_task(task: Path, wheel: Path) -> None:
+    """Add only the installed-reviewer gap to an ordinary isolated Harbor task."""
+    from daydream import git_ops
+    from daydream.benchmark.reviewbench.harbor_build import NODE_IMAGE, reviewer_build
+    from daydream.deep.artifacts import diff_key
+
+    if hashlib.sha256(wheel.read_bytes()).hexdigest() != DAYDREAM_BUILD['wheel_sha256']:
+        raise ValueError('Daydream wheel SHA-256 differs from the baseline build')
+    suffix, assets, identity = reviewer_build(wheel, platform='linux/arm64')
+    identity.update(DAYDREAM_BUILD)
+    identity['harbor_revision'] = '6099b8cf2bfbbb3e7ff1eb2163bfc4524dbd9ba5'
+    environment = task / 'environment'
+    metadata = tomllib.loads((task / 'task.toml').read_text())['metadata']
+    repo = environment / 'repo'
+    base, head = metadata['base_commit'], metadata['head_commit']
+    if git_ops.head_sha(repo) != head or git_ops.status_porcelain(repo).strip():
+        raise ValueError('Daydream task requires a clean pinned head')
+    patch = git_ops.diff(repo, base)
+    comparison = dict(base_sha=base, head_sha=head,
+        merge_base_sha=git_ops.merge_base(repo, base, head), diff_key=diff_key(patch),
+        patch_sha256=hashlib.sha256(patch.encode()).hexdigest())
+    inputs = environment / 'aacr'
+    inputs.mkdir()
+    (inputs / 'comparison.json').write_text(json.dumps(comparison, indent=2) + '\n')
+    (inputs / 'diff.patch').write_text(patch)
+    (inputs / 'build.json').write_text(json.dumps(identity, indent=2) + '\n')
+    shutil.copy2(inputs / 'comparison.json', task / 'tests/comparison.json')
+    shutil.copy2(inputs / 'build.json', task / 'tests/build.json')
+    # Reference annotations and the independent judge transport remain verifier-only.
+    runtime = environment / 'suite/benchmarks/aacr'
+    runtime.mkdir(parents=True)
+    shutil.copy2(PACKAGE.parent / '__init__.py', runtime.parent / '__init__.py')
+    for name in ('__init__.py', 'daydream_entrypoint.py'):
+        shutil.copy2(PACKAGE / name, runtime / name)
+    for directory in (environment, task / 'tests'):
+        for name, contents in assets.items():
+            path = directory / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(contents)
+    (environment / 'Dockerfile').write_text(
+        f'FROM {NODE_IMAGE}\n'
+        'RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates ripgrep '
+        '&& rm -rf /var/lib/apt/lists/*\n' + suffix +
+        'COPY repo/ /workspace/repo/\nCOPY aacr/ /opt/aacr/\n'
+        'COPY suite/ /opt/aacr-suite/\n'
+        'RUN cp -r /opt/aacr-suite/benchmarks /opt/daydream/lib/python3.14/site-packages/\n'
+        'WORKDIR /workspace/repo\n')
+    (environment / 'docker-compose.yaml').write_text(
+        'services:\n  main:\n    security_opt:\n      - seccomp=unconfined\n'
+        '    volumes:\n      - type: bind\n'
+        '        source: ${AACR_CODEX_AUTH_DIR:?set the dedicated native Codex reviewer directory}\n'
+        '        target: /run/aacr-codex\n        bind:\n          create_host_path: false\n')
+    # Keep Pi SDK/provider/model locked exactly as in the Oracle verifier.
+    (task / 'tests/Dockerfile').write_text(
+        f'FROM {NODE_IMAGE}\nRUN apt-get update && apt-get install -y --no-install-recommends '
+        'git ca-certificates && rm -rf /var/lib/apt/lists/*\n' + suffix +
+        'COPY . /tests/\nRUN uv pip install --no-deps --python /opt/daydream/bin/python /tests/suite '
+        '&& npm ci --omit=dev --prefix /tests/suite/benchmarks/aacr\nWORKDIR /tests/suite\n')
+    script = (task / 'tests/test.sh').read_text().replace(
+        '--output /logs/verifier', '--output /logs/verifier \\\n  --daydream-proof /logs/artifacts/daydream \\\n  --comparison /tests/comparison.json --host-receipt /logs/agent/host-receipt.json')
+    (task / 'tests/test.sh').write_text(script)
+    config = (task / 'task.toml').read_text().replace('timeout_sec = 60.0', 'timeout_sec = 5400.0')
+    config = config.replace('network_mode = "no-network"', 'network_mode = "public"')
+    config = config.replace('cpus = 1', 'cpus = 4').replace('memory_mb = 2048', 'memory_mb = 8192')
+    config = config.replace('fixed Oracle reviewer', 'complete Daydream reviewer').replace('"oracle"', '"daydream"')
+    # Transfer only this nonsecret log document so host cancellation remains
+    # authoritative even if the sandbox receipt upload fails. Harbor lint's
+    # artifact-log-overlap warning is intentional for this single file.
+    config = 'artifacts = ["/logs/agent/host-receipt.json"]\n' + config
+    config += ''.join(f'daydream_{key} = {json.dumps(identity[key])}\n'
+        for key in ('source_commit', 'wheel_sha256', 'codex_cli', 'reviewer_runtime_lock_sha256'))
+    (task / 'task.toml').write_text(config)
+    shutil.rmtree(task / 'solution')
+
+
+def generate_task(upstream: Path, output: Path, *, daydream_wheel: Path | None = None) -> Path:
     """Validate pinned AACR source/data and generate exactly one isolated task."""
     upstream = Path(upstream).resolve()
     revision = subprocess.run(['git', '-C', str(upstream), 'rev-parse', 'HEAD'], text=True, capture_output=True)
@@ -105,6 +182,8 @@ def generate_task(upstream: Path, output: Path) -> Path:
         stage = Path(temporary) / TASK_NAME
         instance = render_task(records[0], stage)
         prepare_context(instance, stage)
+        if daydream_wheel is not None:
+            configure_daydream_task(stage, daydream_wheel)
         stage.rename(destination)
     return destination
 
@@ -113,8 +192,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--upstream', required=True, type=Path, help='Clean checkout of the pinned Alibaba AACR source')
     parser.add_argument('--output', type=Path, default=Path('artifacts/aacr/tasks'))
+    parser.add_argument('--daydream-wheel', type=Path, help='Use the pinned Daydream baseline instead of Oracle')
     arguments = parser.parse_args()
-    print(generate_task(arguments.upstream, arguments.output))
+    print(generate_task(arguments.upstream, arguments.output, daydream_wheel=arguments.daydream_wheel))
 
 
 if __name__ == '__main__':

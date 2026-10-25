@@ -1,0 +1,18 @@
+# One complete review per native trial; k, scheduling and retries belong to Harbor.
+job_name: aacr-daydream
+jobs_dir: jobs
+n_attempts: 1
+n_concurrent_trials: 1
+retry:
+  max_retries: 0
+agents:
+  - import_path: benchmarks.aacr.daydream_agent:DaydreamAgent
+    kwargs:
+      version: 0.30.0
+environment:
+  type: docker
+  delete: true
+  kwargs:
+    auto_mounting: true
+tasks:
+  - path: artifacts/aacr/daydream-tasks/laravel-framework-56591

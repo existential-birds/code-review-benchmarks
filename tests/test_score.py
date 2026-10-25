@@ -1,8 +1,10 @@
 """Behavioral proof through AACR's real builder, scorer and summary functions."""
 import asyncio
+import hashlib
 import json
 from pathlib import Path
 from types import SimpleNamespace
+import uuid
 
 import pytest
 
@@ -167,4 +169,223 @@ def test_transport_sticky_failure_is_checked_even_with_valid_verdict(tmp_path):
     client.failures.append({'category': 'transport'})
     with pytest.raises(score.VerificationError):
         run(paths, client)
+    assert not (paths[2] / 'reward.json').exists()
+
+
+def daydream_artifacts(tmp_path, findings):
+    """A native terminal contract alongside independent filesystem receipts."""
+    paths = fixture(tmp_path, findings)
+    proof = tmp_path / 'daydream'
+    proof.mkdir()
+    invocation = str(uuid.uuid4())
+    comparison = {'base_sha': 'a' * 40, 'head_sha': 'b' * 40,
+                  'merge_base_sha': 'a' * 40, 'diff_key': 'd' * 64,
+                  'patch_sha256': 'c' * 64}
+    scope = {'scope_id': 'php', 'stack': 'php', 'files': ['src/file.php'],
+             'shard': None, 'scope_ref': None}
+    terminal = {
+        'schema_version': 1, 'run_id': str(uuid.uuid4()),
+        'analysis_state': 'complete', 'pipeline_state': 'completed',
+        'analyzed_revision': {key: comparison[key] for key in ('head_sha', 'merge_base_sha', 'diff_key')},
+        'reason_codes': [], 'planned_scopes': [scope], 'required_phases': ['findings'],
+        'stack_outcomes': [dict(scope, status='complete', reason_codes=[], partial_evidence=False)],
+        'phase_outcomes': [{'phase': 'findings', 'status': 'complete', 'reason_codes': [],
+                            'noop': False, 'usable_evidence': True}],
+        'completed_stacks': ['php'], 'failed_stacks': [], 'uncovered_stacks': [],
+        'projection_valid': True,
+    }
+    execution = {
+        'schema_version': 1, 'invocation_id': invocation,
+        'status': 'complete' if findings else 'completed_empty', 'runner_exit_code': 0,
+        'terminal_result': terminal, 'analyzed_comparison': comparison,
+        'post_comparison': comparison, 'usage': {}, 'retained_findings': findings,
+        'resolved_configuration': {}, 'build': {}, 'diagnostics': [], 'elapsed_seconds': 1,
+        'findings_sha256': hashlib.sha256(paths[1].read_bytes()).hexdigest(),
+    }
+    for name, value in {
+        'request.json': {'invocation_id': invocation},
+        'host-receipt.json': {'invocation_id': invocation, 'status': 'succeeded', 'return_code': 0},
+        'execution.json': execution,
+    }.items():
+        (proof / name).write_text(json.dumps(value))
+    expected = tmp_path / 'comparison.json'
+    expected.write_text(json.dumps(comparison))
+    host_receipt = tmp_path / 'native-host-receipt.json'
+    host_receipt.write_bytes((proof / 'host-receipt.json').read_bytes())
+    return paths, proof, expected, host_receipt
+
+
+@pytest.mark.parametrize('findings,responses', [([], []), ([finding()], ['One agreement\n[1]'])])
+def test_daydream_completed_review_requires_native_terminal_and_process_proof(tmp_path, findings, responses):
+    paths, proof, expected, host_receipt = daydream_artifacts(tmp_path, findings)
+    client = JudgeTransport(*responses)
+    result = asyncio.run(score.score_case(*paths, client=client,
+                        daydream_proof=proof, comparison_path=expected, host_receipt_path=host_receipt))
+    assert result['summary']['generated_notes'] == len(findings)
+    assert result['summary']['matched_generated_notes'] == len(findings)
+    if findings:
+        assert result['eval_res'][0]['generated_comments'][0]['from_line'] is None
+    assert (paths[2] / 'reward.json').is_file()
+
+
+@pytest.mark.parametrize('artifact,field,value', [
+    ('host-receipt.json', 'status', 'failed'),
+    ('host-receipt.json', 'status', 'cancelled'),
+    ('host-receipt.json', 'return_code', 1),
+    ('host-receipt.json', 'return_code', False),
+    ('host-receipt.json', 'invocation_id', str(uuid.UUID(int=1))),
+    ('request.json', 'invocation_id', 'not-an-invocation'),
+    ('execution.json', 'invocation_id', str(uuid.UUID(int=1))),
+    ('execution.json', 'schema_version', 2),
+    ('execution.json', 'runner_exit_code', 1),
+    ('execution.json', 'status', 'incomplete'),
+    ('execution.json', 'status', 'failed'),
+    ('execution.json', 'status', 'cancelled'),
+    ('execution.json', 'terminal_result', None),
+    ('execution.json', 'findings_sha256', '0' * 64),
+])
+def test_daydream_partial_stale_or_nonzero_output_cannot_be_empty_success(tmp_path, artifact, field, value):
+    paths, proof, expected, host_receipt = daydream_artifacts(tmp_path, [])
+    path = proof / artifact
+    document = json.loads(path.read_text())
+    document[field] = value
+    path.write_text(json.dumps(document))
+    client = JudgeTransport()
+    with pytest.raises(score.VerificationError):
+        asyncio.run(score.score_case(*paths, client=client,
+                    daydream_proof=proof, comparison_path=expected, host_receipt_path=host_receipt))
+    assert not client.requests
+    assert not (paths[2] / 'reward.json').exists()
+    assert json.loads((paths[2] / 'diagnostic.json').read_text())['status'] == 'failed'
+
+
+@pytest.mark.parametrize('missing', ['request.json', 'host-receipt.json', 'execution.json', 'comparison.json'])
+def test_daydream_missing_proof_fails_before_judging(tmp_path, missing):
+    paths, proof, expected, host_receipt = daydream_artifacts(tmp_path, [finding()])
+    (expected if missing == 'comparison.json' else proof / missing).unlink()
+    client = JudgeTransport('[1]')
+    with pytest.raises(score.VerificationError):
+        asyncio.run(score.score_case(*paths, client=client,
+                    daydream_proof=proof, comparison_path=expected, host_receipt_path=host_receipt))
+    assert not client.requests
+    assert not (paths[2] / 'reward.json').exists()
+
+
+@pytest.mark.parametrize('location,key', [
+    ('expected', 'base_sha'), ('expected', 'head_sha'),
+    ('analyzed_comparison', 'merge_base_sha'), ('analyzed_comparison', 'patch_sha256'),
+    ('post_comparison', 'head_sha'), ('post_comparison', 'diff_key'),
+    ('terminal_result', 'head_sha'), ('terminal_result', 'merge_base_sha'),
+    ('terminal_result', 'diff_key'),
+])
+def test_daydream_comparison_mismatch_fails_before_judging(tmp_path, location, key):
+    paths, proof, expected, host_receipt = daydream_artifacts(tmp_path, [finding()])
+    path = expected if location == 'expected' else proof / 'execution.json'
+    document = json.loads(path.read_text())
+    target = (document if location == 'expected' else document['terminal_result']['analyzed_revision']
+              if location == 'terminal_result' else document[location])
+    target[key] = 'mismatched'
+    path.write_text(json.dumps(document))
+    client = JudgeTransport('[1]')
+    with pytest.raises(score.VerificationError):
+        asyncio.run(score.score_case(*paths, client=client,
+                    daydream_proof=proof, comparison_path=expected, host_receipt_path=host_receipt))
+    assert not client.requests
+    assert not (paths[2] / 'reward.json').exists()
+
+
+def test_daydream_contradictory_complete_terminal_is_rejected_by_native_validator(tmp_path):
+    paths, proof, expected, host_receipt = daydream_artifacts(tmp_path, [])
+    path = proof / 'execution.json'
+    document = json.loads(path.read_text())
+    document['terminal_result']['stack_outcomes'][0]['status'] = 'uncovered'
+    document['terminal_result']['stack_outcomes'][0]['reason_codes'] = ['coverage_unknown']
+    path.write_text(json.dumps(document))
+    with pytest.raises(score.VerificationError) as error:
+        asyncio.run(score.score_case(*paths, client=JudgeTransport(),
+                    daydream_proof=proof, comparison_path=expected, host_receipt_path=host_receipt))
+    assert isinstance(error.value.__cause__, ValueError)
+    assert 'completed_stacks disagrees' in str(error.value.__cause__)
+    assert not (paths[2] / 'reward.json').exists()
+
+
+@pytest.mark.parametrize('pipeline', ['completed', 'cancelled'])
+def test_daydream_valid_unfinished_terminal_cannot_publish_a_callback_output(tmp_path, pipeline):
+    from daydream.review_result import validate_terminal_result
+
+    paths, proof, expected, host_receipt = daydream_artifacts(tmp_path, [])
+    path = proof / 'execution.json'
+    document = json.loads(path.read_text())
+    terminal = document['terminal_result']
+    terminal['pipeline_state'] = pipeline
+    terminal['analysis_state'] = 'incomplete'
+    terminal['phase_outcomes'][0].update(status='incomplete', reason_codes=['backend_failure'])
+    terminal['reason_codes'] = ['backend_failure'] + (['interruption'] if pipeline == 'cancelled' else [])
+    # This is valid native partial coverage, not merely a malformed artifact.
+    validate_terminal_result(terminal)
+    path.write_text(json.dumps(document))
+    client = JudgeTransport()
+    with pytest.raises(score.VerificationError):
+        asyncio.run(score.score_case(*paths, client=client,
+                    daydream_proof=proof, comparison_path=expected, host_receipt_path=host_receipt))
+    assert not client.requests
+    assert not (paths[2] / 'reward.json').exists()
+
+
+@pytest.mark.parametrize('missing', ['daydream_proof', 'comparison_path', 'host_receipt_path'])
+def test_daydream_completion_options_cannot_silently_select_oracle_boundary(tmp_path, missing):
+    paths, proof, expected, host_receipt = daydream_artifacts(tmp_path, [])
+    options = {'daydream_proof': proof, 'comparison_path': expected, 'host_receipt_path': host_receipt}
+    del options[missing]
+    with pytest.raises(score.VerificationError):
+        asyncio.run(score.score_case(*paths, client=JudgeTransport(), **options))
+    assert not (paths[2] / 'reward.json').exists()
+
+
+def test_failed_reverification_removes_prior_rewards(tmp_path):
+    paths = fixture(tmp_path, [])
+    run(paths, JudgeTransport())
+    (paths[2] / 'reward.txt').write_text('1')
+    paths[1].unlink()
+    with pytest.raises(score.VerificationError):
+        run(paths, JudgeTransport())
+    assert not (paths[2] / 'reward.json').exists()
+    assert not (paths[2] / 'reward.txt').exists()
+
+
+def test_daydream_requires_separate_native_host_receipt(tmp_path):
+    paths, proof, expected, host_receipt = daydream_artifacts(tmp_path, [])
+    with pytest.raises(score.VerificationError):
+        asyncio.run(score.score_case(*paths, client=JudgeTransport(),
+                    daydream_proof=proof, comparison_path=expected,
+                    host_receipt_path=proof / 'host-receipt.json'))
+    assert not (paths[2] / 'reward.json').exists()
+
+
+@pytest.mark.parametrize('field,value', [
+    ('status', 'cancelled'), ('status', 'failed'),
+    ('return_code', 1), ('return_code', False),
+    ('invocation_id', str(uuid.UUID(int=1))),
+])
+def test_daydream_native_host_receipt_overrides_sandbox_success(tmp_path, field, value):
+    paths, proof, expected, host_receipt = daydream_artifacts(tmp_path, [])
+    document = json.loads(host_receipt.read_text())
+    document[field] = value
+    host_receipt.write_text(json.dumps(document))
+    # Sandbox upload may have finished before the host observed cancellation.
+    assert json.loads((proof / 'host-receipt.json').read_text())['status'] == 'succeeded'
+    client = JudgeTransport()
+    with pytest.raises(score.VerificationError):
+        asyncio.run(score.score_case(*paths, client=client, daydream_proof=proof,
+                    comparison_path=expected, host_receipt_path=host_receipt))
+    assert not client.requests
+    assert not (paths[2] / 'reward.json').exists()
+
+
+def test_daydream_missing_native_host_artifact_cannot_publish_reward(tmp_path):
+    paths, proof, expected, host_receipt = daydream_artifacts(tmp_path, [])
+    host_receipt.unlink()
+    with pytest.raises(score.VerificationError):
+        asyncio.run(score.score_case(*paths, client=JudgeTransport(), daydream_proof=proof,
+                    comparison_path=expected, host_receipt_path=host_receipt))
     assert not (paths[2] / 'reward.json').exists()
