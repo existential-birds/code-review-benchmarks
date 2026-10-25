@@ -18,7 +18,6 @@ include = ["benchmarks*"]
 
 [tool.setuptools.package-data]
 "benchmarks.aacr" = ["*.mjs", "package*.json", "templates/**/*"]
-"benchmarks.aacr.upstream" = ["LICENSE", "*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
