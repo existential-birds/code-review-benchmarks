@@ -19,7 +19,7 @@ import time
 import uuid
 
 
-DAYDREAM_REVISION = '05f067e96e51c63ff4bad966100bb638bf906346'
+DAYDREAM_REVISION = '5bae1ac09918ecf8d095aaf6d283235ca1ad83a8'
 
 
 def _write_json(path: Path, value) -> None:
