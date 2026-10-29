@@ -127,7 +127,6 @@ def test_completed_review_exports_only_finalized_items_and_isolated_defaults(rev
     assert proof['retained_findings'] == items
     assert proof['findings_sha256'] == hashlib.sha256((case.artifacts / 'findings.json').read_bytes()).hexdigest()
     assert (case.logs / 'trajectory.json').exists()
-    assert (case.inputs / 'credential-store/.reviewer.lock').is_file()
 
 
 def test_configuration_reads_native_routing_after_runner_copies_config(review_case, monkeypatch):

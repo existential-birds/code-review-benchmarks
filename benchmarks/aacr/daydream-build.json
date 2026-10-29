@@ -1,6 +1,6 @@
 {
-  "source_commit": "05f067e96e51c63ff4bad966100bb638bf906346",
-  "wheel_sha256": "7e56e04386d2c7463db80a359be28dbf55b11f4911efd22068e75c5afd08f0fc",
+  "source_commit": "5bae1ac09918ecf8d095aaf6d283235ca1ad83a8",
+  "wheel_sha256": "923075dff2be5e6d5b2bdc670eb5e247fc86efc391ae5d6c23eee35e4ca63d92",
   "wheel_name": "daydream-0.30.0-py3-none-any.whl",
-  "build_command": "uv build --wheel --out-dir ../daydream-wheel"
+  "build_command": "uv build --wheel --out-dir ../daydream-5bae1ac0-issue9-wheel"
 }
