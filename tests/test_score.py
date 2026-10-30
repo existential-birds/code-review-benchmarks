@@ -458,6 +458,9 @@ def test_native_verifier_keeps_host_completion_authoritative_after_sandbox_forge
                 return SimpleNamespace(return_code=1 if outcome == 'failed' else 0)
             return SimpleNamespace(return_code=0)
 
+    retained_execution = trial.agent_dir / 'execution.json'
+    assert not retained_execution.exists()
+    expected_execution = (proof / 'execution.json').read_bytes()
     agent = DaydreamAgent(logs_dir=trial.agent_dir)
     async def review():
         await asyncio.wait_for(agent.run('review', ReviewerEnvironment(), AgentContext()),
@@ -535,7 +538,7 @@ def test_native_verifier_keeps_host_completion_authoritative_after_sandbox_forge
             asyncio.run(verifier.verify())
         assert not trial.reward_json_path.exists()
         assert not trial.reward_text_path.exists()
-        assert (proof / 'execution.json').is_file()
+        assert retained_execution.read_bytes() == expected_execution
         if outcome == 'timeout':
             assert json.loads((trial.trial_dir / 'daydream-receipt.json').read_text())['status'] == 'cancelled'
         if outcome in {'judge_failure', 'stale', 'missing_output'}:
