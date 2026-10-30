@@ -87,7 +87,8 @@ def _configuration(config, backend, staged: Path) -> dict:
     from daydream.run_config import _resolved_model, _resolved_reasoning_effort
     return {
         **{name: getattr(config, name) for name in ('backend', 'output_mode', 'flow_name',
-            'non_interactive', 'precision_mode', 'dataset_capture_disabled', 'archive', 'run_eval',
+            'non_interactive', 'precision_mode', 'dataset_capture', 'dataset_capture_disabled',
+            'dataset_store_path', 'trajectory_hub_repo', 'archive', 'run_eval',
             'discover_github_provenance', 'base', 'approved_head_sha', 'model', 'reasoning_effort')},
         'file_config': asdict(config.file_config),
         'review_profile': {'source_kind': config.review_profile.source_kind,
@@ -143,7 +144,7 @@ def _isolated_environment(private: Path):
 
 
 async def review_once(*, repository: Path, inputs: Path, artifacts: Path, agent_logs: Path,
-                      invocation_id: str, credential_home: Path) -> int:
+                      invocation_id: str, credential_home: Path, capture_data: bool = False) -> int:
     """Invoke the complete pipeline once; publish only after successful finalization."""
     from daydream import git_ops, runner
     from daydream.backends import BackendExecutionInput
@@ -193,7 +194,9 @@ async def review_once(*, repository: Path, inputs: Path, artifacts: Path, agent_
                 backend = BackendExecutionInput.from_environment(controls, backend='codex')
                 config = RunConfig(target=str(repository), backend='codex', output_mode='review',
                     flow_name='review', non_interactive=True, precision_mode=False,
-                    dataset_capture_disabled=True, archive=False, run_eval=False,
+                    dataset_capture=capture_data, dataset_capture_disabled=not capture_data,
+                    dataset_store_path=agent_logs / 'dataset' if capture_data else None,
+                    archive=False, run_eval=False,
                     discover_github_provenance=False, base=expected['base_sha'],
                     approved_head_sha=expected['head_sha'], file_config=DaydreamFileConfig(),
                     review_profile=resolve_harbor_profile(env={}), dump_artifacts=str(staged))
@@ -246,7 +249,7 @@ async def review_once(*, repository: Path, inputs: Path, artifacts: Path, agent_
             _write_json(execution_path, record)
 
 
-async def _main(invocation: str) -> int:
+async def _main(invocation: str, capture_data: bool = False) -> int:
     import anyio
     from daydream.trajectory import flush_active_signal_recorders
 
@@ -265,7 +268,8 @@ async def _main(invocation: str) -> int:
             try:
                 result = await review_once(repository=Path('/workspace/repo'), inputs=Path('/opt/aacr'),
                     artifacts=Path('/logs/artifacts'), agent_logs=Path('/logs/agent'),
-                    invocation_id=invocation, credential_home=Path('/run/aacr-codex'))
+                    invocation_id=invocation, credential_home=Path('/run/aacr-codex'),
+                    capture_data=capture_data)
             finally:
                 loop.remove_signal_handler(signal.SIGTERM)
     except asyncio.CancelledError:
@@ -276,4 +280,7 @@ async def _main(invocation: str) -> int:
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--invocation', required=True)
-    raise SystemExit(asyncio.run(_main(parser.parse_args().invocation)))
+    parser.add_argument('--capture-data', action='store_true',
+                        help='Retain native local JSONL capture under the trial agent logs')
+    args = parser.parse_args()
+    raise SystemExit(asyncio.run(_main(args.invocation, args.capture_data)))

@@ -1,10 +1,11 @@
-"""Map the pinned Laravel AACR review case to one native Harbor Oracle task."""
+"""Convert the pinned AACR catalog into isolated native Harbor review tasks."""
 from __future__ import annotations
 
 import argparse
 import hashlib
 import json
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import tempfile
@@ -23,18 +24,34 @@ PACKAGE = Path(__file__).resolve().parent
 DAYDREAM_BUILD = json.loads((PACKAGE / 'daydream-build.json').read_text())
 
 
-def render_task(record: dict, destination: Path) -> schema.ReviewInstance:
-    """Reuse AACR's converter/schema and keep annotations only in verifier assets."""
+def task_name(record: dict) -> str:
+    """Keep stable PR identities independent of upstream's commit-based instance IDs."""
+    match = re.fullmatch(r'https://github\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)/pull/([0-9]+)',
+                         record.get('githubPrUrl', ''))
+    if match is None:
+        raise ValueError('Expected a GitHub pull request URL for the review case')
+    return re.sub(r'[^a-z0-9]+', '-', '-'.join(match.groups()).lower()).strip('-')
+
+
+def validated_instance(record: dict) -> schema.ReviewInstance:
     instance = convert_record(record)
     if instance is None:
-        raise ValueError('AACR converter rejected the selected review case')
-    # Round trip through the upstream loader before writing any task assets.
-    with tempfile.TemporaryDirectory(prefix='aacr-schema-') as temporary:
-        standard = Path(temporary) / 'instance.jsonl'
-        standard.write_text(json.dumps(instance.to_dict()) + '\n')
-        instance, = schema.load_instances(standard)
+        raise ValueError('AACR converter rejected the review case')
+    return schema.ReviewInstance.from_dict(instance.to_dict(), task_name(record))
+
+
+def render_task(record: dict, destination: Path) -> schema.ReviewInstance:
+    """Reuse AACR's converter/schema and keep annotations only in verifier assets."""
+    instance = validated_instance(record)
     destination = Path(destination)
     shutil.copytree(PACKAGE / 'templates', destination)
+    oracle = (record['githubPrUrl'] == PR_URL and
+              instance.base_commit == BASE and instance.head_commit == HEAD)
+    if not oracle:
+        shutil.rmtree(destination / 'solution')
+    instruction = (destination / 'instruction.md').read_text().format(
+        pr_url=record['githubPrUrl'], base_commit=instance.base_commit, head_commit=instance.head_commit)
+    (destination / 'instruction.md').write_text(instruction)
     metadata = {
         'instance_id': instance.instance_id,
         'repository': instance.repo,
@@ -45,7 +62,11 @@ def render_task(record: dict, destination: Path) -> schema.ReviewInstance:
         'aacr_revision': AACR_REVISION,
         'dataset_sha256': DATASET_SHA256,
     }
-    config = (destination / 'task.toml').read_text()
+    config = (destination / 'task.toml').read_text().format(task_name=task_name(record))
+    if oracle:
+        config = config.replace('review case and subscription judge',
+                                'review case with a fixed Oracle reviewer and subscription judge')
+        config = config.replace('["code-review", "aacr"]', '["code-review", "aacr", "oracle"]')
     config += '\n[metadata]\n' + ''.join(f'{key} = {json.dumps(value)}\n' for key, value in metadata.items())
     (destination / 'task.toml').write_text(config)
     (destination / 'tests/instance.jsonl').write_text(json.dumps(instance.to_dict()) + '\n')
@@ -62,22 +83,46 @@ def render_task(record: dict, destination: Path) -> schema.ReviewInstance:
 
 
 def prepare_context(instance: schema.ReviewInstance, task: Path) -> Path:
-    """Run upstream's destructive preparation only in a fresh generated directory."""
+    """Fetch pinned trees and enough history into a fresh isolated repository."""
     environment = Path(task) / 'environment'
     environment.mkdir(parents=True, exist_ok=True)
     repository = environment / 'repo'
     if repository.exists():
         raise FileExistsError(f'Refusing to replace repository context: {repository}')
     with tempfile.TemporaryDirectory(prefix='.aacr-context-', dir=environment) as temporary:
-        prepared = repo_utils.prepare_repo(
-            Path(temporary), instance.resolved_clone_url, instance.repo,
-            instance.base_commit, instance.head_commit,
-        )
-        for revision in (instance.base_commit, instance.head_commit):
-            subprocess.run(['git', '-C', str(prepared), 'cat-file', '-e', revision + '^{commit}'], check=True)
-        actual = subprocess.check_output(['git', '-C', str(prepared), 'rev-parse', 'HEAD'], text=True).strip()
-        status = subprocess.check_output(['git', '-C', str(prepared), 'status', '--porcelain'], text=True)
-        if actual != instance.head_commit or status:
+        prepared = Path(temporary) / 'repo'
+        def git(*arguments: str) -> subprocess.CompletedProcess:
+            result = subprocess.run(['git', '-C', str(prepared), *arguments], text=True, capture_output=True,
+                                    timeout=1800)
+            if result.returncode:
+                raise repo_utils.RepoError(f'Git context unavailable ({" ".join(arguments)}): {result.stderr.strip()}')
+            return result
+        prepared.mkdir()
+        git('init', '-q')
+        git('remote', 'add', 'origin', instance.resolved_clone_url)
+        # Materialize both pinned trees without copying a project's entire history.
+        revisions = (instance.base_commit, instance.head_commit)
+        git('fetch', '--no-tags', '--depth=32', 'origin', *revisions)
+        depth = 32
+        while True:
+            common = subprocess.run(['git', '-C', str(prepared), 'merge-base', *revisions],
+                                    text=True, capture_output=True, timeout=1800)
+            shallow_path = prepared / '.git/shallow'
+            boundaries = set(shallow_path.read_text().splitlines()) if shallow_path.exists() else set()
+            if common.returncode == 0:
+                # A visible older common ancestor is insufficient if a shallower
+                # side branch can still hide a nearer one before that candidate.
+                exclusive = set(git('rev-list', *revisions, '^' + common.stdout.strip()).stdout.splitlines())
+                if not boundaries.intersection(exclusive):
+                    break
+            if not boundaries:
+                raise repo_utils.RepoError('Pinned base/head have no common history')
+            git('fetch', '--no-tags', f'--deepen={depth}', 'origin', *revisions)
+            depth *= 2
+        git('checkout', '--detach', instance.head_commit)
+        for revision in revisions:
+            git('cat-file', '-e', revision + '^{commit}')
+        if git('rev-parse', 'HEAD').stdout.strip() != instance.head_commit or git('status', '--porcelain').stdout:
             raise ValueError('Repository preparation did not produce a clean pinned head')
         prepared.rename(repository)
     return repository
@@ -126,8 +171,9 @@ def configure_daydream_task(task: Path, wheel: Path) -> None:
             path.write_bytes(contents)
     (environment / 'Dockerfile').write_text(
         f'FROM {NODE_IMAGE}\n'
-        'RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates ripgrep '
-        '&& rm -rf /var/lib/apt/lists/*\n' + suffix +
+        'RUN apt-get update && apt-get install -y --no-install-recommends git git-lfs ca-certificates ripgrep '
+        '&& rm -rf /var/lib/apt/lists/*\n'
+        'RUN git lfs install --system\n' + suffix +
         'COPY repo/ /workspace/repo/\nCOPY aacr/ /opt/aacr/\n'
         'COPY suite/ /opt/aacr-suite/\n'
         'RUN cp -r /opt/aacr-suite/benchmarks /opt/daydream/lib/python3.14/site-packages/\n'
@@ -150,14 +196,18 @@ def configure_daydream_task(task: Path, wheel: Path) -> None:
     config = config.replace('network_mode = "no-network"', 'network_mode = "public"')
     config = config.replace('cpus = 1', 'cpus = 4').replace('memory_mb = 2048', 'memory_mb = 8192')
     config = config.replace('fixed Oracle reviewer', 'complete Daydream reviewer').replace('"oracle"', '"daydream"')
+    config = config.replace('review case and subscription judge',
+                            'review case with the complete Daydream reviewer and subscription judge')
+    config = config.replace('["code-review", "aacr"]', '["code-review", "aacr", "daydream"]')
     config += ''.join(f'daydream_{key} = {json.dumps(identity[key])}\n'
         for key in ('source_commit', 'wheel_sha256', 'codex_cli', 'reviewer_runtime_lock_sha256'))
     (task / 'task.toml').write_text(config)
-    shutil.rmtree(task / 'solution')
+    if (task / 'solution').exists():
+        shutil.rmtree(task / 'solution')
 
 
-def generate_task(upstream: Path, output: Path, *, daydream_wheel: Path | None = None) -> Path:
-    """Validate pinned AACR source/data and generate exactly one isolated task."""
+def load_records(upstream: Path) -> list[dict]:
+    """Admit only the clean pinned source and checksum, validating every identity."""
     upstream = Path(upstream).resolve()
     revision = subprocess.run(['git', '-C', str(upstream), 'rev-parse', 'HEAD'], text=True, capture_output=True)
     if revision.returncode or revision.stdout.strip() != AACR_REVISION:
@@ -168,17 +218,29 @@ def generate_task(upstream: Path, output: Path, *, daydream_wheel: Path | None =
     dataset = upstream / 'dataset/positive_samples.json'
     if hashlib.sha256(dataset.read_bytes()).hexdigest() != DATASET_SHA256:
         raise ValueError('AACR positive dataset SHA-256 does not match the pin')
-    records = [record for record in json.loads(dataset.read_text()) if record.get('githubPrUrl') == PR_URL]
-    if len(records) != 1 or records[0]['source_commit'] != BASE or records[0]['target_commit'] != HEAD:
-        raise ValueError('Expected exactly the pinned Laravel review case')
-    output = Path(output).resolve()
-    output.mkdir(parents=True, exist_ok=True)
-    destination = output / TASK_NAME
+    records = json.loads(dataset.read_text())
+    if not isinstance(records, list) or not records:
+        raise ValueError('Expected a nonempty AACR positive dataset array')
+    names, identities = set(), set()
+    for record in records:
+        name = task_name(record)
+        instance = validated_instance(record)
+        if name in names:
+            raise ValueError(f'duplicate task identity: {name}')
+        if instance.instance_id in identities:
+            raise ValueError(f'duplicate instance identity: {instance.instance_id}')
+        names.add(name)
+        identities.add(instance.instance_id)
+    return sorted(records, key=task_name)
+
+
+def write_task(record: dict, output: Path, daydream_wheel: Path | None) -> Path:
+    destination = output / task_name(record)
     if destination.exists():
         raise FileExistsError(f'Refusing to replace generated task: {destination}')
     with tempfile.TemporaryDirectory(prefix='.aacr-task-', dir=output) as temporary:
-        stage = Path(temporary) / TASK_NAME
-        instance = render_task(records[0], stage)
+        stage = Path(temporary) / destination.name
+        instance = render_task(record, stage)
         prepare_context(instance, stage)
         if daydream_wheel is not None:
             configure_daydream_task(stage, daydream_wheel)
@@ -186,13 +248,77 @@ def generate_task(upstream: Path, output: Path, *, daydream_wheel: Path | None =
     return destination
 
 
+def generate_task(upstream: Path, output: Path, *, daydream_wheel: Path | None = None) -> Path:
+    """Preserve the pinned single Laravel Oracle/integration fixture."""
+    records = [record for record in load_records(upstream) if record['githubPrUrl'] == PR_URL]
+    if len(records) != 1 or records[0]['source_commit'] != BASE or records[0]['target_commit'] != HEAD:
+        raise ValueError('Expected exactly the pinned Laravel review case')
+    output = Path(output).resolve()
+    output.mkdir(parents=True, exist_ok=True)
+    return write_task(records[0], output, daydream_wheel)
+
+
+def generate_catalog(upstream: Path, output: Path, *, daydream_wheel: Path | None = None,
+                     task_names: list[str] | None = None) -> list[Path]:
+    """Generate every selected case and retain explicit revision/conversion failures."""
+    records = load_records(upstream)
+    total = len(records)
+    if task_names is not None:
+        unknown = set(task_names) - {task_name(record) for record in records}
+        if unknown:
+            raise ValueError(f'Unknown AACR task names: {sorted(unknown)}')
+        records = [record for record in records if task_name(record) in task_names]
+        if not records:
+            raise ValueError('Select at least one AACR task')
+    output = Path(output).resolve()
+    report_path = output / 'catalog.json'
+    for destination in [report_path, *(output / task_name(record) for record in records)]:
+        if destination.exists():
+            raise FileExistsError(f'Refusing to replace generated catalog assets: {destination}')
+    output.mkdir(parents=True, exist_ok=True)
+    report = dict(aacr_revision=AACR_REVISION, dataset_sha256=DATASET_SHA256,
+                  total_records=total, selected_records=len(records), generated_tasks=0,
+                  reference_findings=0, errors=0, cases=[])
+    tasks = []
+    for record in records:
+        instance = validated_instance(record)
+        case = dict(task_name=task_name(record), instance_id=instance.instance_id,
+                    pr_url=record['githubPrUrl'], language=record['project_main_language'],
+                    base_commit=instance.base_commit, head_commit=instance.head_commit,
+                    reference_findings=len(instance.reference_comments))
+        report['reference_findings'] += case['reference_findings']
+        try:
+            tasks.append(write_task(record, output, daydream_wheel))
+        except Exception as error:
+            case.update(status='error', error=f'{type(error).__name__}: {error}')
+            report['errors'] += 1
+        else:
+            case['status'] = 'generated'
+            report['generated_tasks'] += 1
+        report['cases'].append(case)
+        report_path.write_text(json.dumps(report, indent=2) + '\n')
+        print(f"{case['task_name']}: {case['status']}", flush=True)
+    if report['errors']:
+        raise ValueError(f"{report['errors']} of {len(records)} AACR cases failed; see {report_path}")
+    return tasks
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--upstream', required=True, type=Path, help='Clean checkout of the pinned Alibaba AACR source')
     parser.add_argument('--output', type=Path, default=Path('artifacts/aacr/tasks'))
-    parser.add_argument('--daydream-wheel', type=Path, help='Use the pinned Daydream baseline instead of Oracle')
+    parser.add_argument('--daydream-wheel', type=Path, help='Configure every generated task for the pinned Daydream baseline')
+    parser.add_argument('--task', action='append', dest='task_names', help='Exact case to convert; repeat to select several')
+    parser.add_argument('--oracle', action='store_true', help='Generate only the pinned Laravel Oracle fixture')
     arguments = parser.parse_args()
-    print(generate_task(arguments.upstream, arguments.output, daydream_wheel=arguments.daydream_wheel))
+    if arguments.oracle:
+        if arguments.task_names or arguments.daydream_wheel:
+            parser.error('--oracle cannot be combined with --task or --daydream-wheel')
+        print(generate_task(arguments.upstream, arguments.output))
+    else:
+        generate_catalog(arguments.upstream, arguments.output, daydream_wheel=arguments.daydream_wheel,
+                         task_names=arguments.task_names)
+        print(arguments.output / 'catalog.json')
 
 
 if __name__ == '__main__':

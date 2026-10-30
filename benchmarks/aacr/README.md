@@ -1,9 +1,10 @@
 # AACR
 
-One pinned review case, Laravel framework PR #56591, supports an Oracle
+The converter supports the full pinned positive AACR catalog. Laravel framework PR #56591 supports an Oracle
 verification fixture ([#2](https://github.com/existential-birds/code-review-benchmarks/issues/2))
 and a complete Daydream review ([#3](https://github.com/existential-birds/code-review-benchmarks/issues/3)).
-The parent issue's pilot and full baseline remain separate work.
+The ten-case pilot is tracked in [#4](https://github.com/existential-birds/code-review-benchmarks/issues/4);
+full baseline execution remains separate work.
 
 - Use `.cache/harbor-6099b8c-env/bin/harbor`, backed by checkout revision
   `6099b8cf2bfbbb3e7ff1eb2163bfc4524dbd9ba5` (Harbor 0.24.0). PATH Harbor and
@@ -22,6 +23,9 @@ Accepted Oracle run: `jobs/aacr-oracle-final`, trial
 `laravel-framework-56591__UypUvTg`: 1/1 completed, zero errors; precision, recall
 and balanced score all 1.0. `jobs/aacr-oracle` retains the earlier temperature
 failure; use a fresh named job when rerunning.
+Generate this fixture with `python -m benchmarks.aacr.convert --oracle
+--upstream <pinned-source> --output <fresh-oracle-catalog>`. Other review cases
+do not receive the Laravel-specific Oracle solution.
 
 ## Daydream
 
@@ -97,6 +101,7 @@ PY
 .venv/bin/python -m benchmarks.aacr.convert \
   --upstream /path/to/clean/pinned/aacr-bench \
   --output <fresh-task-catalog> \
+  --task laravel-framework-56591 \
   --daydream-wheel .cache/daydream-5bae1ac0-issue9-wheel/daydream-0.30.0-py3-none-any.whl
 .cache/harbor-6099b8c-env/bin/harbor lint <fresh-task-catalog>/laravel-framework-56591 --json
 .cache/harbor-6099b8c-env/bin/harbor run -c experiments/aacr-daydream.yaml \
@@ -171,7 +176,8 @@ requiring custom code or a change to ADR 0001.
 
 Daydream uses packaged default review settings, precision mode off, empty file
 configuration, and isolated execution inputs. It applies no fixes, publication,
-or training capture. The separate verifier requires successful matching process
+or training. The Daydream experiment configurations enable local native JSONL
+capture for inspection. The separate verifier requires successful matching process
 receipts, native complete terminal coverage, unchanged base/head/full-patch
 identity, and finalized findings hashes before scoring. Incomplete or stale
 output cannot publish rewards; complete empty reviews remain valid. Unknown-line
@@ -200,15 +206,182 @@ These historical jobs used the earlier wheel. The lock-removal regression
 uses deterministic child processes and synthetic credential rotation; it does
 not prove live OAuth refresh or a new live reviewer/judge run.
 
+Conversion and its behavioral fixtures require Git and Git LFS on the host
+(`git lfs version`). Generated reviewer images install native LFS filters so
+materialized files remain clean against their pinned pointer index.
 Run deterministic checks with `.venv/bin/python -m pytest tests` and
 `node --test tests/pi_judge.test.mjs`. Daydream adapter and completion tests need
 the pinned native runtime; inference doubles are confined to tests.
 
+## Pilot
+
+Observed execution, catalog availability and validation limits are recorded in
+[the pilot validation report](../../docs/aacr-pilot-validation.md).
+
+Use the pinned wheel and separate accepted credential stores described above.
+Install and verify the host package before conversion, then generate a fresh
+catalog. The default input has 196 review cases and 1,506 reference findings:
+
+```sh
+.venv/bin/python -m benchmarks.aacr.convert \
+  --upstream .cache/aacr-issue3-final-source \
+  --output artifacts/aacr/issue4-tasks \
+  --daydream-wheel .cache/daydream-5bae1ac0-issue9-wheel/daydream-0.30.0-py3-none-any.whl
+```
+
+The converter validates the source revision/checksum, schema and unique task and
+instance identities before generating assets. Each task has an isolated clean Git
+checkout with both pinned commits and a merge base. Shallow native fetches avoid
+copying every repository's full history. `catalog.json` records every attempted
+case, reference count and conversion/revision error; any error makes conversion
+exit unsuccessfully. Historical tasks and catalog reports cannot be overwritten.
+Repeatable `--task <exact-name>` options prepare a smaller fresh catalog when
+needed; runtime selection stays in Harbor. Use `--oracle` to prepare only the
+pinned Laravel Oracle fixture. Its fixed finding is limited to that exact case;
+Daydream tasks contain no Oracle solution.
+
+The pilot overlay uses `artifacts/aacr/issue4-pilot-tasks`. Generate another fresh
+catalog there with the same command and source/wheel pins, or point the overlay
+at the full catalog above. For focused operational validation, `--task` can
+materialize the selected cases plus an excluded control case while full-catalog
+conversion continues separately. Harbor's explicit ten-name selection still
+determines the pilot trials; retain both catalog reports.
+
+`experiments/aacr-baseline.yaml` supplies shared reviewer, verifier, environment,
+metric and zero-retry settings without a task source. The pilot overlay contributes
+only a dataset and ten exact task names, one per available language. Run from the
+repository root so the metric path resolves:
+
+The proposed Node.js PR #56185 has an unavailable pinned head
+`b2255442712cb6db83d112deb6ba61197d06a5f3`. The selected JavaScript case is
+Checkmate PR #1897 instead; the ten selected cases contain 52 reference findings.
+
+```sh
+.cache/harbor-6099b8c-env/bin/harbor run \
+  -c experiments/aacr-baseline.yaml -c experiments/aacr-pilot.yaml --print-config
+.cache/harbor-6099b8c-env/bin/harbor run \
+  -c experiments/aacr-baseline.yaml -c experiments/aacr-pilot.yaml --dry-run
+.cache/harbor-6099b8c-env/bin/harbor run \
+  -c experiments/aacr-baseline.yaml -c experiments/aacr-pilot.yaml \
+  -k 1 -n 1 -r 0 --job-name <fresh-pilot-name>
+
+# Separate independent-attempt check, excluded from the pilot aggregate.
+.cache/harbor-6099b8c-env/bin/harbor run -c experiments/aacr-baseline.yaml \
+  -p artifacts/aacr/issue4-tasks -i lvgl-lvgl-8129 \
+  -k 2 -n 1 -r 0 --job-name <fresh-attempt-check-name>
+
+# Separate concurrent subset, after validating the serial pilot.
+.cache/harbor-6099b8c-env/bin/harbor run -c experiments/aacr-baseline.yaml \
+  -p artifacts/aacr/issue4-pilot-tasks \
+  -i bluewave-labs-checkmate-1897 -i cline-cline-2347 \
+  -k 1 -n 2 -r 0 --job-name <fresh-concurrency-check-name>
+.cache/harbor-6099b8c-env/bin/harbor view jobs
+```
+
+Repeated `-c` appends agents, tasks, datasets and metrics. Compose the shared
+settings with one selection overlay; do not compose the earlier single-task
+`aacr-daydream.yaml` with the pilot. For another fresh catalog, update the
+overlay's native `datasets[].path`. Rehydrate printed JSON with the pinned
+`JobConfig` because defaults are omitted. Verify one reviewer, exactly ten tasks,
+`n_attempts=1`, `n_concurrent_trials=1`, `retry.max_retries=0`, one metric and
+the configured `DaydreamVerifier`. Check the resolved plan for every operational
+job. CLI `-i` selection requires an explicit `-p`. Fresh selected jobs preserve
+earlier failures; avoid error-filtered resume or reopening incomplete jobs.
+
+Task deadlines are 5,400 seconds for review, 300 seconds for verification, and
+1,200 seconds for each environment build. Configure native
+`agents[].override_timeout_sec` or `verifier.override_timeout_sec` in the shared
+job settings, or use native `--agent-timeout-multiplier` /
+`--verifier-timeout-multiplier` flags. Inspect the resolved settings before use.
+Cancellation and timeout must remain errors with retained evidence. Completed
+empty output is scoreable only after successful host receipt, finalized native
+terminal state and unchanged-comparison admission.
+
+The configured `uv-script` metric pools `expected_notes`, `generated_notes`,
+`matched_generated_notes` and `matched_file_semantic_notes`, then invokes unchanged
+`upstream/evaluate.py::_compute_summary`. It preserves AACR rounding and the
+distinct generated-hit and reference-coverage numerators. Native results expose
+raw counts, `file_semantic_match_rate` (precision), `file_semantic_recall_rate`
+(recall), and `balanced_score`. These are pooled ratios, not means of per-case
+ratios. `uv` uses the script's pinned `typing-extensions==4.16.0` dependency; the
+real Harbor subprocess boundary is tested.
+
+### Native JSONL capture
+
+The shared baseline and single-case Daydream experiment set native agent kwarg
+`capture_data: true`. The adapter passes `--capture-data` to the baked entrypoint,
+which enables Daydream's own `RunConfig.dataset_capture` and fixes the local
+store at `/logs/agent/dataset`. Native Harbor log mounting retains its immutable
+records under `jobs/<job>/<trial>/agent/dataset/runs/<hash>.jsonl`.
+Each native `daydream.run.v1` record includes the input diff and comparison,
+joined root/specialist trajectories, raw reviewer claims, merged findings,
+adjudication, terminal coverage and provenance. Capture does not initiate training.
+The isolated runtime supplies no Hub destination or upload credentials.
+
+**Generate fresh task assets after this adapter change** and point the native
+dataset selection at that new catalog. Historical task entrypoints do not accept
+the capture flag. To run an older catalog, pass native
+`--agent-kwarg capture_data=false`. Preserve earlier catalogs and jobs; the
+ten-case pilot was capture-disabled and retains ATIF JSON trajectories, with
+no retrospectively reconstructed native JSONL.
+
+For example, prepare and validate one fresh selected case:
+
+```sh
+.venv/bin/python -m benchmarks.aacr.convert \
+  --upstream .cache/aacr-issue3-final-source \
+  --output <fresh-capture-catalog> --task cline-cline-2347 \
+  --daydream-wheel .cache/daydream-5bae1ac0-issue9-wheel/daydream-0.30.0-py3-none-any.whl
+.cache/harbor-6099b8c-env/bin/harbor run -c experiments/aacr-baseline.yaml \
+  -p <fresh-capture-catalog> -i cline-cline-2347 \
+  -k 1 -n 1 -r 0 --job-name <fresh-capture-job> --dry-run
+.cache/harbor-6099b8c-env/bin/harbor run -c experiments/aacr-baseline.yaml \
+  -p <fresh-capture-catalog> -i cline-cline-2347 \
+  -k 1 -n 1 -r 0 --job-name <fresh-capture-job>
+```
+
+Native capture reports persistence failures separately; enabling the flag alone
+does not prove a record was emitted. Inspect the trial's JSONL and native logs.
+The captured record's intrinsic Daydream scoring is separate from AACR agreement;
+the independent judge runs afterward and retains its rewards and full rationales
+under `verifier/`. Benchmark reference findings stay outside reviewer inputs and
+capture. Use the trial identity to inspect these retained sources together.
+
+Harbor-first capture inspection covered `agents/base.py::parse_options`,
+`agents/options.py::InstalledAgentOptions`, `job_plan.py`, native log mounting
+and `trial/artifact_handler.py`. Harbor already validates agent kwargs and retains
+per-trial logs. Pinned Daydream's `commands/common.py`, `runner.run`,
+`run_artifacts._capture_dataset`, `dataset_capture.capture_run_record`,
+`dataset.LocalRecordStore` and `hub.resolve_hub_repo` own JSONL construction,
+validation and persistence. The only new integration is flag/path propagation;
+there is no custom JSONL collector or shared dataset writer.
+
+Eligibility means a non-null scoring reward with valid integer counts. Nulls
+represent missing scores; completed empty reviews contribute their references
+and zero generated findings. Malformed counts fail aggregation. Harbor does not
+pass lifecycle exceptions to the metric, and can supply a reward alongside a
+later cleanup error. Metric instance counters therefore describe scoring inputs.
+Inspect native completion and errors separately; pilot acceptance requires ten
+complete scored trials and zero errors. Reconcile every finding, judge rationale,
+analyzed comparison and native phase record, including conditional exploration
+and adjudication. Keep attempt and concurrency jobs separate from pilot scores.
+An unchanged credential store or deterministic rotation test does not establish
+live OAuth refresh; report what was observed.
+
+Harbor-first inspection at `6099b8c` covered `models/job/config.py`, `job_plan.py`,
+`cli/config_sources.py`, `cli/jobs.py`, `trial/trial.py`, `trial/single_step.py`,
+`job.py`, `metrics/{base,sum,uv_script,factory}.py`, dataset-metric/job-config docs,
+and native job-plan, configuration-composition, retry, verifier and
+separate-verifier tests. Harbor already owns selection, attempts, concurrency,
+timeouts, cancellation, retries, storage and metric execution. The remaining
+custom gaps are AACR record/context conversion and ratios derived from pooled
+count dimensions. No new execution layer is needed.
+
 ## Upstream
 
 The vendored evaluator comes from [Alibaba AACR-Bench](https://github.com/alibaba/aacr-bench)
-and shares the root [Apache-2.0 license](../../LICENSE). Generated Laravel
-repository context retains its own license.
+and shares the root [Apache-2.0 license](../../LICENSE). Generated repository
+contexts retain their own licenses.
 
 The vendored converter has one local correction: an existing raw-data file whose
 SHA-256 differs from its metadata is rejected when no download URL is available.

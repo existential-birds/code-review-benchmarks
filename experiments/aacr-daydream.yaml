@@ -9,6 +9,7 @@ agents:
   - import_path: benchmarks.aacr.daydream_agent:DaydreamAgent
     kwargs:
       version: 0.30.0
+      capture_data: true
 verifier:
   import_path: benchmarks.aacr.daydream_verifier:DaydreamVerifier
 environment:

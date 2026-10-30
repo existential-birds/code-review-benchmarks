@@ -9,12 +9,20 @@ import uuid
 
 from harbor.agents.capabilities import AgentCapabilities
 from harbor.agents.installed.base import BaseInstalledAgent
+from harbor.agents.options import InstalledAgentOptions
+
+
+class DaydreamOptions(InstalledAgentOptions):
+    """Native Harbor option for retaining Daydream's local capture records."""
+
+    capture_data: bool = False
 
 
 class DaydreamAgent(BaseInstalledAgent):
     """Use the baked native runtime; Harbor owns trial execution and storage."""
 
     capabilities = AgentCapabilities(atif=True)
+    options_model = DaydreamOptions
 
     @staticmethod
     def name() -> str:
@@ -57,6 +65,7 @@ class DaydreamAgent(BaseInstalledAgent):
             await environment.upload_file(receipt_path, '/logs/artifacts/daydream/host-receipt.json')
             result = await environment.exec(
                 'python -I -m benchmarks.aacr.daydream_entrypoint --invocation ' + invocation
+                + (' --capture-data' if self.options.capture_data else '')
                 + ' > /logs/agent/daydream.stdout.log 2> /logs/agent/daydream.stderr.log',
                 cwd='/workspace/repo')
             receipt['return_code'] = result.return_code

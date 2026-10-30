@@ -4,9 +4,14 @@ Harbor-based evaluation suite for measuring the effects of changes to
 [Daydream](https://github.com/existential-birds/daydream). Other code-review
 agents can provide comparison points.
 
-The first integration includes a single-case [AACR Oracle verification fixture](benchmarks/aacr/README.md)
-and a [complete Daydream review trial](benchmarks/aacr/README.md#daydream), using native Harbor
-execution and a separate Pi Codex subscription judge.
+The integration includes an [AACR Oracle verification fixture](benchmarks/aacr/README.md),
+a [complete Daydream review trial](benchmarks/aacr/README.md#daydream), and
+[native pilot configuration and pooled scoring](benchmarks/aacr/README.md#pilot).
+Harbor owns execution and a separate Pi Codex subscription judge scores findings.
+See the [pilot validation evidence](docs/aacr-pilot-validation.md) for observed
+execution, catalog availability and operational limits.
+Fresh Daydream runs also retain [native local JSONL capture](benchmarks/aacr/README.md#native-jsonl-capture)
+for trajectory and finding inspection.
 
 ## Structure
 

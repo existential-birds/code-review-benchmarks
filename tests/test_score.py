@@ -415,7 +415,8 @@ def test_daydream_missing_native_host_artifact_cannot_publish_reward(tmp_path):
 
 
 @pytest.mark.parametrize('outcome', [
-    'cancelled', 'failed', 'missing', 'shared_agent', 'shared_artifacts', 'wrong_image', 'empty', 'findings',
+    'cancelled', 'timeout', 'failed', 'missing', 'shared_agent', 'shared_artifacts', 'wrong_image',
+    'judge_failure', 'stale', 'missing_output', 'empty', 'findings',
 ])
 def test_native_verifier_keeps_host_completion_authoritative_after_sandbox_forgery(tmp_path, outcome):
     """Agent.run -> configured native verifier -> real scorer, with hostile logs."""
@@ -430,7 +431,7 @@ def test_native_verifier_keeps_host_completion_authoritative_after_sandbox_forge
     from harbor.models.trial.paths import TrialPaths
     from harbor.verifier.factory import VerifierFactory
 
-    findings = [finding()] if outcome == 'findings' else []
+    findings = [finding()] if outcome in {'findings', 'judge_failure'} else []
     paths, proof, expected, _ = daydream_artifacts(tmp_path, findings)
     trial = TrialPaths(tmp_path / 'trial')
     trial.mkdir()
@@ -452,14 +453,20 @@ def test_native_verifier_keeps_host_completion_authoritative_after_sandbox_forge
             if '-m benchmarks.aacr.daydream_entrypoint' in command:
                 if outcome == 'cancelled':
                     raise asyncio.CancelledError
+                if outcome == 'timeout':
+                    await asyncio.Event().wait()
                 return SimpleNamespace(return_code=1 if outcome == 'failed' else 0)
             return SimpleNamespace(return_code=0)
 
     agent = DaydreamAgent(logs_dir=trial.agent_dir)
     async def review():
-        await agent.run('review', ReviewerEnvironment(), AgentContext())
+        await asyncio.wait_for(agent.run('review', ReviewerEnvironment(), AgentContext()),
+                               timeout=0.01 if outcome == 'timeout' else 5)
     if outcome == 'cancelled':
         with pytest.raises(asyncio.CancelledError):
+            asyncio.run(review())
+    elif outcome == 'timeout':
+        with pytest.raises(TimeoutError):
             asyncio.run(review())
     elif outcome == 'failed':
         with pytest.raises(RuntimeError):
@@ -475,7 +482,11 @@ def test_native_verifier_keeps_host_completion_authoritative_after_sandbox_forge
         path.write_text(json.dumps(forged))
     execution = json.loads((proof / 'execution.json').read_text())
     execution['invocation_id'] = invocation
+    if outcome == 'stale':
+        execution['invocation_id'] = str(uuid.uuid4())
     (proof / 'execution.json').write_text(json.dumps(execution))
+    if outcome == 'missing_output':
+        paths[1].unlink()
     trial.reward_json_path.write_text('{"balanced_score": 1.0}')
     trial.reward_text_path.write_text('1')
     if outcome == 'missing':
@@ -504,18 +515,36 @@ def test_native_verifier_keeps_host_completion_authoritative_after_sandbox_forge
                 trial.reward_json_path.unlink(missing_ok=True)
                 trial.reward_text_path.unlink(missing_ok=True)
             elif '/tests/test.sh' in command and not command.startswith('chmod'):
-                await score.score_case(*paths, client=JudgeTransport('One agreement\n[1]'),
-                    daydream_proof=proof, comparison_path=expected, host_receipt_path=self.receipt)
+                response = RuntimeError('judge authentication failed') if outcome == 'judge_failure' else 'One agreement\n[1]'
+                try:
+                    await score.score_case(*paths, client=JudgeTransport(response),
+                        daydream_proof=proof, comparison_path=expected, host_receipt_path=self.receipt)
+                except score.VerificationError as error:
+                    # Model the real test.sh process boundary, leaving the scorer's
+                    # diagnostics for the native verifier to retain and inspect.
+                    return SimpleNamespace(return_code=1, stdout='', stderr=str(error))
             return SimpleNamespace(return_code=0, stdout='', stderr='')
 
     config = yaml.safe_load((Path(__file__).resolve().parents[1] / 'experiments/aacr-daydream.yaml').read_text())
     verifier = VerifierFactory.create_verifier_from_config(VerifierConfig(**config.get('verifier', {})),
         task=task, trial_paths=trial, environment=VerifierEnvironment())
-    if outcome in {'cancelled', 'failed', 'missing', 'shared_agent', 'shared_artifacts', 'wrong_image'}:
+    failures = {'cancelled', 'timeout', 'failed', 'missing', 'shared_agent', 'shared_artifacts',
+                'wrong_image', 'judge_failure', 'stale', 'missing_output'}
+    if outcome in failures:
         with pytest.raises((RuntimeError, FileNotFoundError)):
             asyncio.run(verifier.verify())
         assert not trial.reward_json_path.exists()
         assert not trial.reward_text_path.exists()
+        assert (proof / 'execution.json').is_file()
+        if outcome == 'timeout':
+            assert json.loads((trial.trial_dir / 'daydream-receipt.json').read_text())['status'] == 'cancelled'
+        if outcome in {'judge_failure', 'stale', 'missing_output'}:
+            diagnostic = json.loads((trial.verifier_dir / 'diagnostic.json').read_text())
+            assert diagnostic['status'] == 'failed'
+            assert diagnostic['error_type']
+        if outcome == 'judge_failure':
+            assert diagnostic['failures']
+            assert list((trial.verifier_dir / 'upstream').glob('metrics_*.json'))
     else:
         result = asyncio.run(verifier.verify())
         assert result.rewards['balanced_score'] == (0.667 if findings else 0.0)
