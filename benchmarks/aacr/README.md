@@ -121,6 +121,8 @@ review case and reviewer; it is separate from automatic retries. Set concurrency
 with native `-n` as needed. Pair CLI selection (`-i`) with the catalog (`-p`):
 `-i` alone does not filter a dataset inherited only from configuration. For the
 Oracle fixture use `experiments/aacr-oracle.yaml` and its fresh task catalog.
+The default `tasks` path in `experiments/aacr-daydream.yaml` is a retained catalog
+that predates capture, so select a fresh catalog with `-p` as above.
 Use `--print-config` and `--dry-run` to inspect the selected plan before execution.
 Printed JSON omits default values; rehydrate it with the pinned Harbor's
 `harbor.models.job.config.JobConfig` to check that `retry.max_retries == 0` and
@@ -220,12 +222,13 @@ Observed execution, catalog availability and validation limits are recorded in
 
 Use the pinned wheel and separate accepted credential stores described above.
 Install and verify the host package before conversion, then generate a fresh
-catalog. The default input has 196 review cases and 1,506 reference findings:
+catalog in a new directory. The default input has 196 review cases and 1,506
+reference findings:
 
 ```sh
 .venv/bin/python -m benchmarks.aacr.convert \
   --upstream .cache/aacr-issue3-final-source \
-  --output artifacts/aacr/issue4-tasks \
+  --output <fresh-catalog> \
   --daydream-wheel .cache/daydream-5bae1ac0-issue9-wheel/daydream-0.30.0-py3-none-any.whl
 ```
 
@@ -240,48 +243,59 @@ needed; runtime selection stays in Harbor. Use `--oracle` to prepare only the
 pinned Laravel Oracle fixture. Its fixed finding is limited to that exact case;
 Daydream tasks contain no Oracle solution.
 
-The pilot overlay uses `artifacts/aacr/issue4-pilot-tasks`. Generate another fresh
-catalog there with the same command and source/wheel pins, or point the overlay
-at the full catalog above. For focused operational validation, `--task` can
-materialize the selected cases plus an excluded control case while full-catalog
-conversion continues separately. Harbor's explicit ten-name selection still
-determines the pilot trials; retain both catalog reports.
+The pilot overlay uses the retained `artifacts/aacr/issue4-pilot-tasks`. That
+catalog, `issue4-tasks`, `issue4-attempt-tasks` and `daydream-tasks` predate
+capture: their baked entrypoints reject `--capture-data`, which the shared
+configuration enables, so the reviewer stage fails after the image build. The
+commands below reproduce the accepted capture-disabled runs against those
+retained catalogs by passing `--agent-kwarg capture_data=false`.
+
+For a fresh capture-enabled run, generate a new catalog as above, change the
+overlay's `datasets[].path` or the `-p` value to it, and drop the override. For
+focused operational validation, `--task` can materialize the selected cases plus
+an excluded control case while full-catalog conversion continues separately.
+Harbor's explicit ten-name selection still determines the pilot trials; retain
+both catalog reports.
+
+The proposed Node.js PR #56185 has an unavailable pinned head
+`b2255442712cb6db83d112deb6ba61197d06a5f3`. The selected JavaScript case is
+Checkmate PR #1897 instead; the ten selected cases contain 52 reference findings.
 
 `experiments/aacr-baseline.yaml` supplies shared reviewer, verifier, environment,
 metric and zero-retry settings without a task source. The pilot overlay contributes
 only a dataset and ten exact task names, one per available language. Run from the
 repository root so the metric path resolves:
 
-The proposed Node.js PR #56185 has an unavailable pinned head
-`b2255442712cb6db83d112deb6ba61197d06a5f3`. The selected JavaScript case is
-Checkmate PR #1897 instead; the ten selected cases contain 52 reference findings.
-
 ```sh
 .cache/harbor-6099b8c-env/bin/harbor run \
-  -c experiments/aacr-baseline.yaml -c experiments/aacr-pilot.yaml --print-config
-.cache/harbor-6099b8c-env/bin/harbor run \
-  -c experiments/aacr-baseline.yaml -c experiments/aacr-pilot.yaml --dry-run
+  -c experiments/aacr-baseline.yaml -c experiments/aacr-pilot.yaml \
+  --agent-kwarg capture_data=false --print-config
 .cache/harbor-6099b8c-env/bin/harbor run \
   -c experiments/aacr-baseline.yaml -c experiments/aacr-pilot.yaml \
+  --agent-kwarg capture_data=false --dry-run
+.cache/harbor-6099b8c-env/bin/harbor run \
+  -c experiments/aacr-baseline.yaml -c experiments/aacr-pilot.yaml \
+  --agent-kwarg capture_data=false \
   -k 1 -n 1 -r 0 --job-name <fresh-pilot-name>
 
 # Separate independent-attempt check, excluded from the pilot aggregate.
 .cache/harbor-6099b8c-env/bin/harbor run -c experiments/aacr-baseline.yaml \
   -p artifacts/aacr/issue4-tasks -i lvgl-lvgl-8129 \
+  --agent-kwarg capture_data=false \
   -k 2 -n 1 -r 0 --job-name <fresh-attempt-check-name>
 
 # Separate concurrent subset, after validating the serial pilot.
 .cache/harbor-6099b8c-env/bin/harbor run -c experiments/aacr-baseline.yaml \
   -p artifacts/aacr/issue4-pilot-tasks \
   -i bluewave-labs-checkmate-1897 -i cline-cline-2347 \
+  --agent-kwarg capture_data=false \
   -k 1 -n 2 -r 0 --job-name <fresh-concurrency-check-name>
 .cache/harbor-6099b8c-env/bin/harbor view jobs
 ```
 
 Repeated `-c` appends agents, tasks, datasets and metrics. Compose the shared
 settings with one selection overlay; do not compose the earlier single-task
-`aacr-daydream.yaml` with the pilot. For another fresh catalog, update the
-overlay's native `datasets[].path`. Rehydrate printed JSON with the pinned
+`aacr-daydream.yaml` with the pilot. Rehydrate printed JSON with the pinned
 `JobConfig` because defaults are omitted. Verify one reviewer, exactly ten tasks,
 `n_attempts=1`, `n_concurrent_trials=1`, `retry.max_retries=0`, one metric and
 the configured `DaydreamVerifier`. Check the resolved plan for every operational

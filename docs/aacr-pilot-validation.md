@@ -5,14 +5,17 @@ user-requested local JSONL capture change is documented in the benchmark README;
 it applies to newly generated task assets and fresh jobs. Existing pilot results
 and their native ATIF trajectories remain intact.
 
-Validation of [issue #4](https://github.com/existential-birds/code-review-benchmarks/issues/4)
-on the uncommitted worktree based on
-`1dd5a45b1c3f6855ddbb3bac71ce27f2c4cf3618`.
+Validation of [issue #4](https://github.com/existential-birds/code-review-benchmarks/issues/4).
+The pilot, attempt and concurrency jobs ran from a worktree based on
+`1dd5a45b1c3f6855ddbb3bac71ce27f2c4cf3618`, before that work was committed as
+`a83796c9530882bc87b8328369fc9e11cbaee0bb`. Their frozen scorer code equals the
+final source; the frozen reviewer entrypoint differs from it only by capture
+propagation. The credential refresh job ran from a catalog generated at
+`8030e2a54be9f5b24e6f7b94914d85114ffe8e6f`.
 The serial pilot passed: **10/10 completed and scored, zero errors and retries**.
-The independent-attempt and concurrency checks passed. Full conversion accounted
-for all 196 cases; all 185 generated tasks passed the final catalog audit.
-Eleven pinned heads are unavailable. No source commit or publication is part of
-this validation.
+The independent-attempt, concurrency and live credential refresh checks passed.
+Full conversion accounted for all 196 cases; all 185 generated tasks passed the
+final catalog audit. Eleven pinned heads are unavailable.
 
 ## Inputs and implementation
 
@@ -134,6 +137,11 @@ findings cover one reference and count as only one novel generated hit. These
 live outcomes preserve the two distinct matching numerators. Five complete empty
 reviews contribute their reference denominators and zero findings.
 
+Checkmate #1897 is the multi-file adjudication case. Its review covered three
+changed files, its one retained finding links the workflow defaults, the
+translation script's output and the application's English fallback, and its native
+arbiter and merge phases both completed as non-noop.
+
 Every trial's protected receipt, request UUID, completed terminal state, exact
 base/head/merge-base/patch hash, finalized findings hash, and raw comment flags
 reconcile with the native reward and aggregate. All eight judge calls completed
@@ -219,11 +227,68 @@ remain unknown.
 Native store validation passed before and after the concurrent job. Metadata-only
 observations retained hashes, modification times, the Codex `last_refresh` value
 and Pi expiry. Neither canonical store changed during this check; the reviewer
-refresh marker remained 2026-10-22 and Pi expiry remained in the future.
-**Live OAuth refresh/persistence was not exercised or proven.** Issue #9's
-deterministic overlap/rotation tests remain synthetic persistence evidence.
+refresh marker remained 2026-10-22 and Pi expiry remained in the future, so this
+job did not exercise live OAuth refresh or persistence.
 Native authentication owns refresh and locking; no credentials were copied,
 expiry was not forced, and no custom refresh lock, semaphore or retry was added.
+
+## Live credential refresh
+
+`jobs/aacr-issue4-refresh-20261101-a` proves live refresh and persistence for
+both canonical stores under concurrency. It was the first credentialed use of the
+stores after Pi's expiry passed, from the fresh capture-enabled catalog
+`artifacts/aacr/issue4-refresh-tasks`, selecting Checkmate #1897 and Cline #2347
+with `k=1`, concurrency 2 and automatic retries 0. Native print-config/JobConfig
+resolution and dry run passed. Both trials completed and scored: **2/2, zero
+errors, retries or cancellations**.
+
+Metadata snapshots, taken 19 seconds before the live job and 12 seconds after it finished:
+
+| Store | SHA-256 before | SHA-256 after | Refresh metadata before | After |
+|---|---|---|---|---|
+| Reviewer (Codex) | `ce8d7b78…08ec3` | `ac4a8ee1…ee473` | `last_refresh` 2026-10-22 09:00:05 | 2026-11-01 14:57:45 |
+| Judge (Pi) | `e9617d80…404ced` | `46796c15…0a3` | `expires` 2026-11-01 09:01:14 | 2026-11-11 15:06:08 |
+
+The reviewer store was rewritten at 14:57:45, 2.2 seconds after both reviewer
+executions started together. It was not rewritten again. The judge store was
+rewritten at 15:06:09, about nine seconds after both verifier containers started, while
+the judge calls ran. Native `validate_credential_stores` passed afterward.
+
+| Trial | Reviewer started (UTC) | Finished (UTC) | Verifier started | Finished |
+|---|---|---|---|---|
+| Checkmate `8Dyi6bu` | 14:57:42.915271 | 15:01:48.756687 | 15:02:06.224670 | 15:06:26.837383 |
+| Cline `c48RBv2` | 14:57:42.920828 | 15:03:36.851179 | 15:04:00.084729 | 15:06:32.945191 |
+
+Reviewer executions overlapped by **245.835859 seconds**. Native verifier stages
+overlapped too. Docker snapshots show each reviewer mounting only the Codex store
+plus its own agent, artifact and verifier logs, and each verifier container
+mounting only the Pi store and its own verifier logs. All six judge calls
+completed through Pi OAuth (`openai-codex/gpt-6.1-sol`, HTTP 200). No job file
+contains an authentication failure or `refresh_token_reused`.
+
+All seven findings and six full judge responses were inspected. Checkmate's
+language-default finding matched one reference; its token-permission finding did
+not. Cline's memory-allocation finding covered two references. Its lossy-encoding,
+normalization and binary-validation findings did not match, and its lockfile
+finding had no annotated path, so it had no judge call. Counts are 18 references,
+seven findings, two matched findings and three covered references: precision .286,
+recall .167, balanced .211. These counts are excluded from the ten-case aggregate.
+Both trials emitted one native JSONL record that `LocalRecordStore` reads.
+
+Reviewer execution was 243.534 and 350.996 seconds; combined usage was 1,885,684
+input tokens (1,515,520 cached), 25,655 output, API-equivalent estimate $1.5131892.
+Judge calls used 3,405 input and 397 output tokens over 38.634024 seconds,
+API-equivalent estimate $0.01078. Subscription charges remain unknown.
+
+Observed: the hash, modification-time and refresh metadata changes above; their
+timing inside the reviewer and judge stages; successful inference after them; and
+post-job validation. Inferred, not observed: the exact trigger and writer of each
+refresh. The reviewer token was deliberately not decoded, so its expiry is unknown;
+pinned Codex refreshes on token expiry or a `last_refresh` older than eight days.
+Metadata records only the final write, so it cannot show how many processes
+attempted refresh or whether attempts overlapped. No forced rotation or induced
+refresh failure was tested; Issue #9's deterministic overlap and rotation tests
+remain the synthetic evidence for those paths.
 
 ## Error behavior and checks
 
@@ -236,8 +301,8 @@ stale rewards; retained proof and scorer diagnostics permit inspection.
 Complete empty output remains valid. These are focused deterministic integration
 checks; no live account failure or forced OAuth rotation is induced.
 
-Final source checks: **161 Python tests passed**, **6 Node judge tests passed**.
-The pinned Harbor's focused plan/config/retry/verifier/separate-verifier checks:
+Python and Node judge test results for the final revision are recorded on the
+pull request. The pinned Harbor's focused plan/config/retry/verifier/separate-verifier checks:
 **256 passed**, with 34 upstream mock/deprecation/cache warnings.
 The actual UvScript subprocess passes from an unrelated working directory using
 its pinned dependency. Unequal denominators pool to precision .2, recall .3 and
@@ -268,6 +333,10 @@ Local supporting audit files under `.cache/issue4/` include
 `credential-observation-before.json`, `credential-observation-after-attempts.json`,
 `credential-observation-before-concurrent.json`,
 `credential-observation-after-concurrent.json`,
+`credential-observation-before-refresh.json`,
+`credential-observation-after-refresh.json`, `refresh-print-config.json`,
+`refresh-dry-run.log`, `refresh-live.log`, `refresh-reconciliation.json`,
+`refresh-reviewer-mounts.json`, `refresh-verifier-mounts.json`,
 `python-tests-final.log`, `harbor-checks.log`, and `test-audit.md`.
 Catalog accounting is `artifacts/aacr/issue4-tasks/catalog.json`, with separate
 `full-catalog-validation.json`/`.md` and `full-catalog-lint.json` audits.
