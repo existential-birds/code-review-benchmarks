@@ -75,20 +75,22 @@ def finalized(case, items, *, complete=True):
         {'prompt_tokens': 120, 'cached_tokens': 70, 'completion_tokens': 11})
 
 
-def run_case(case):
+def run_case(case, **kwargs):
     return asyncio.run(entrypoint.review_once(repository=case.repo, inputs=case.inputs,
         artifacts=case.artifacts, agent_logs=case.logs, invocation_id=case.invocation,
-        credential_home=case.inputs / 'credential-store'))
+        credential_home=case.inputs / 'credential-store', **kwargs))
 
 
 @pytest.mark.parametrize('items', [[], [{'file': 'file.php', 'line': None,
     'description': 'A whole-file concern', 'rationale': 'Why it matters'}]])
-def test_completed_review_exports_only_finalized_items_and_isolated_defaults(review_case, monkeypatch, items):
+@pytest.mark.parametrize('capture_data', [False, True])
+def test_completed_review_exports_only_finalized_items_and_isolated_defaults(review_case, monkeypatch, items, capture_data):
     from daydream import runner
     case = review_case
     monkeypatch.setenv('DAYDREAM_REVIEW_PROFILE', '/missing/operator-profile')
     monkeypatch.setenv('DAYDREAM_FANOUT_CONCURRENCY', '1')
     monkeypatch.setenv('OPENAI_API_KEY', 'must-not-reach-native-transport')
+    monkeypatch.setenv('DAYDREAM_TRAJECTORY_HUB_REPO', 'must-not-publish/benchmark-data')
     calls = []
     async def inference(config, *, review_result_handler, execution):
         calls.append(config)
@@ -97,7 +99,12 @@ def test_completed_review_exports_only_finalized_items_and_isolated_defaults(rev
         assert config.model is None and config.reasoning_effort is None
         assert config.file_config.phases == {}
         assert config.review_profile.source_kind == 'default'
-        assert config.dataset_capture_disabled and not config.archive and not config.run_eval
+        assert config.dataset_capture is capture_data
+        assert config.dataset_capture_disabled is not capture_data
+        assert config.dataset_store_path == (case.logs / 'dataset' if capture_data else None)
+        assert config.trajectory_hub_repo is None
+        assert 'DAYDREAM_TRAJECTORY_HUB_REPO' not in os.environ
+        assert not config.archive and not config.run_eval
         assert not config.discover_github_provenance
         assert execution.backend.fanout_concurrency == 8
         assert 'OPENAI_API_KEY' not in execution.backend.child_environment()
@@ -111,7 +118,7 @@ def test_completed_review_exports_only_finalized_items_and_isolated_defaults(rev
         review_result_handler(finalized(case, items))
         return 0
     monkeypatch.setattr(runner, 'run', inference)
-    assert run_case(case) == 0
+    assert run_case(case, capture_data=capture_data) == 0
     assert len(calls) == 1
     findings = json.loads((case.artifacts / 'findings.json').read_text())['review_output']
     assert len(findings) == len(items)
@@ -125,6 +132,8 @@ def test_completed_review_exports_only_finalized_items_and_isolated_defaults(rev
     assert proof['usage']['prompt_tokens'] == 120
     assert proof['cost_interpretation'] == 'API-equivalent estimate when available; subscription charges unknown'
     assert proof['retained_findings'] == items
+    assert proof['resolved_configuration']['dataset_capture'] is capture_data
+    assert proof['resolved_configuration']['dataset_store_path'] == (str(case.logs / 'dataset') if capture_data else None)
     assert proof['findings_sha256'] == hashlib.sha256((case.artifacts / 'findings.json').read_bytes()).hexdigest()
     assert (case.logs / 'trajectory.json').exists()
 
@@ -216,8 +225,9 @@ def test_unsuccessful_invocation_retains_evidence_without_findings(review_case, 
     assert proof['usage'].get('prompt_tokens') == (None if failure == 'missing' else 120)
 
 
-@pytest.mark.parametrize('outcome', [0, 7, 'cancelled', 'cancelled_download', 'cancelled_receipt'])
-def test_installed_agent_requires_process_success_and_populates_usage(tmp_path, outcome):
+@pytest.mark.parametrize('outcome,capture_data', [(0, False), (0, True), (7, False),
+    ('cancelled', False), ('cancelled_download', False), ('cancelled_receipt', False)])
+def test_installed_agent_requires_process_success_and_populates_usage(tmp_path, outcome, capture_data):
     from benchmarks.aacr.daydream_agent import DaydreamAgent
     from harbor.models.agent.context import AgentContext
 
@@ -251,7 +261,7 @@ def test_installed_agent_requires_process_success_and_populates_usage(tmp_path, 
     environment = Environment()
     logs = tmp_path / 'agent'
     logs.mkdir()
-    agent = DaydreamAgent(logs_dir=logs)
+    agent = DaydreamAgent(logs_dir=logs, capture_data=capture_data)
     context = AgentContext()
     async def run():
         await agent.run('review the pinned comparison', environment, context)
@@ -264,6 +274,7 @@ def test_installed_agent_requires_process_success_and_populates_usage(tmp_path, 
     else:
         asyncio.run(run())
     assert len(environment.invocations) == 1
+    assert ('--capture-data' in environment.invocations[0]) is capture_data
     request = environment.uploads['/logs/artifacts/daydream/request.json']
     receipt = environment.uploads['/logs/artifacts/daydream/host-receipt.json']
     assert receipt['invocation_id'] == request['invocation_id']

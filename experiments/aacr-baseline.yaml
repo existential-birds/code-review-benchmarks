@@ -1,0 +1,22 @@
+# Shared native settings; supply exactly one dataset source in an overlay or -p.
+jobs_dir: jobs
+n_attempts: 1
+n_concurrent_trials: 1
+retry:
+  max_retries: 0
+agents:
+  - import_path: benchmarks.aacr.daydream_agent:DaydreamAgent
+    kwargs:
+      version: 0.30.0
+      capture_data: true
+verifier:
+  import_path: benchmarks.aacr.daydream_verifier:DaydreamVerifier
+environment:
+  type: docker
+  delete: true
+  kwargs:
+    auto_mounting: true
+metrics:
+  - type: uv-script
+    kwargs:
+      script_path: benchmarks/aacr/metric.py

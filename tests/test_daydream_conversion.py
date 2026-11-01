@@ -1,7 +1,9 @@
 """Generated Daydream task boundaries, using real task and Git assets."""
 import hashlib
 import json
+import os
 from pathlib import Path
+import shutil
 import subprocess
 import tomllib
 import zipfile
@@ -12,9 +14,21 @@ import yaml
 from benchmarks.aacr import convert
 
 
-def test_daydream_task_freezes_runtime_comparison_and_keeps_oracle_separate(tmp_path, monkeypatch):
+@pytest.fixture
+def pinned_wheel(tmp_path, monkeypatch):
+    wheel = tmp_path / 'daydream-0.30.0-py3-none-any.whl'
+    with zipfile.ZipFile(wheel, 'w') as archive:
+        archive.writestr('daydream-0.30.0.dist-info/METADATA', 'Name: daydream\nVersion: 0.30.0\n')
+        archive.writestr('daydream/benchmark/reviewbench/harbor_entrypoint.py', '')
+    monkeypatch.setattr(convert, 'DAYDREAM_BUILD', dict(convert.DAYDREAM_BUILD,
+        wheel_sha256=hashlib.sha256(wheel.read_bytes()).hexdigest()))
+    return wheel
+
+
+@pytest.mark.parametrize('pr_url', [convert.PR_URL, 'https://github.com/owner/project/pull/17'])
+def test_daydream_task_freezes_runtime_comparison_and_keeps_oracle_separate(tmp_path, pinned_wheel, pr_url):
     record = {
-        'githubPrUrl': convert.PR_URL, 'project_main_language': 'PHP',
+        'githubPrUrl': pr_url, 'project_main_language': 'PHP',
         'source_commit': convert.BASE, 'target_commit': convert.HEAD,
         'comments': [{'path': 'file.php', 'note': 'verifier only annotation'}],
     }
@@ -35,12 +49,7 @@ def test_daydream_task_freezes_runtime_comparison_and_keeps_oracle_separate(tmp_
     head = git('rev-parse', 'HEAD')
     metadata = (task / 'task.toml').read_text().replace(convert.BASE, base).replace(convert.HEAD, head)
     (task / 'task.toml').write_text(metadata)
-    wheel = tmp_path / 'daydream-0.30.0-py3-none-any.whl'
-    with zipfile.ZipFile(wheel, 'w') as archive:
-        archive.writestr('daydream-0.30.0.dist-info/METADATA', 'Name: daydream\nVersion: 0.30.0\n')
-        archive.writestr('daydream/benchmark/reviewbench/harbor_entrypoint.py', '')
-    monkeypatch.setattr(convert, 'DAYDREAM_BUILD', dict(convert.DAYDREAM_BUILD,
-        wheel_sha256=hashlib.sha256(wheel.read_bytes()).hexdigest()))
+    wheel = pinned_wheel
     modified_wheel = tmp_path / 'modified' / wheel.name
     modified_wheel.parent.mkdir()
     modified_wheel.write_bytes(wheel.read_bytes() + b'changed wheel bytes')
@@ -70,4 +79,63 @@ def test_daydream_task_freezes_runtime_comparison_and_keeps_oracle_separate(tmp_
     assert '--host-receipt /tmp/aacr-host-receipt.json' in (task / 'tests/test.sh').read_text()
     assert not (task / 'solution').exists()
     assert 'verifier only annotation' not in ''.join(p.read_text() for p in (task / 'environment/aacr').glob('*.json'))
-    assert 'oracle' in (convert.PACKAGE / 'templates/task.toml').read_text()
+    assert config['task']['keywords'] == ['code-review', 'aacr', 'daydream']
+
+
+@pytest.mark.parametrize('reviewer', ['plain', 'daydream'])
+def test_emitted_runtime_preserves_clean_materialized_lfs_context(tmp_path, monkeypatch, pinned_wheel, reviewer):
+    # Host conversion has native LFS filters; Docker starts with neutral Git config.
+    host_system = tmp_path / 'host-system.gitconfig'
+    host_global = tmp_path / 'host-global.gitconfig'
+    host_global.touch()
+    monkeypatch.setenv('GIT_CONFIG_SYSTEM', str(host_system))
+    monkeypatch.setenv('GIT_CONFIG_GLOBAL', str(host_global))
+    subprocess.run(['git', 'lfs', 'install', '--system'], cwd=tmp_path, check=True, capture_output=True)
+    task = tmp_path / 'task'
+    record = {'githubPrUrl': 'https://github.com/owner/project/pull/17',
+              'project_main_language': 'Python', 'source_commit': convert.BASE,
+              'target_commit': convert.HEAD, 'comments': []}
+    convert.render_task(record, task)
+    repo = task / 'environment/repo'
+    repo.mkdir()
+    def git(*args, directory=repo, env=None):
+        return subprocess.check_output(['git', '-C', str(directory), *args], text=True, env=env).strip()
+    git('init', '-q')
+    (repo / 'file.py').write_text('base\n')
+    git('add', '.')
+    git('-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'base')
+    base = git('rev-parse', 'HEAD')
+    git('lfs', 'track', '*.bin')
+    contents = 'materialized LFS object\n' * 100
+    (repo / 'asset.bin').write_text(contents)
+    git('add', '.')
+    git('-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'LFS head')
+    head = git('rev-parse', 'HEAD')
+    assert git('show', 'HEAD:asset.bin').startswith('version https://git-lfs.github.com/spec/v1')
+    assert git('status', '--porcelain') == ''
+    metadata = (task / 'task.toml').read_text().replace(convert.BASE, base).replace(convert.HEAD, head)
+    (task / 'task.toml').write_text(metadata)
+    if reviewer == 'daydream':
+        convert.configure_daydream_task(task, pinned_wheel)
+    dockerfile = (task / 'environment/Dockerfile').read_text()
+    runtime_system = tmp_path / 'runtime-system.gitconfig'
+    runtime_global = tmp_path / 'runtime-global.gitconfig'
+    runtime_system.touch()
+    runtime_global.touch()
+    runtime_env = dict(os.environ, GIT_CONFIG_SYSTEM=str(runtime_system), GIT_CONFIG_GLOBAL=str(runtime_global))
+    copied = tmp_path / 'runtime-repo'
+    shutil.copytree(repo, copied)
+    assert (copied / 'asset.bin').read_text() == contents
+    assert 'asset.bin' in git('status', '--porcelain', directory=copied, env=runtime_env)
+    # Execute the emitted pre-COPY setup with the real native binary, using a
+    # private system config file so the test cannot modify the operator's filters.
+    for line in dockerfile.splitlines():
+        if line.startswith('COPY repo/'):
+            break
+        if line.startswith('RUN git lfs '):
+            subprocess.run(line[4:], shell=True, cwd=tmp_path, env=runtime_env,
+                           check=True, capture_output=True)
+    assert git('status', '--porcelain', directory=copied, env=runtime_env) == ''
+    assert git('rev-parse', 'HEAD', directory=copied, env=runtime_env) == head
+    assert (copied / 'asset.bin').read_text() == contents
+    assert 'git-lfs' in next(line for line in dockerfile.splitlines() if 'apt-get install' in line)

@@ -1,0 +1,15 @@
+# Explicit pilot selection from the retained catalog, which predates capture:
+# pass --agent-kwarg capture_data=false, or set path to a fresh catalog.
+datasets:
+  - path: artifacts/aacr/issue4-pilot-tasks
+    task_names:
+      - lvgl-lvgl-8129
+      - microsoft-powertoys-40814
+      - opencv-opencv-26815
+      - ollama-ollama-8938
+      - dbeaver-dbeaver-37564
+      - bluewave-labs-checkmate-1897
+      - symfony-symfony-61601
+      - infiniflow-ragflow-6691
+      - linera-io-linera-protocol-4639
+      - cline-cline-2347

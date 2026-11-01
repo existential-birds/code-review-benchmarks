@@ -1,4 +1,6 @@
 # One complete review per native trial; k, scheduling and retries belong to Harbor.
+# The default task predates capture: select a fresh catalog with -p and -i, or
+# pass --agent-kwarg capture_data=false.
 job_name: aacr-daydream
 jobs_dir: jobs
 n_attempts: 1
@@ -9,6 +11,7 @@ agents:
   - import_path: benchmarks.aacr.daydream_agent:DaydreamAgent
     kwargs:
       version: 0.30.0
+      capture_data: true
 verifier:
   import_path: benchmarks.aacr.daydream_verifier:DaydreamVerifier
 environment:
