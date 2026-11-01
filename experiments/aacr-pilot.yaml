@@ -1,4 +1,5 @@
-# Explicit pilot selection from a freshly generated pinned catalog.
+# Explicit pilot selection from the retained catalog, which predates capture:
+# pass --agent-kwarg capture_data=false, or set path to a fresh catalog.
 datasets:
   - path: artifacts/aacr/issue4-pilot-tasks
     task_names:

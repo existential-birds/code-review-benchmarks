@@ -362,6 +362,12 @@ Linera admission and the five complete empty outputs. Final Spec follow-up found
 and documentation. The agent-stage overlap is reported from Harbor's exact
 intervals, which include its thin reviewer wrapper.
 
+A later code review of the full branch diff led to small corrections after every
+live job above: conversion now sets LFS filters per context and requires the
+wheel outside the Oracle fixture, and the adapter renders `--capture-data` through
+Harbor's `Cli` annotation. Live jobs predate these changes; deterministic tests
+and a real one-case conversion cover them.
+
 ## Native JSONL capture follow-up
 
 After the pilot, the user requested local `--capture-data` for inspecting and
@@ -396,7 +402,7 @@ separate from the record's native intrinsic scoring.
 
 TDD extended existing adapter and composed-plan keeper tests: six expected
 regressions were observed before implementation; focused checks then passed.
-The final repository suite passed **164 tests**. Two pinned native capture tests
+The repository suite then passed **164 tests**. Two pinned native capture tests
 passed using the existing Daydream test runtime, proving JSONL emission without
 a Hub destination and explicit capture disablement. The initial attempt with the
 benchmark's pytest environment could not collect those upstream tests because its

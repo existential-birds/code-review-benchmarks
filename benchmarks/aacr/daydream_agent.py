@@ -5,17 +5,18 @@ import asyncio
 from contextlib import suppress
 import json
 from pathlib import Path
+from typing import Annotated
 import uuid
 
 from harbor.agents.capabilities import AgentCapabilities
 from harbor.agents.installed.base import BaseInstalledAgent
-from harbor.agents.options import InstalledAgentOptions
+from harbor.agents.options import Cli, InstalledAgentOptions
 
 
 class DaydreamOptions(InstalledAgentOptions):
     """Native Harbor option for retaining Daydream's local capture records."""
 
-    capture_data: bool = False
+    capture_data: Annotated[bool, Cli('--capture-data')] = False
 
 
 class DaydreamAgent(BaseInstalledAgent):
@@ -64,8 +65,8 @@ class DaydreamAgent(BaseInstalledAgent):
         try:
             await environment.upload_file(receipt_path, '/logs/artifacts/daydream/host-receipt.json')
             result = await environment.exec(
-                'python -I -m benchmarks.aacr.daydream_entrypoint --invocation ' + invocation
-                + (' --capture-data' if self.options.capture_data else '')
+                f'python -I -m benchmarks.aacr.daydream_entrypoint --invocation {invocation} '
+                + self.build_cli_flags()
                 + ' > /logs/agent/daydream.stdout.log 2> /logs/agent/daydream.stderr.log',
                 cwd='/workspace/repo')
             receipt['return_code'] = result.return_code

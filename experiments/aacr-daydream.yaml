@@ -1,4 +1,6 @@
 # One complete review per native trial; k, scheduling and retries belong to Harbor.
+# The default task predates capture: select a fresh catalog with -p, or pass
+# --agent-kwarg capture_data=false.
 job_name: aacr-daydream
 jobs_dir: jobs
 n_attempts: 1

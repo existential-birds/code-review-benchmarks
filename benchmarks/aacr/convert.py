@@ -98,6 +98,8 @@ def prepare_context(instance: schema.ReviewInstance, task: Path) -> Path:
             return result
         prepared.mkdir()
         git('init', '-q')
+        # Materialize LFS content on any host, independent of ambient Git filters.
+        git('lfs', 'install', '--local', '--skip-repo')
         git('remote', 'add', 'origin', instance.resolved_clone_url)
         # Materialize both pinned trees without copying a project's entire history.
         revisions = (instance.base_commit, instance.head_commit)
@@ -306,7 +308,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--upstream', required=True, type=Path, help='Clean checkout of the pinned Alibaba AACR source')
     parser.add_argument('--output', type=Path, default=Path('artifacts/aacr/tasks'))
-    parser.add_argument('--daydream-wheel', type=Path, help='Configure every generated task for the pinned Daydream baseline')
+    parser.add_argument('--daydream-wheel', type=Path, help='Pinned wheel for every generated Daydream task; required unless --oracle is set')
     parser.add_argument('--task', action='append', dest='task_names', help='Exact case to convert; repeat to select several')
     parser.add_argument('--oracle', action='store_true', help='Generate only the pinned Laravel Oracle fixture')
     arguments = parser.parse_args()
@@ -314,6 +316,8 @@ def main() -> None:
         if arguments.task_names or arguments.daydream_wheel:
             parser.error('--oracle cannot be combined with --task or --daydream-wheel')
         print(generate_task(arguments.upstream, arguments.output))
+    elif not arguments.daydream_wheel:
+        parser.error('--daydream-wheel is required unless --oracle is set')
     else:
         generate_catalog(arguments.upstream, arguments.output, daydream_wheel=arguments.daydream_wheel,
                          task_names=arguments.task_names)

@@ -209,7 +209,7 @@ uses deterministic child processes and synthetic credential rotation; it does
 not prove live OAuth refresh or a new live reviewer/judge run.
 
 Conversion and its behavioral fixtures require Git and Git LFS on the host
-(`git lfs version`). Generated reviewer images install native LFS filters so
+(`git lfs version`); conversion configures LFS filters in each context. Generated reviewer images install native LFS filters so
 materialized files remain clean against their pinned pointer index.
 Run deterministic checks with `.venv/bin/python -m pytest tests` and
 `node --test tests/pi_judge.test.mjs`. Daydream adapter and completion tests need
@@ -238,6 +238,10 @@ checkout with both pinned commits and a merge base. Shallow native fetches avoid
 copying every repository's full history. `catalog.json` records every attempted
 case, reference count and conversion/revision error; any error makes conversion
 exit unsuccessfully. Historical tasks and catalog reports cannot be overwritten.
+Shallow context means `git log` and `git blame` inside a review stop at the fetched
+boundary, whose depth varies by case, so older lines can appear to originate there.
+Top-level `reference_findings` in `catalog.json` counts every attempted case; use
+the per-case records for the generated subset.
 Repeatable `--task <exact-name>` options prepare a smaller fresh catalog when
 needed; runtime selection stays in Harbor. Use `--oracle` to prepare only the
 pinned Laravel Oracle fixture. Its fixed finding is limited to that exact case;
@@ -250,9 +254,10 @@ configuration enables, so the reviewer stage fails after the image build. The
 commands below reproduce the accepted capture-disabled runs against those
 retained catalogs by passing `--agent-kwarg capture_data=false`.
 
-For a fresh capture-enabled run, generate a new catalog as above, change the
-overlay's `datasets[].path` or the `-p` value to it, and drop the override. For
-focused operational validation, `--task` can materialize the selected cases plus
+For a fresh capture-enabled pilot, generate a new catalog as above, change the
+overlay's `datasets[].path` to it, and drop the override. Do not use `-p` for
+this: it replaces the overlay's dataset, including its ten task names, unless
+every case is repeated with `-i`. For focused operational validation, `--task` can materialize the selected cases plus
 an excluded control case while full-catalog conversion continues separately.
 Harbor's explicit ten-name selection still determines the pilot trials; retain
 both catalog reports.
@@ -367,12 +372,17 @@ and `trial/artifact_handler.py`. Harbor already validates agent kwargs and retai
 per-trial logs. Pinned Daydream's `commands/common.py`, `runner.run`,
 `run_artifacts._capture_dataset`, `dataset_capture.capture_run_record`,
 `dataset.LocalRecordStore` and `hub.resolve_hub_repo` own JSONL construction,
-validation and persistence. The only new integration is flag/path propagation;
-there is no custom JSONL collector or shared dataset writer.
+validation and persistence. The only new integration is a native `Cli` option
+annotation and path propagation; there is no custom JSONL collector or shared
+dataset writer.
 
 Eligibility means a non-null scoring reward with valid integer counts. Nulls
 represent missing scores; completed empty reviews contribute their references
-and zero generated findings. Malformed counts fail aggregation. Harbor does not
+and zero generated findings. A failed trial has no reward, so its references
+leave the pooled denominators; report `missing_instances` beside any score.
+Malformed counts, or a failing `uv` metric subprocess, raise inside Harbor's
+trial-completion hook. That ends the whole job, so rerun the remainder in a fresh
+named job. Harbor does not
 pass lifecycle exceptions to the metric, and can supply a reward alongside a
 later cleanup error. Metric instance counters therefore describe scoring inputs.
 Inspect native completion and errors separately; pilot acceptance requires ten
