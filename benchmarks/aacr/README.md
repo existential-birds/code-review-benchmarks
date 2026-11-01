@@ -381,8 +381,8 @@ represent missing scores; completed empty reviews contribute their references
 and zero generated findings. A failed trial has no reward, so its references
 leave the pooled denominators; report `missing_instances` beside any score.
 Malformed counts, or a failing `uv` metric subprocess, raise inside Harbor's
-trial-completion hook. That ends the whole job, so rerun the remainder in a fresh
-named job. Harbor does not
+trial-completion hook. That ends the whole job, so rerun the full selection in a
+fresh named job to keep one pooled aggregate. Harbor does not
 pass lifecycle exceptions to the metric, and can supply a reward alongside a
 later cleanup error. Metric instance counters therefore describe scoring inputs.
 Inspect native completion and errors separately; pilot acceptance requires ten

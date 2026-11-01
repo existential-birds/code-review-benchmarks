@@ -140,20 +140,23 @@ class ConversionTests(unittest.TestCase):
     def test_context_configures_lfs_filters_without_ambient_host_configuration(self):
         origin = self.root / 'origin'
         origin.mkdir()
-        def git(*args):
-            return subprocess.check_output(['git', '-C', str(origin), *args], text=True).strip()
-        git('init', '-q')
-        (origin / 'file.php').write_text('context')
-        git('add', '.')
-        git('-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'base')
-        head = git('rev-parse', 'HEAD')
         neutral = self.root / 'neutral.gitconfig'
         neutral.touch()
-        instance = schema.ReviewInstance('test', 'owner/name', head, head, str(origin))
+        def git(*args):
+            return subprocess.check_output(['git', '-C', str(origin), *args], text=True).strip()
+        contents = 'materialized LFS object\n' * 100
         with patch.dict(os.environ, GIT_CONFIG_SYSTEM=str(neutral), GIT_CONFIG_GLOBAL=str(neutral)):
+            git('init', '-q')
+            git('lfs', 'install', '--local')
+            git('lfs', 'track', '*.bin')
+            (origin / 'asset.bin').write_text(contents)
+            git('add', '.')
+            git('-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'base')
+            head = git('rev-parse', 'HEAD')
+            self.assertTrue(git('show', 'HEAD:asset.bin').startswith('version https://git-lfs.github.com/spec/v1'))
+            instance = schema.ReviewInstance('test', 'owner/name', head, head, f'file://{origin}')
             repo = convert.prepare_context(instance, self.root / 'task')
-        self.assertEqual(subprocess.check_output(['git', '-C', str(repo), 'config', '--local', 'filter.lfs.required'],
-                                                 text=True).strip(), 'true')
+        self.assertEqual((repo / 'asset.bin').read_text(), contents)
 
     def test_context_fetches_pinned_history_without_cloning_unrelated_history(self):
         origin = self.root / 'origin'

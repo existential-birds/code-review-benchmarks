@@ -98,7 +98,7 @@ def prepare_context(instance: schema.ReviewInstance, task: Path) -> Path:
             return result
         prepared.mkdir()
         git('init', '-q')
-        # Materialize LFS content on any host, independent of ambient Git filters.
+        # Configure LFS filters per context instead of relying on ambient configuration.
         git('lfs', 'install', '--local', '--skip-repo')
         git('remote', 'add', 'origin', instance.resolved_clone_url)
         # Materialize both pinned trees without copying a project's entire history.

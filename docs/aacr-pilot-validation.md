@@ -362,11 +362,12 @@ Linera admission and the five complete empty outputs. Final Spec follow-up found
 and documentation. The agent-stage overlap is reported from Harbor's exact
 intervals, which include its thin reviewer wrapper.
 
-A later code review of the full branch diff led to small corrections after every
-live job above: conversion now sets LFS filters per context and requires the
+Code review of the full branch diff led to small corrections after every live
+job in this report: conversion now sets LFS filters per context and requires the
 wheel outside the Oracle fixture, and the adapter renders `--capture-data` through
-Harbor's `Cli` annotation. Live jobs predate these changes; deterministic tests
-and a real one-case conversion cover them.
+Harbor's `Cli` annotation. Deterministic tests cover these changes, and the
+one-case catalog `artifacts/aacr/issue4-review-fix-check` retains a real conversion
+with the local filters. No live job was rerun afterward.
 
 ## Native JSONL capture follow-up
 
