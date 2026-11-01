@@ -19,7 +19,6 @@ DATASET_SHA256 = '02c8561f1c3994a26f427d479b2a3f6e6c8e6858161fbc903b45248fa2cb20
 PR_URL = 'https://github.com/laravel/framework/pull/56591'
 BASE = '6d94b16fd5f4f72bb741f9b900b83179c8ab46c9'
 HEAD = '0a5238acfc4ca99c363283bf3bb16e20905f2a39'
-TASK_NAME = 'laravel-framework-56591'
 PACKAGE = Path(__file__).resolve().parent
 DAYDREAM_BUILD = json.loads((PACKAGE / 'daydream-build.json').read_text())
 
