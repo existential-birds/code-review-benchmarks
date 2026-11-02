@@ -1,7 +1,7 @@
 # Agent guidance
 
-Read and follow [CONTRIBUTING.md](CONTRIBUTING.md) before repository exploration,
-implementation, verification, tracker operations, or creating or updating a PR.
+Read and follow [CONTRIBUTING.md](CONTRIBUTING.md) before making changes or
+creating or updating a PR.
 
 ## Never bypass Git hooks
 

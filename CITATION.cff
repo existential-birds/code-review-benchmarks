@@ -1,0 +1,58 @@
+cff-version: 1.2.0
+message: >-
+  If you use this suite, cite the original benchmark and identify the exact
+  release or commit you used. See docs/citing.md.
+type: software
+title: Code Review Benchmarks
+abstract: >-
+  Harbor-based evaluation suite for measuring the effects of changes to
+  Daydream and comparing other code-review agents.
+authors:
+  - given-names: Kevin
+    family-names: Anderson
+    affiliation: Existential Birds
+version: 0.1.0
+license: Apache-2.0
+repository-code: https://github.com/existential-birds/code-review-benchmarks
+keywords:
+  - code review
+  - benchmark
+  - evaluation
+references:
+  - type: generic
+    title: "AACR-Bench: Evaluating Automatic Code Review with Holistic Repository-Level Context"
+    authors:
+      - given-names: Lei
+        family-names: Zhang
+      - given-names: Yongda
+        family-names: "Yu"
+      - given-names: Minghui
+        family-names: "Yu"
+      - given-names: Xinxin
+        family-names: Guo
+      - given-names: Zhengqi
+        family-names: Zhuang
+      - given-names: Guoping
+        family-names: Rong
+      - given-names: Dong
+        family-names: Shao
+      - given-names: Haifeng
+        family-names: Shen
+      - given-names: Hongyu
+        family-names: Kuang
+      - given-names: Zhengfeng
+        family-names: Li
+      - given-names: Boge
+        family-names: Wang
+      - given-names: Guoan
+        family-names: Zhang
+      - given-names: Bangyu
+        family-names: Xiang
+      - given-names: Xiaobin
+        family-names: Xu
+    year: 2026
+    identifiers:
+      - type: other
+        value: "arXiv:2601.19494"
+    url: https://arxiv.org/abs/2601.19494
+    repository-code: https://github.com/alibaba/aacr-bench

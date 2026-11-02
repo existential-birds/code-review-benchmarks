@@ -36,10 +36,10 @@ Runs use pinned inputs:
 | Daydream wheel | see [`daydream-build.json`](daydream-build.json) |
 
 You need Docker, Git, Git LFS, `uv`, Python 3.14 for conversion, and an
-environment with the pinned Harbor. Examples use `.cache/harbor-6099b8c-env/bin/harbor`.
+environment with the pinned Harbor. Examples run `harbor` from that environment.
 
 Build the wheel from the pinned Daydream source, then install Daydream's locked
-runtime, the pinned Harbor and the wheel, in that order:
+runtime, the pinned Harbor, the wheel and this suite, in that order:
 
 ```sh
 mkdir -p .cache/daydream-source
@@ -51,6 +51,7 @@ uv pip install --python .venv/bin/python --require-hashes \
 uv pip install --python .venv/bin/python -e /path/to/pinned/harbor
 uv pip install --python .venv/bin/python --no-deps --reinstall \
   .cache/daydream-wheel/daydream-0.30.0-py3-none-any.whl
+uv pip install --python .venv/bin/python --no-deps -e .
 ```
 
 Review and judging use separate subscription logins, kept outside task assets and
@@ -103,7 +104,8 @@ took under 8 hours.
 
 Default limits are 5,400 seconds per review, 300 for verification and 1,200 per
 environment build. `experiments/aacr-pilot.yaml` selects a ten-case, one-per-language
-subset; point its dataset at a fresh catalog before using it.
+subset of a catalog at `artifacts/aacr/tasks`, the converter's default output. Pass it
+as a second `-c` in place of `-p`.
 
 ## Rerun failed cases
 
@@ -150,3 +152,6 @@ The vendored evaluator in [`upstream/`](upstream/) comes from
 [Apache-2.0 license](../../LICENSE). Generated repository contexts keep their own
 licenses. One local change: the converter rejects an existing raw-data file whose
 SHA-256 differs from its metadata when no download URL is available.
+
+See [Citing this suite](../../docs/citing.md) for AACR-Bench's citation and how this
+integration differs from upstream.

@@ -1,7 +1,6 @@
-# Explicit pilot selection from the retained catalog, which predates capture:
-# pass --agent-kwarg capture_data=false, or set path to a fresh catalog.
+# Ten cases, one per language, for checking a setup before a full run.
 datasets:
-  - path: artifacts/aacr/issue4-pilot-tasks
+  - path: artifacts/aacr/tasks
     task_names:
       - lvgl-lvgl-8129
       - microsoft-powertoys-40814
