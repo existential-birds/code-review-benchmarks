@@ -1,0 +1,4 @@
+interface:
+  display_name: "Refactor Audit"
+  short_description: "Simplify benchmark architecture through Harbor-native behavior"
+  default_prompt: "Use $refactor-audit to sweep this PR for overengineering and implement supported behavior-preserving simplifications using Harbor's built-in capabilities."
