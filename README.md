@@ -12,11 +12,9 @@ The first integrated benchmark is
 ## Quick start
 
 This reviews one pull request and scores it. You need: 
-- Docker,
-- Git,
-- Git LFS,
+- Docker
 - [`uv`](https://docs.astral.sh/uv/),
-- a Codex login for the reviewer and
+- a Codex login for the reviewer, and
 - [Pi](https://shittycodingagent.ai/) authenticated to Codex subscription
 
 **1. Get the pinned sources.** The suite expects exact revisions of each project:
