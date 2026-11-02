@@ -52,6 +52,7 @@ uv pip install --python .venv/bin/python --require-hashes \
 uv pip install --python .venv/bin/python -e ../harbor
 uv pip install --python .venv/bin/python --no-deps --reinstall \
   .cache/daydream-wheel/daydream-0.30.0-py3-none-any.whl
+uv pip install --python .venv/bin/python --no-deps -e .
 ```
 
 **3. Point the suite at your logins.** Keep these directories writable so tokens can

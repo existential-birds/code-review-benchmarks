@@ -39,7 +39,7 @@ You need Docker, Git, Git LFS, `uv`, Python 3.14 for conversion, and an
 environment with the pinned Harbor. Examples run `harbor` from that environment.
 
 Build the wheel from the pinned Daydream source, then install Daydream's locked
-runtime, the pinned Harbor and the wheel, in that order:
+runtime, the pinned Harbor, the wheel and this suite, in that order:
 
 ```sh
 mkdir -p .cache/daydream-source
@@ -51,6 +51,7 @@ uv pip install --python .venv/bin/python --require-hashes \
 uv pip install --python .venv/bin/python -e /path/to/pinned/harbor
 uv pip install --python .venv/bin/python --no-deps --reinstall \
   .cache/daydream-wheel/daydream-0.30.0-py3-none-any.whl
+uv pip install --python .venv/bin/python --no-deps -e .
 ```
 
 Review and judging use separate subscription logins, kept outside task assets and
