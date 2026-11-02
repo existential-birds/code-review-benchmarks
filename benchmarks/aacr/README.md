@@ -36,7 +36,7 @@ Runs use pinned inputs:
 | Daydream wheel | see [`daydream-build.json`](daydream-build.json) |
 
 You need Docker, Git, Git LFS, `uv`, Python 3.14 for conversion, and an
-environment with the pinned Harbor. Examples use `.cache/harbor-6099b8c-env/bin/harbor`.
+environment with the pinned Harbor. Examples run `harbor` from that environment.
 
 Build the wheel from the pinned Daydream source, then install Daydream's locked
 runtime, the pinned Harbor and the wheel, in that order:

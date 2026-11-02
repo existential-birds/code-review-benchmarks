@@ -1,72 +1,117 @@
 # Code Review Benchmarks
 
-Harbor-based evaluation suite for measuring the effects of changes to
-[Daydream](https://github.com/existential-birds/daydream). Other code-review
-agents can provide comparison points.
+Measures how well [Daydream](https://github.com/existential-birds/daydream) reviews
+code, so we can tell whether a new version or configuration is actually better.
+Runs use [Harbor](https://github.com/harbor-framework/harbor): each pull request
+gets its own sandboxed review, then a separate judge scores the findings against
+human-annotated review comments.
 
-AACR-Bench is the first integrated benchmark. Harbor runs each review and a separate
-judge scores the findings. See [the latest baseline](docs/aacr-baseline.md) for
-results and [the AACR guide](benchmarks/aacr/README.md) to run it yourself.
+The first integrated benchmark is
+[AACR-Bench](https://github.com/alibaba/aacr-bench). In [the latest
+baseline](docs/aacr-baseline.md), 167 of its pull requests were scored:
 
-## Structure
+| Precision | Recall | Balanced score |
+|---:|---:|---:|
+| 0.263 | 0.081 | 0.124 |
 
-The suite uses this layout:
+These scores measure agreement with annotated comments, not verified bug-finding
+accuracy. A finding that matches no comment may still be a real problem.
+
+## Quick start
+
+This reviews one pull request and scores it. You need Docker, Git, Git LFS,
+[`uv`](https://docs.astral.sh/uv/), a Codex login for the reviewer and a
+[Pi](https://www.npmjs.com/package/@earendil-works/pi-coding-agent) login to OpenAI
+Codex for the judge. Both logins are subscriptions, so a run uses your quota.
+
+**1. Get the pinned sources.** The suite expects exact revisions of each project:
+
+```sh
+git clone https://github.com/existential-birds/code-review-benchmarks
+git clone https://github.com/harbor-framework/harbor
+git clone https://github.com/existential-birds/daydream
+git clone https://github.com/alibaba/aacr-bench
+
+git -C harbor checkout 6099b8cf2bfbbb3e7ff1eb2163bfc4524dbd9ba5
+git -C aacr-bench checkout ee9d7fef70ef31acea2ff7ae316ce0a9575fe4df
+cd code-review-benchmarks
+```
+
+**2. Build Daydream and install everything.** Conversion checks the wheel against
+the hash in [`daydream-build.json`](benchmarks/aacr/daydream-build.json):
+
+```sh
+uv venv --python 3.14 .venv
+mkdir -p .cache/daydream-source
+git -C ../daydream archive 5bae1ac09918ecf8d095aaf6d283235ca1ad83a8 \
+  | tar -x -C .cache/daydream-source
+(cd .cache/daydream-source && uv build --wheel --out-dir ../daydream-wheel)
+
+uv pip install --python .venv/bin/python --require-hashes \
+  -r .cache/daydream-source/daydream/benchmark/harbor/runtime-requirements.lock
+uv pip install --python .venv/bin/python -e ../harbor
+uv pip install --python .venv/bin/python --no-deps --reinstall \
+  .cache/daydream-wheel/daydream-0.30.0-py3-none-any.whl
+```
+
+**3. Point the suite at your logins.** Keep these directories writable so tokens can
+refresh:
+
+```sh
+export AACR_CODEX_AUTH_DIR=/path/to/codex-login
+export AACR_PI_AUTH_DIR=/path/to/pi-login
+```
+
+**4. Generate one review case:**
+
+```sh
+.venv/bin/python -m benchmarks.aacr.convert \
+  --upstream ../aacr-bench \
+  --output artifacts/aacr/quickstart \
+  --daydream-wheel .cache/daydream-wheel/daydream-0.30.0-py3-none-any.whl \
+  --task bluewave-labs-checkmate-1897
+```
+
+**5. Run it and look at the result:**
+
+```sh
+.venv/bin/harbor run -c experiments/aacr-baseline.yaml -p artifacts/aacr/quickstart \
+  -k 1 -n 1 -r 0 --job-name quickstart
+.venv/bin/harbor view jobs
+```
+
+The median review in the baseline took about three minutes. See
+[the AACR guide](benchmarks/aacr/README.md) to run the full catalog, rerun failed
+cases and read job output.
+
+## How scoring works
+
+- **Precision** is the share of findings that match an annotated comment.
+- **Recall** is the share of annotated comments covered by a finding.
+- **Balanced score** is AACR's combined score, computed from those two.
+
+Scores pool raw counts across review cases. A review must finish to be scored, so
+read scores alongside the failure count. The
+[baseline report](docs/aacr-baseline.md) shows both, with usage and time reported
+separately.
+
+Only compare runs that use the same review cases and scoring settings. Scores here
+aren't equivalent to those published by AACR-Bench; see
+[how this differs from upstream](docs/citing.md#how-this-differs-from-aacr-bench).
+
+## Repository layout
 
 ```text
 benchmarks/
-  aacr/           # AACR conversion, task definitions, verifier, and metrics
-experiments/      # Native Harbor job configurations
+  aacr/           # AACR conversion, task definitions, verifier and metrics
+experiments/      # Harbor job configurations
+docs/             # Baseline results and citation guide
 ```
 
-Each benchmark retains its own reference data, scoring rules, and reported
-metrics. Add shared utilities when integrations actually need the same behavior.
-Use Harbor's built-in job configuration, task selection, attempt counts,
-concurrency, timeouts, retries, result storage, and aggregation where supported.
-Project-specific code covers benchmark conversion and verification plus the
-Daydream and subscription-judge adapters required to connect them.
-
-Reuse Daydream's existing ReviewBench integration where practical, with Harbor
-owning execution behavior.
-ReviewBench benchmark tooling currently lives in Daydream and will eventually
-move into this suite.
-
-## Evaluation scope
-
-Evaluate Daydream's complete review pipeline, including exploration,
-adjudication, and filtering. Use review-only mode so the output is the findings
-a user would receive before any fixes are applied.
-
-The primary goal is deciding whether a Daydream version or configuration
-improves review quality at an acceptable cost and latency. This repository is
-public so people can see how Daydream is measured. Leaderboard submissions and
-exact upstream score equivalence are outside the current scope.
-
-## Initial delivery
-
-- Establish one baseline of Daydream's review pipeline; a candidate build is
-  not needed yet.
-- Use Daydream's Codex backend with its current default deep-review profile
-  and model settings, including precision mode off.
-- Validate execution and scoring on 10 AACR pull requests before running the
-  full available AACR set.
-- Reuse the existing AACR scorer with Codex as the sole judge, authenticated
-  through the operator's subscription.
-- Add other judges only when there is a concrete need; additional scoring modes
-  and upstream compatibility checks are outside the initial scope.
-- Run evaluations manually on demand, with the operator choosing which cases
-  to run or rerun. Configure attempts per case through Harbor's native
-  `-k` / `--n-attempts` option or `n_attempts` job setting, using Harbor's default
-  when omitted. CI integration is outside the initial scope.
-
-## Comparison discipline
-
-- Keep benchmark cases and scoring settings consistent within a comparison.
-- Save raw findings, per-case results, and the settings needed to interpret them.
-- Report benchmark scores, completion rate, usage, and latency separately;
-  include monetary cost when it is available.
-
-AACR reference agreement measures agreement with annotated comments. Any claim
-about actual bug precision requires separate validation.
+Harbor owns job configuration, task selection, attempts, concurrency, timeouts,
+retries, result storage and aggregation. This repository adds only what connects a
+benchmark to Harbor: conversion, verification, and the Daydream and judge adapters.
+See [the design decision](docs/adr/0001-use-native-harbor-execution.md).
 
 ## Citation
 
@@ -76,5 +121,5 @@ upstream.
 
 ## License
 
-Project code is licensed under [Apache License 2.0](LICENSE). Imported benchmark
-materials retain their upstream licenses and attribution.
+Project code is licensed under the [Apache License 2.0](LICENSE). Imported benchmark
+materials keep their upstream licenses and attribution.
