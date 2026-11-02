@@ -7,22 +7,17 @@ gets its own sandboxed review, then a separate judge scores the findings against
 human-annotated review comments.
 
 The first integrated benchmark is
-[AACR-Bench](https://github.com/alibaba/aacr-bench). In [the latest
-baseline](docs/aacr-baseline.md), 167 of its pull requests were scored:
-
-| Precision | Recall | Balanced score |
-|---:|---:|---:|
-| 0.263 | 0.081 | 0.124 |
-
-These scores measure agreement with annotated comments, not verified bug-finding
-accuracy. A finding that matches no comment may still be a real problem.
+[AACR-Bench](https://github.com/alibaba/aacr-bench).
 
 ## Quick start
 
-This reviews one pull request and scores it. You need Docker, Git, Git LFS,
-[`uv`](https://docs.astral.sh/uv/), a Codex login for the reviewer and a
-[Pi](https://www.npmjs.com/package/@earendil-works/pi-coding-agent) login to OpenAI
-Codex for the judge. Both logins are subscriptions, so a run uses your quota.
+This reviews one pull request and scores it. You need: 
+- Docker,
+- Git,
+- Git LFS,
+- [`uv`](https://docs.astral.sh/uv/),
+- a Codex login for the reviewer and
+- [Pi](https://shittycodingagent.ai/) authenticated to Codex subscription
 
 **1. Get the pinned sources.** The suite expects exact revisions of each project:
 
@@ -81,8 +76,7 @@ export AACR_PI_AUTH_DIR=/path/to/pi-login
 .venv/bin/harbor view jobs
 ```
 
-The median review in the baseline took about three minutes. See
-[the AACR guide](benchmarks/aacr/README.md) to run the full catalog, rerun failed
+See [the AACR guide](benchmarks/aacr/README.md) to run the full catalog, rerun failed
 cases and read job output.
 
 ## How scoring works
@@ -119,8 +113,3 @@ See [the design decision](docs/adr/0001-use-native-harbor-execution.md).
 Cite the original benchmark and the exact release or commit of this suite. See
 [Citing this suite](docs/citing.md) for citations, inputs and differences from
 upstream.
-
-## License
-
-Project code is licensed under the [Apache License 2.0](LICENSE). Imported benchmark
-materials keep their upstream licenses and attribution.
