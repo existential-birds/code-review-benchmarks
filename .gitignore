@@ -28,7 +28,14 @@ dist/
 /.cache/
 .firecrawl/
 
-.agents/skills/
+# Skills installed from skills-lock.json; only our own skills are tracked
+.agents/skills/*
+!.agents/skills/fetch-pr-feedback/
+!.agents/skills/prepare-implement/
+!.agents/skills/receive-pr-feedback/
+!.agents/skills/refactor-audit/
+!.agents/skills/respond-pr-feedback/
+!.agents/skills/test-audit/
 .hermes/
 docs/agents/
 
