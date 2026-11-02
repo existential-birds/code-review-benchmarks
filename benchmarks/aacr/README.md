@@ -150,3 +150,6 @@ The vendored evaluator in [`upstream/`](upstream/) comes from
 [Apache-2.0 license](../../LICENSE). Generated repository contexts keep their own
 licenses. One local change: the converter rejects an existing raw-data file whose
 SHA-256 differs from its metadata when no download URL is available.
+
+See [Citing this suite](../../docs/citing.md) for AACR-Bench's citation and how this
+integration differs from upstream.

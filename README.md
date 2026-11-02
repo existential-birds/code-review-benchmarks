@@ -68,6 +68,12 @@ exact upstream score equivalence are outside the current scope.
 AACR reference agreement measures agreement with annotated comments. Any claim
 about actual bug precision requires separate validation.
 
+## Citation
+
+Cite the original benchmark and the exact release or commit of this suite. See
+[Citing this suite](docs/citing.md) for citations, inputs and differences from
+upstream.
+
 ## License
 
 Project code is licensed under [Apache License 2.0](LICENSE). Imported benchmark
