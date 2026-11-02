@@ -1,59 +1,38 @@
-# Contributing as an agent
+# Contributing
 
-## Before exploring
+Open an issue before starting a change, so we can agree on the approach first.
 
-Use a single-context layout. Read the
-[domain guide](docs/agents/domain.md) before exploring the codebase; it defines
-when to consult the glossary and architecture decision records.
+## Setup
 
-## Harbor first: absolute minimum custom code
+Follow the [quick start](README.md#quick-start) to install the suite, then add the
+test dependency and run the tests:
 
-Use Harbor's built-in behavior, configuration, and supported extension points
-wherever possible. Keep custom code to the absolute minimum required.
+```sh
+uv pip install --python .venv/bin/python pytest==8.4.2
+.venv/bin/python -m pytest tests -q
+node --test tests/pi_judge.test.mjs
+```
 
-Before writing any custom code, inspect the Harbor checkout at
-`/Users/ka/github/harbor` and prove that the required capability is not already
-included. Check the relevant source, documentation, and tests. Record the
-inspected paths or symbols, what Harbor already provides, and the precise gap
-that requires custom code before implementing it. Assumptions, memory, or the
-absence of a feature in Daydream's current wrapper are not sufficient evidence.
+Use the terms in the [glossary](GLOSSARY.md) and check the
+[decision records](docs/adr/) before changing how the suite works.
 
-Use native Harbor job configuration and controls for task selection, attempt
-count (`k`), concurrency, timeouts, retries, scheduling, result storage,
-aggregation, and inspection wherever supported. Do not duplicate those
-capabilities with a suite runner, custom loops, configuration schemas, or
-parallel execution infrastructure. Any necessary custom integration must cover
-only the demonstrated gap and use Harbor's supported interfaces.
+## Harbor first
 
-## Issues and triage
+Use Harbor's built-in behavior, configuration and extension points wherever
+possible, and keep custom code to the minimum required. That covers task selection,
+attempt count (`k`), concurrency, timeouts, retries, scheduling, result storage,
+aggregation and inspection. Don't add a suite runner, custom loops, configuration
+schemas or parallel execution infrastructure.
 
-Track issues and specs in GitHub Issues. Read the
-[issue-tracker guide](docs/agents/issue-tracker.md) before tracker operations.
-
-Use the five default triage labels. Read the
-[triage-label guide](docs/agents/triage-labels.md) before assigning triage roles.
-
-## Verification
-
-Discover the relevant checks from the current project configuration and the
-affected benchmark's documentation. Run them against the final changes.
-
-Apply the Git-hook requirements in [AGENTS.md](AGENTS.md) when committing or
-pushing.
+Before writing custom code, check Harbor's source, documentation and tests at the
+pinned revision to confirm the capability isn't already there. Record what you
+inspected and the precise gap in your pull request. Any custom integration should
+cover only that gap and use Harbor's supported interfaces.
 
 ## Pull requests
 
-Before creating or updating a PR, read and follow the
-[PR template](.github/pull_request_template.md). It is the source of truth for
-required sections, checklist items, and verification evidence. Use the local
-[`pr` skill](.agents/skills/pr/SKILL.md), when available, for Summary examples.
+Follow the [PR template](.github/pull_request_template.md). Keep every checklist
+item, and check one only after recording its evidence or why it doesn't apply. Leave
+failed, skipped or blocked items unchecked and explain them.
 
-Keep every checklist item. Check an item only after documenting either its
-completed work and evidence, or `Not applicable` with a concrete reason. Leave
-failed, skipped, or blocked applicable items unchecked and explain the blocker
-and remaining uncertainty in the verification evidence.
-
-Before requesting review or handing off the PR, account for every checklist
-item and ensure the description reflects the final changes and verified
-revision. Report unresolved checks explicitly; an unchecked item must never
-silently disappear from the description.
+Keep Git hooks enabled; see [AGENTS.md](AGENTS.md).

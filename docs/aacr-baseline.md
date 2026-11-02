@@ -88,6 +88,3 @@ for the reviewer and $0.60 for the judge.
 | AACR input SHA-256 | `02c8561f1c3994a26f427d479b2a3f6e6c8e6858161fbc903b45248fa2cb2097` |
 | Harbor | 0.24.0, `6099b8cf2bfbbb3e7ff1eb2163bfc4524dbd9ba5` |
 | Harbor job | `-k 1 -n 2 -r 0`, data capture on |
-
-Job evidence is stored locally rather than in this repository, under
-`jobs/aacr-baseline-20261101-a` and `jobs/aacr-baseline-20261101-electron-a`.

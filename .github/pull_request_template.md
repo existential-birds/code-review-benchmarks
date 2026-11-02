@@ -22,7 +22,6 @@ Describe the final change; omit work chronology and abandoned approaches.
 Place each visual next to the short text it supports. Include only the calls,
 files, props, states, and boundaries needed to explain the change. Use one or
 several views as useful; keep the summary easy to scan.
-See .agents/skills/pr/SKILL.md for examples.
 -->
 [Summary]
 
@@ -48,7 +47,6 @@ Issue: [Closes / Related to + full GitHub issue URL, or no linked issue — brie
 
 - [ ] Ran the relevant documented repository checks and recorded the outcome below, or explained why they are not applicable.
 - [ ] For custom code, recorded the Harbor-first evidence required by `CONTRIBUTING.md`, or explained why it is not applicable.
-- [ ] Ran `$test-audit` when this PR includes test changes and recorded the outcome below, or explained why it is not applicable.
 
 <!-- Record verification actually performed on the final change. Give exact commands
 or reproducible manual steps, observed results, and the correctness each check establishes.

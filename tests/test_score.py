@@ -528,7 +528,7 @@ def test_native_verifier_keeps_host_completion_authoritative_after_sandbox_forge
                     return SimpleNamespace(return_code=1, stdout='', stderr=str(error))
             return SimpleNamespace(return_code=0, stdout='', stderr='')
 
-    config = yaml.safe_load((Path(__file__).resolve().parents[1] / 'experiments/aacr-daydream.yaml').read_text())
+    config = yaml.safe_load((Path(__file__).resolve().parents[1] / 'experiments/aacr-baseline.yaml').read_text())
     verifier = VerifierFactory.create_verifier_from_config(VerifierConfig(**config.get('verifier', {})),
         task=task, trial_paths=trial, environment=VerifierEnvironment())
     failures = {'cancelled', 'timeout', 'failed', 'missing', 'shared_agent', 'shared_artifacts',

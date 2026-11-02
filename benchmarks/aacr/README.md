@@ -103,7 +103,8 @@ took under 8 hours.
 
 Default limits are 5,400 seconds per review, 300 for verification and 1,200 per
 environment build. `experiments/aacr-pilot.yaml` selects a ten-case, one-per-language
-subset; point its dataset at a fresh catalog before using it.
+subset of a catalog at `artifacts/aacr/tasks`, the converter's default output. Pass it
+as a second `-c` in place of `-p`.
 
 ## Rerun failed cases
 
