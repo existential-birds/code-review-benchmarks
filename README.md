@@ -4,14 +4,9 @@ Harbor-based evaluation suite for measuring the effects of changes to
 [Daydream](https://github.com/existential-birds/daydream). Other code-review
 agents can provide comparison points.
 
-The integration includes an [AACR Oracle verification fixture](benchmarks/aacr/README.md),
-a [complete Daydream review trial](benchmarks/aacr/README.md#daydream), and
-[native pilot configuration and pooled scoring](benchmarks/aacr/README.md#pilot).
-Harbor owns execution and a separate Pi Codex subscription judge scores findings.
-See the [pilot validation evidence](docs/aacr-pilot-validation.md) for observed
-execution, catalog availability and operational limits.
-Fresh Daydream runs also retain [native local JSONL capture](benchmarks/aacr/README.md#native-jsonl-capture)
-for trajectory and finding inspection.
+AACR-Bench is the first integrated benchmark. Harbor runs each review and a separate
+judge scores the findings. See [the latest baseline](docs/aacr-baseline.md) for
+results and [the AACR guide](benchmarks/aacr/README.md) to run it yourself.
 
 ## Structure
 
@@ -42,9 +37,9 @@ adjudication, and filtering. Use review-only mode so the output is the findings
 a user would receive before any fixes are applied.
 
 The primary goal is deciding whether a Daydream version or configuration
-improves review quality at an acceptable cost and latency. This is an internal
-measurement tool. Leaderboard submissions, exact upstream score equivalence,
-and third-party reproduction are outside the current scope.
+improves review quality at an acceptable cost and latency. This repository is
+public so people can see how Daydream is measured. Leaderboard submissions and
+exact upstream score equivalence are outside the current scope.
 
 ## Initial delivery
 
@@ -69,7 +64,6 @@ and third-party reproduction are outside the current scope.
 - Save raw findings, per-case results, and the settings needed to interpret them.
 - Report benchmark scores, completion rate, usage, and latency separately;
   include monetary cost when it is available.
-- Keep evaluation inputs and results separate from training data.
 
 AACR reference agreement measures agreement with annotated comments. Any claim
 about actual bug precision requires separate validation.

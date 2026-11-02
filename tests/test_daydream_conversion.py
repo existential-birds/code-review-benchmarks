@@ -139,3 +139,28 @@ def test_emitted_runtime_preserves_clean_materialized_lfs_context(tmp_path, monk
     assert git('rev-parse', 'HEAD', directory=copied, env=runtime_env) == head
     assert (copied / 'asset.bin').read_text() == contents
     assert 'git-lfs' in next(line for line in dockerfile.splitlines() if 'apt-get install' in line)
+
+
+def test_frozen_patch_ignores_host_system_git_attributes(tmp_path, pinned_wheel, monkeypatch):
+    """Apple Git's system attributes change `.mm` hunk headers; the reviewer's Git has none."""
+    from daydream import git_ops
+    monkeypatch.delenv('GIT_ATTR_NOSYSTEM', raising=False)
+    task = tmp_path / 'task'
+    convert.render_task({'githubPrUrl': convert.PR_URL, 'project_main_language': 'PHP',
+        'source_commit': convert.BASE, 'target_commit': convert.HEAD, 'comments': []}, task)
+    repo = task / 'environment/repo'
+    repo.mkdir()
+    def git(*args):
+        return subprocess.check_output(['git', '-C', str(repo), *args], text=True).strip()
+    git('init', '-q')
+    (repo / 'file.php').write_text('base\n')
+    git('add', '.')
+    git('-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'base')
+    commit = git('rev-parse', 'HEAD')
+    metadata = (task / 'task.toml').read_text().replace(convert.BASE, commit).replace(convert.HEAD, commit)
+    (task / 'task.toml').write_text(metadata)
+    seen = []
+    real_diff = git_ops.diff
+    monkeypatch.setattr(git_ops, 'diff', lambda *args: seen.append(os.environ.get('GIT_ATTR_NOSYSTEM')) or real_diff(*args))
+    convert.configure_daydream_task(task, pinned_wheel)
+    assert seen == ['1']

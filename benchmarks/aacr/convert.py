@@ -4,12 +4,14 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
 import shutil
 import subprocess
 import tempfile
 import tomllib
+from unittest import mock
 
 from benchmarks.aacr.upstream import repo_utils, schema
 from benchmarks.aacr.upstream.converters.aacr_bench import convert_record
@@ -148,7 +150,9 @@ def configure_daydream_task(task: Path, wheel: Path) -> None:
     base, head = metadata['base_commit'], metadata['head_commit']
     if git_ops.head_sha(repo) != head or git_ops.status_porcelain(repo).strip():
         raise ValueError('Daydream task requires a clean pinned head')
-    patch = git_ops.diff(repo, base)
+    # Host system attributes (Apple Git's `*.mm diff=objc`) change hunk headers.
+    with mock.patch.dict(os.environ, GIT_ATTR_NOSYSTEM='1'):
+        patch = git_ops.diff(repo, base)
     comparison = dict(base_sha=base, head_sha=head,
         merge_base_sha=git_ops.merge_base(repo, base, head), diff_key=diff_key(patch),
         patch_sha256=hashlib.sha256(patch.encode()).hexdigest())
