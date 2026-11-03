@@ -7,8 +7,7 @@ gets its own sandboxed review, then a separate judge scores the findings against
 human-annotated review comments.
 
 The first integrated benchmark is
-[AACR-Bench](https://github.com/alibaba/aacr-bench). Results so far are in the
-[baseline report](docs/aacr-baseline.md).
+[AACR-Bench](https://github.com/alibaba/aacr-bench).
 
 ## Quick start
 
@@ -104,13 +103,12 @@ aren't equivalent to those published by AACR-Bench; see
 ```text
 benchmarks/aacr/  # AACR conversion, task templates, reviewer and judge adapters, scoring
 experiments/      # Harbor job configurations
-docs/             # Baseline results, citation guide and design decisions
+docs/             # Citation guide
 tests/            # Python and Node tests
 ```
 
-Harbor owns job configuration, task selection, attempts, concurrency, timeouts,
-retries, result storage and aggregation. This repository adds only what connects a
-benchmark to Harbor; see [the design decision](docs/adr/0001-use-native-harbor-execution.md).
+Harbor owns execution, from task selection to result storage; this repository adds
+only what connects a benchmark to it. See [Harbor first](CONTRIBUTING.md#harbor-first).
 
 ## Contributing and citation
 

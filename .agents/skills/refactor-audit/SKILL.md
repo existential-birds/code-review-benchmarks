@@ -15,8 +15,8 @@ A sweep request defaults to implementing supported refactors within its scope.
 Explicit review-only or planning requests stay read-only. Commit, push, merge,
 feature removal, and external changes require existing user authorization.
 
-Read root `AGENTS.md`, [GLOSSARY.md](../../../GLOSSARY.md), relevant
-[ADRs](../../../docs/adr/), and the selected requirements and public contracts.
+Read root `AGENTS.md`, [GLOSSARY.md](../../../GLOSSARY.md), and the selected
+requirements and public contracts.
 Pin a baseline, preserve pending work, and discover verification commands from
 actual configuration.
 
@@ -26,7 +26,7 @@ user's effort limit and report actual coverage; do not create speculative module
 
 ## Harbor before custom architecture
 
-Read [ADR 0001](../../../docs/adr/0001-use-native-harbor-execution.md). Harbor owns
+Read [Harbor first](../../../CONTRIBUTING.md#harbor-first). Harbor owns
 job configuration, task selection, attempt count, concurrency, timeouts, retries,
 scheduling, result storage, aggregation, and inspection where supported. Look
 first for custom code that duplicates those responsibilities.

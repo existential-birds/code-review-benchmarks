@@ -12,7 +12,7 @@ When the remote head moved after acquisition, refresh feedback and re-anchor the
 
 ## Per item
 
-1. Locate the target with `rg`; inspect the implementation, consumers, configuration, and current repository guidance. Read glossary/ADRs for domain claims.
+1. Locate the target with `rg`; inspect the implementation, consumers, configuration, and current repository guidance. Read the glossary for domain claims.
 2. Trace inputs and reachable behavior across conversion, task assets, reviewer adapters, verifier/scorer, judge adapters, and native Harbor jobs as applicable. A missing local guard alone does not establish a defect when an earlier invariant guarantees the input; verify that invariant.
 3. Exercise the stated conditions with the smallest meaningful test or command available. Record exact input/fixture, command, result, tested tree/commit, and evidence location. Keep observation separate from inference. Preserve a failing reproduction when fixing a behavioral bug; use the relevant existing test seam.
 4. Classify under [EVALUATION.md](EVALUATION.md). Missing runtime access, unavailable fixtures, or uncertain reachability remains an evidence gap, not proof of validity or invalidity. Use sufficient evidence to triage each item without requiring an entire benchmark run first.
@@ -28,7 +28,7 @@ When the remote head moved after acquisition, refresh feedback and re-anchor the
 | Execution/configuration | Harbor source/docs/tests for native controls and supported extension points; compare actual job configuration and trial artifacts rather than the wrapper's apparent limitations |
 | Import/type/config error | Pinned dependencies, package/build configuration and configured check; never invent a language toolchain from the proposed future layout |
 | Performance/cost regression | Comparable baseline/candidate inputs and settings, measured completion/usage/latency, and available monetary cost; a plausible optimization is not a measured regression |
-| Architecture/domain | `AGENTS.md`, glossary, relevant ADRs, neighboring modules, and demonstrated Harbor capability/gap; a design heuristic alone is not a defect |
+| Architecture/domain | `CONTRIBUTING.md`, glossary, neighboring modules, and demonstrated Harbor capability/gap; a design heuristic alone is not a defect |
 | Security/data handling | Reachable credential, subscription, untrusted repository/task, filesystem/network, log, and artifact boundaries; establish the actual exposure conditions |
 | Test quality | Observable conversion/scoring/adapter outcomes and meaningful negative cases; mock-call counts alone do not establish behavior |
 

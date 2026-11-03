@@ -12,8 +12,8 @@ Create a separate handoff file only when requested.
 
 ## Establish scope and branch
 
-- Read `AGENTS.md`, `CONTRIBUTING.md`, the root `GLOSSARY.md`, relevant
-  `docs/adr/`, and `README.md`. Read the full GitHub issue/spec, comments,
+- Read `AGENTS.md`, `CONTRIBUTING.md`, the root `GLOSSARY.md`, and
+  `README.md`. Read the full GitHub issue/spec, comments,
   amendments, and linked prerequisites from
   `existential-birds/code-review-benchmarks`. Resolve superseding decisions and
   distinguish them from stale linked requirements.
@@ -46,8 +46,7 @@ task selection, attempt count (`k`), concurrency, timeouts, retries, scheduling,
 result storage, aggregation, and inspection wherever supported. Prefer native
 configuration and supported extension points; narrow any custom integration to
 the demonstrated gap. Explain any conflict with
-`docs/adr/0001-use-native-harbor-execution.md` rather than silently replacing its
-decision.
+the Harbor-first rule in `CONTRIBUTING.md` rather than silently working around it.
 
 Collect every agent's findings and reconcile shared contracts before writing the
 prompt. Resolve conflicts with focused reads, and mark unanswered questions
