@@ -25,7 +25,6 @@ class DaydreamVerifier(PiJudgeVerifier):
                 or type(receipt.get('return_code')) is not int or receipt['return_code'] != 0):
             raise RuntimeError('Daydream host invocation did not finish successfully')
         await self.environment.upload_file(receipt_path, '/tmp/aacr-host-receipt.json')
-        # PiJudgeVerifier hands over the judge login; the factory's custom-verifier
-        # seam uploads the trusted tests again; retain native uploads, reward
-        # cleanup, execution and result parsing.
+        # PiJudgeVerifier uploads the judge login, then Harbor's native verify
+        # uploads the trusted tests, runs them and parses the reward.
         return await super().verify()

@@ -12,9 +12,9 @@ Create a separate handoff file only when requested.
 
 ## Establish scope and branch
 
-- Read `AGENTS.md`, `docs/agents/domain.md`, the root `GLOSSARY.md`, relevant
-  `docs/adr/`, and `README.md`. Follow `docs/agents/issue-tracker.md` when reading
-  the full issue/spec, comments, amendments, and linked prerequisites from
+- Read `AGENTS.md`, `CONTRIBUTING.md`, the root `GLOSSARY.md`, relevant
+  `docs/adr/`, and `README.md`. Read the full GitHub issue/spec, comments,
+  amendments, and linked prerequisites from
   `existential-birds/code-review-benchmarks`. Resolve superseding decisions and
   distinguish them from stale linked requirements.
 - Inspect the current branch, HEAD, worktree status, and remotes. Preserve and
@@ -25,10 +25,8 @@ Create a separate handoff file only when requested.
   choose a unique name. If preserving edits prevents a safe checkout, leave them
   in place and report the branch blocker.
 - Confirm the actual branch before gathering context. Inspect the current
-  repository for build/test configuration, hooks, CI, and PR guidance. This repo
-  began as a scaffold: planned benchmark directories and README examples are not
-  proof that implementations or verification commands exist. Record unavailable
-  checks rather than importing Daydream Cloud's commands.
+  repository for build/test configuration, hooks, CI, and PR guidance. Record
+  unavailable checks rather than borrowing commands from other repositories.
 
 ## Gather implementation context
 
@@ -40,8 +38,8 @@ seams, dependencies, and unresolved risks. Agents leave file edits and
 implementation to the new session. If delegation is unavailable, gather the same
 evidence directly and state that limitation.
 
-For work that could require custom code, inspect the Harbor checkout at
-`/Users/ka/github/harbor` before proposing an implementation. Check relevant
+For work that could require custom code, inspect the Harbor checkout at its
+pinned revision (see `README.md`) before proposing an implementation. Check relevant
 source, documentation, and tests. Record inspected paths or symbols, what Harbor
 already provides, and the precise remaining gap. Harbor owns job configuration,
 task selection, attempt count (`k`), concurrency, timeouts, retries, scheduling,

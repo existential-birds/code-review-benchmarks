@@ -25,9 +25,7 @@ The default excludes both authors and resolved inline threads.
 
 ## Resolve the target
 
-Read [AGENTS.md](../../../AGENTS.md) and the [tracker guide](../../../docs/agents/issue-tracker.md).
-Handling a selected PR's feedback is separate from using PRs as a general issue-triage request surface.
-Discover the repository from
+Read [AGENTS.md](../../../AGENTS.md). Discover the repository from
 the checkout rather than hard-coding an owner, fork, or branch. Commands below use
 shell variables populated from successful JSON responses, not literal placeholders.
 

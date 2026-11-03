@@ -20,13 +20,15 @@ build/
 dist/
 *.egg-info/
 
+# Node dependencies
+node_modules/
+
 # Generated benchmark assets and execution evidence
 /artifacts/
 /snapshots/
 /jobs/
 /results/
 /.cache/
-.firecrawl/
 
 # Skills installed from skills-lock.json; only our own skills are tracked
 .agents/skills/*
@@ -36,8 +38,8 @@ dist/
 !.agents/skills/refactor-audit/
 !.agents/skills/respond-pr-feedback/
 !.agents/skills/test-audit/
+
+# Local agent tooling
+.firecrawl/
 .hermes/
 docs/agents/
-
-# Node dependencies
-node_modules/

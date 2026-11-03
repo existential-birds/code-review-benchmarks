@@ -80,8 +80,7 @@ def _validate_daydream_completion(instance, findings_path: Path, findings: dict,
     if (execution.get('analyzed_comparison') != expected or execution.get('post_comparison') != expected
             or execution.get('findings_sha256') != hashlib.sha256(findings_path.read_bytes()).hexdigest()):
         raise VerificationError('Daydream comparison or finalized findings differ')
-    # Keep the authoritative runtime's schema and coverage invariants. Oracle
-    # verification has no Daydream dependency and retains its existing boundary.
+    # Imported here because the oracle task's verifier image has no Daydream.
     from daydream.review_result import validate_terminal_result
     terminal = execution.get('terminal_result')
     validate_terminal_result(terminal, expected_head_sha=instance.head_commit)

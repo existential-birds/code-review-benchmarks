@@ -2,7 +2,6 @@
 call that slips past the fakes in ``fake_git.py`` fails the test instead of
 reaching the real Git and the operator's configuration."""
 import os
-from pathlib import Path
 
 import pytest
 

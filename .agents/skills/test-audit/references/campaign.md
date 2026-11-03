@@ -15,7 +15,7 @@ commands. If runtime is a goal, fix selection, workers, retries, coverage, and
 setup/teardown settings before measuring.
 
 Done when every in-scope file has a reproducible result or an explicit prerequisite
-blocker. A scaffold with no tests is a coverage gap, not a pruning opportunity.
+blocker. Missing tests are a coverage gap, not a pruning opportunity.
 
 ## 2. Inventory by production owner
 

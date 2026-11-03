@@ -85,7 +85,8 @@ def ensure_raw_file(input_path: Path) -> Path:
     Reuse a local file if its checksum passes or metadata has no sha256. Otherwise,
     download from url to the target path in chunks via a temporary file and atomic
     os.replace, so an interrupted download cannot be reused as a valid cache entry.
-    Then verify SHA-256 integrity. Exit if both the file and metadata are missing.
+    Then verify SHA-256 integrity. Without a url, exit if the file is missing or
+    fails its checksum.
     """
     input_path = Path(input_path)
     meta_path = input_path.with_name(f"{input_path.stem}.meta.json")

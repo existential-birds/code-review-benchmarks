@@ -7,16 +7,18 @@ gets its own sandboxed review, then a separate judge scores the findings against
 human-annotated review comments.
 
 The first integrated benchmark is
-[AACR-Bench](https://github.com/alibaba/aacr-bench).
+[AACR-Bench](https://github.com/alibaba/aacr-bench). Results so far are in the
+[baseline report](docs/aacr-baseline.md).
 
 ## Quick start
 
-This reviews one pull request and scores it. You need: 
-- Docker
-- [`uv`](https://docs.astral.sh/uv/),
-- Node 22.19 or later,
-- a Codex login for the reviewer, and
-- [Pi](https://shittycodingagent.ai/) authenticated to Codex subscription
+This reviews one pull request and scores it. You need:
+
+- Docker, Git and Git LFS
+- [`uv`](https://docs.astral.sh/uv/) and Node 22.19 or later
+- A Codex login for the reviewer
+- [Pi](https://shittycodingagent.ai/) logged in to an OpenAI Codex subscription,
+  for the judge
 
 **1. Get the pinned sources.** The suite expects exact revisions of each project:
 
@@ -53,8 +55,7 @@ npm ci --omit=dev --prefix benchmarks/aacr
 The last command installs the pinned Pi SDK, which refreshes the judge's login on
 your machine before scoring.
 
-**3. Point the suite at your logins.** Use your normal login folders. You don't need
-a separate login or a copy of `auth.json`:
+**3. Point the suite at your logins.** Use your normal login folders, not a copy:
 
 ```sh
 export AACR_CODEX_AUTH_DIR=~/.codex
@@ -92,9 +93,7 @@ cases and read job output.
 - **Balanced score** is AACR's combined score, computed from those two.
 
 Scores pool raw counts across review cases. A review must finish to be scored, so
-read scores alongside the failure count. The
-[baseline report](docs/aacr-baseline.md) shows both, with usage and time reported
-separately.
+read scores alongside the failure count.
 
 Only compare runs that use the same review cases and scoring settings. Scores here
 aren't equivalent to those published by AACR-Bench; see
@@ -103,19 +102,20 @@ aren't equivalent to those published by AACR-Bench; see
 ## Repository layout
 
 ```text
-benchmarks/
-  aacr/           # AACR conversion, task definitions, verifier and metrics
+benchmarks/aacr/  # AACR conversion, task templates, reviewer and judge adapters, scoring
 experiments/      # Harbor job configurations
-docs/             # Baseline results and citation guide
+docs/             # Baseline results, citation guide and design decisions
+tests/            # Python and Node tests
 ```
 
 Harbor owns job configuration, task selection, attempts, concurrency, timeouts,
 retries, result storage and aggregation. This repository adds only what connects a
-benchmark to Harbor: conversion, verification, and the Daydream and judge adapters.
-See [the design decision](docs/adr/0001-use-native-harbor-execution.md).
+benchmark to Harbor; see [the design decision](docs/adr/0001-use-native-harbor-execution.md).
 
-## Citation
+## Contributing and citation
 
-Cite the original benchmark and the exact release or commit of this suite. See
-[Citing this suite](docs/citing.md) for citations, inputs and differences from
-upstream.
+See [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request. To cite results,
+cite the original benchmark and the exact commit of this suite; see
+[Citing this suite](docs/citing.md).
+
+Licensed under [Apache-2.0](LICENSE).

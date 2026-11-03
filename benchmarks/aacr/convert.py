@@ -132,7 +132,7 @@ def prepare_context(instance: schema.ReviewInstance, task: Path) -> Path:
 
 
 def configure_daydream_task(task: Path, wheel: Path) -> None:
-    """Add only the installed-reviewer gap to an ordinary isolated Harbor task."""
+    """Make a rendered task run the pinned Daydream wheel as its reviewer."""
     from daydream import git_ops
     from daydream.benchmark.reviewbench.harbor_build import NODE_IMAGE, reviewer_build
     from daydream.deep.artifacts import diff_key
@@ -190,7 +190,7 @@ def configure_daydream_task(task: Path, wheel: Path) -> None:
         # a refresh in the container reaches the host. Must stay writable.
         '        source: ${AACR_CODEX_AUTH_DIR:?set to your Codex login folder, usually ~/.codex}/auth.json\n'
         '        target: /run/aacr-codex/auth.json\n        bind:\n          create_host_path: false\n')
-    # Keep Pi SDK/provider/model locked exactly as in the Oracle verifier.
+    # The verifier installs the same locked Pi SDK as the oracle task's verifier.
     (task / 'tests/Dockerfile').write_text(
         f'FROM {NODE_IMAGE}\nRUN apt-get update && apt-get install -y --no-install-recommends '
         'git ca-certificates && rm -rf /var/lib/apt/lists/*\n' + suffix +
@@ -256,7 +256,7 @@ def write_task(record: dict, output: Path, daydream_wheel: Path | None) -> Path:
 
 
 def generate_task(upstream: Path, output: Path, *, daydream_wheel: Path | None = None) -> Path:
-    """Preserve the pinned single Laravel Oracle/integration fixture."""
+    """Generate the Laravel oracle task run by experiments/aacr-oracle.yaml."""
     records = [record for record in load_records(upstream) if record['githubPrUrl'] == PR_URL]
     if len(records) != 1 or records[0]['source_commit'] != BASE or records[0]['target_commit'] != HEAD:
         raise ValueError('Expected exactly the pinned Laravel review case')
