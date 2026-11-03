@@ -1,7 +1,7 @@
 """AACR's narrow async text-completion interface backed by Pi's subscription SDK.
 
-No credentials pass through this process or its evidence. Pi reads and refreshes
-its native store inside the separate verifier.
+No credentials pass through this process or its evidence. Pi reads a copy of its
+login that the host refreshed and uploaded to the separate verifier.
 """
 from __future__ import annotations
 

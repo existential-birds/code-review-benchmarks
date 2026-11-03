@@ -3,6 +3,7 @@ import asyncio
 import hashlib
 import json
 from pathlib import Path
+import time
 from types import SimpleNamespace
 import uuid
 
@@ -418,7 +419,7 @@ def test_daydream_missing_native_host_artifact_cannot_publish_reward(tmp_path):
     'cancelled', 'timeout', 'failed', 'missing', 'shared_agent', 'shared_artifacts', 'wrong_image',
     'judge_failure', 'stale', 'missing_output', 'empty', 'findings',
 ])
-def test_native_verifier_keeps_host_completion_authoritative_after_sandbox_forgery(tmp_path, outcome):
+def test_native_verifier_keeps_host_completion_authoritative_after_sandbox_forgery(tmp_path, monkeypatch, outcome):
     """Agent.run -> configured native verifier -> real scorer, with hostile logs."""
     import shutil
     import yaml
@@ -495,6 +496,16 @@ def test_native_verifier_keeps_host_completion_authoritative_after_sandbox_forge
     if outcome == 'missing':
         (trial.trial_dir / 'daydream-receipt.json').unlink(missing_ok=True)
 
+    from benchmarks.aacr import judge_verifier
+    pi_home = tmp_path / 'pi-agent'
+    pi_home.mkdir()
+    (pi_home / 'auth.json').write_text(json.dumps({'openai-codex': {'type': 'oauth', 'access': 'a',
+        'refresh': 'r', 'accountId': 'account', 'expires': (time.time() + 3600) * 1000}}))
+    monkeypatch.setenv('AACR_PI_AUTH_DIR', str(pi_home))
+    async def fresh_login(auth_path, min_validity_ms):
+        pass
+    monkeypatch.setattr(judge_verifier, 'refresh_host_login', fresh_login)
+
     class VerifierEnvironment:
         os = TaskOS.LINUX
         environment_dir = task.paths.environment_dir if outcome == 'wrong_image' else task.paths.tests_dir
@@ -508,7 +519,11 @@ def test_native_verifier_keeps_host_completion_authoritative_after_sandbox_forge
                     and host_path == trial.agent_dir)
                 or (outcome == 'shared_artifacts' and str(environment_path) == '/logs/artifacts'
                     and host_path == trial.artifacts_dir / 'logs/artifacts'))
+        judge_login = None
         async def upload_file(self, source_path, target_path):
+            if target_path == '/run/aacr-pi/auth.json':
+                self.judge_login = json.loads(Path(source_path).read_text())
+                return
             assert target_path == '/tmp/aacr-host-receipt.json'
             shutil.copyfile(source_path, self.receipt)
         async def upload_dir(self, source_dir, target_dir):
@@ -529,8 +544,9 @@ def test_native_verifier_keeps_host_completion_authoritative_after_sandbox_forge
             return SimpleNamespace(return_code=0, stdout='', stderr='')
 
     config = yaml.safe_load((Path(__file__).resolve().parents[1] / 'experiments/aacr-baseline.yaml').read_text())
+    environment = VerifierEnvironment()
     verifier = VerifierFactory.create_verifier_from_config(VerifierConfig(**config.get('verifier', {})),
-        task=task, trial_paths=trial, environment=VerifierEnvironment())
+        task=task, trial_paths=trial, environment=environment)
     failures = {'cancelled', 'timeout', 'failed', 'missing', 'shared_agent', 'shared_artifacts',
                 'wrong_image', 'judge_failure', 'stale', 'missing_output'}
     if outcome in failures:
@@ -539,6 +555,9 @@ def test_native_verifier_keeps_host_completion_authoritative_after_sandbox_forge
         assert not trial.reward_json_path.exists()
         assert not trial.reward_text_path.exists()
         assert retained_execution.read_bytes() == expected_execution
+        # A rejected host receipt stops the trial before the judge gets a login.
+        scored = outcome in {'judge_failure', 'stale', 'missing_output'}
+        assert (environment.judge_login is not None) is scored
         if outcome == 'timeout':
             assert json.loads((trial.trial_dir / 'daydream-receipt.json').read_text())['status'] == 'cancelled'
         if outcome in {'judge_failure', 'stale', 'missing_output'}:
@@ -550,5 +569,6 @@ def test_native_verifier_keeps_host_completion_authoritative_after_sandbox_forge
             assert list((trial.verifier_dir / 'upstream').glob('metrics_*.json'))
     else:
         result = asyncio.run(verifier.verify())
+        assert set(environment.judge_login) == {'openai-codex'}
         assert result.rewards['balanced_score'] == (0.667 if findings else 0.0)
         assert trial.reward_json_path.is_file()

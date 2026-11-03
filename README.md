@@ -14,6 +14,7 @@ The first integrated benchmark is
 This reviews one pull request and scores it. You need: 
 - Docker
 - [`uv`](https://docs.astral.sh/uv/),
+- Node 22.19 or later,
 - a Codex login for the reviewer, and
 - [Pi](https://shittycodingagent.ai/) authenticated to Codex subscription
 
@@ -46,15 +47,22 @@ uv pip install --python .venv/bin/python -e ../harbor
 uv pip install --python .venv/bin/python --no-deps --reinstall \
   .cache/daydream-wheel/daydream-0.30.0-py3-none-any.whl
 uv pip install --python .venv/bin/python --no-deps -e .
+npm ci --omit=dev --prefix benchmarks/aacr
 ```
 
-**3. Point the suite at your logins.** Keep these directories writable so tokens can
-refresh:
+The last command installs the pinned Pi SDK, which refreshes the judge's login on
+your machine before scoring.
+
+**3. Point the suite at your logins.** Use your normal login folders. You don't need
+a separate login or a copy of `auth.json`:
 
 ```sh
-export AACR_CODEX_AUTH_DIR=/path/to/codex-login
-export AACR_PI_AUTH_DIR=/path/to/pi-login
+export AACR_CODEX_AUTH_DIR=~/.codex
+export AACR_PI_AUTH_DIR=~/.pi/agent
 ```
+
+The reviewer sees only your Codex `auth.json`. The judge gets only Pi's
+`openai-codex` login, refreshed on your machine first.
 
 **4. Generate one review case:**
 

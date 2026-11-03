@@ -1,10 +1,6 @@
-"""Generated Daydream task boundaries, using real task and Git assets."""
+"""Generated Daydream task boundaries, using real task assets and a faked Git checkout."""
 import hashlib
 import json
-import os
-from pathlib import Path
-import shutil
-import subprocess
 import tomllib
 import zipfile
 
@@ -12,6 +8,7 @@ import pytest
 import yaml
 
 from benchmarks.aacr import convert
+from fake_git import BASE, HEAD, PATCH, FakeCheckout
 
 
 @pytest.fixture
@@ -25,30 +22,23 @@ def pinned_wheel(tmp_path, monkeypatch):
     return wheel
 
 
-@pytest.mark.parametrize('pr_url', [convert.PR_URL, 'https://github.com/owner/project/pull/17'])
-def test_daydream_task_freezes_runtime_comparison_and_keeps_oracle_separate(tmp_path, pinned_wheel, pr_url):
-    record = {
-        'githubPrUrl': pr_url, 'project_main_language': 'PHP',
-        'source_commit': convert.BASE, 'target_commit': convert.HEAD,
-        'comments': [{'path': 'file.php', 'note': 'verifier only annotation'}],
-    }
+def daydream_case(tmp_path, monkeypatch, pr_url=convert.PR_URL, comments=()):
+    """A rendered review case whose checkout Git would report at BASE..HEAD."""
     task = tmp_path / 'task'
-    convert.render_task(record, task)
+    convert.render_task({'githubPrUrl': pr_url, 'project_main_language': 'PHP',
+        'source_commit': convert.BASE, 'target_commit': convert.HEAD, 'comments': list(comments)}, task)
     repo = task / 'environment/repo'
     repo.mkdir()
-    def git(*args):
-        return subprocess.check_output(['git', '-C', str(repo), *args], text=True).strip()
-    git('init', '-q')
-    (repo / 'file.php').write_text('base\n')
-    git('add', '.')
-    git('-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'base')
-    base = git('rev-parse', 'HEAD')
     (repo / 'file.php').write_text('head\n')
-    git('add', '.')
-    git('-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'head')
-    head = git('rev-parse', 'HEAD')
-    metadata = (task / 'task.toml').read_text().replace(convert.BASE, base).replace(convert.HEAD, head)
+    metadata = (task / 'task.toml').read_text().replace(convert.BASE, BASE).replace(convert.HEAD, HEAD)
     (task / 'task.toml').write_text(metadata)
+    return task, FakeCheckout(repo).install(monkeypatch)
+
+
+@pytest.mark.parametrize('pr_url', [convert.PR_URL, 'https://github.com/owner/project/pull/17'])
+def test_daydream_task_freezes_runtime_comparison_and_keeps_oracle_separate(tmp_path, monkeypatch, pinned_wheel, pr_url):
+    task, checkout = daydream_case(tmp_path, monkeypatch, pr_url,
+                                   [{'path': 'file.php', 'note': 'verifier only annotation'}])
     wheel = pinned_wheel
     modified_wheel = tmp_path / 'modified' / wheel.name
     modified_wheel.parent.mkdir()
@@ -64,15 +54,20 @@ def test_daydream_task_freezes_runtime_comparison_and_keeps_oracle_separate(tmp_
     convert.configure_daydream_task(task, wheel)
     comparison = json.loads((task / 'environment/aacr/comparison.json').read_text())
     patch = (task / 'environment/aacr/diff.patch').read_bytes()
-    assert comparison == dict(base_sha=base, head_sha=head, merge_base_sha=base,
+    assert patch == PATCH.encode()
+    assert comparison == dict(base_sha=BASE, head_sha=HEAD, merge_base_sha=BASE,
         patch_sha256=hashlib.sha256(patch).hexdigest(), diff_key=hashlib.sha256(patch).hexdigest())
-    assert b'-base\n+head' in patch
     assert (task / 'tests/comparison.json').read_bytes() == (task / 'environment/aacr/comparison.json').read_bytes()
     config = tomllib.loads((task / 'task.toml').read_text())
     assert config['agent']['timeout_sec'] >= 1800
     assert config['environment']['network_mode'] == 'public'
     compose = yaml.safe_load((task / 'environment/docker-compose.yaml').read_text())
     assert compose['services']['main']['security_opt'] == ['seccomp=unconfined']
+    # Only the Codex login file, writable, so an in-container refresh reaches the host.
+    assert compose['services']['main']['volumes'] == [{'type': 'bind',
+        'source': '${AACR_CODEX_AUTH_DIR:?set to your Codex login folder, usually ~/.codex}/auth.json',
+        'target': '/run/aacr-codex/auth.json', 'bind': {'create_host_path': False}}]
+    assert not (task / 'tests/docker-compose.yaml').exists()
     assert config.get('artifacts', []) == []
     assert config['metadata']['daydream_wheel_sha256'] == hashlib.sha256(wheel.read_bytes()).hexdigest()
     assert '--daydream-proof /logs/artifacts/daydream' in (task / 'tests/test.sh').read_text()
@@ -82,85 +77,38 @@ def test_daydream_task_freezes_runtime_comparison_and_keeps_oracle_separate(tmp_
     assert config['task']['keywords'] == ['code-review', 'aacr', 'daydream']
 
 
+@pytest.mark.parametrize('pr_url', [convert.PR_URL, 'https://github.com/owner/project/pull/17'])
+def test_daydream_task_refuses_a_checkout_that_is_not_the_clean_pinned_head(tmp_path, monkeypatch, pinned_wheel, pr_url):
+    task, checkout = daydream_case(tmp_path, monkeypatch, pr_url)
+    for change in ('head', 'dirty'):
+        if change == 'head':
+            checkout.head = BASE
+        else:
+            checkout.head = HEAD
+            (task / 'environment/repo/file.php').write_text('operator edit\n')
+        with pytest.raises(ValueError, match='clean pinned head'):
+            convert.configure_daydream_task(task, pinned_wheel)
+        assert not (task / 'environment/aacr').exists()
+
+
 @pytest.mark.parametrize('reviewer', ['plain', 'daydream'])
-def test_emitted_runtime_preserves_clean_materialized_lfs_context(tmp_path, monkeypatch, pinned_wheel, reviewer):
-    # Host conversion has native LFS filters; Docker starts with neutral Git config.
-    host_system = tmp_path / 'host-system.gitconfig'
-    host_global = tmp_path / 'host-global.gitconfig'
-    host_global.touch()
-    monkeypatch.setenv('GIT_CONFIG_SYSTEM', str(host_system))
-    monkeypatch.setenv('GIT_CONFIG_GLOBAL', str(host_global))
-    subprocess.run(['git', 'lfs', 'install', '--system'], cwd=tmp_path, check=True, capture_output=True)
-    task = tmp_path / 'task'
-    record = {'githubPrUrl': 'https://github.com/owner/project/pull/17',
-              'project_main_language': 'Python', 'source_commit': convert.BASE,
-              'target_commit': convert.HEAD, 'comments': []}
-    convert.render_task(record, task)
-    repo = task / 'environment/repo'
-    repo.mkdir()
-    def git(*args, directory=repo, env=None):
-        return subprocess.check_output(['git', '-C', str(directory), *args], text=True, env=env).strip()
-    git('init', '-q')
-    (repo / 'file.py').write_text('base\n')
-    git('add', '.')
-    git('-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'base')
-    base = git('rev-parse', 'HEAD')
-    git('lfs', 'track', '*.bin')
-    contents = 'materialized LFS object\n' * 100
-    (repo / 'asset.bin').write_text(contents)
-    git('add', '.')
-    git('-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'LFS head')
-    head = git('rev-parse', 'HEAD')
-    assert git('show', 'HEAD:asset.bin').startswith('version https://git-lfs.github.com/spec/v1')
-    assert git('status', '--porcelain') == ''
-    metadata = (task / 'task.toml').read_text().replace(convert.BASE, base).replace(convert.HEAD, head)
-    (task / 'task.toml').write_text(metadata)
+def test_review_image_materializes_lfs_before_copying_the_checkout(tmp_path, monkeypatch, pinned_wheel, reviewer):
+    # The host checkout holds real LFS objects; the image needs LFS filters before
+    # the copy, or Git in the container reports every LFS file as modified.
+    task, _ = daydream_case(tmp_path, monkeypatch, 'https://github.com/owner/project/pull/17')
     if reviewer == 'daydream':
         convert.configure_daydream_task(task, pinned_wheel)
-    dockerfile = (task / 'environment/Dockerfile').read_text()
-    runtime_system = tmp_path / 'runtime-system.gitconfig'
-    runtime_global = tmp_path / 'runtime-global.gitconfig'
-    runtime_system.touch()
-    runtime_global.touch()
-    runtime_env = dict(os.environ, GIT_CONFIG_SYSTEM=str(runtime_system), GIT_CONFIG_GLOBAL=str(runtime_global))
-    copied = tmp_path / 'runtime-repo'
-    shutil.copytree(repo, copied)
-    assert (copied / 'asset.bin').read_text() == contents
-    assert 'asset.bin' in git('status', '--porcelain', directory=copied, env=runtime_env)
-    # Execute the emitted pre-COPY setup with the real native binary, using a
-    # private system config file so the test cannot modify the operator's filters.
-    for line in dockerfile.splitlines():
-        if line.startswith('COPY repo/'):
-            break
-        if line.startswith('RUN git lfs '):
-            subprocess.run(line[4:], shell=True, cwd=tmp_path, env=runtime_env,
-                           check=True, capture_output=True)
-    assert git('status', '--porcelain', directory=copied, env=runtime_env) == ''
-    assert git('rev-parse', 'HEAD', directory=copied, env=runtime_env) == head
-    assert (copied / 'asset.bin').read_text() == contents
-    assert 'git-lfs' in next(line for line in dockerfile.splitlines() if 'apt-get install' in line)
+    lines = (task / 'environment/Dockerfile').read_text().splitlines()
+    install = next(index for index, line in enumerate(lines) if 'apt-get install' in line)
+    assert 'git-lfs' in lines[install]
+    lfs = lines.index('RUN git lfs install --system')
+    copy = next(index for index, line in enumerate(lines) if line.startswith('COPY repo/'))
+    assert install < lfs < copy
 
 
 def test_frozen_patch_ignores_host_system_git_attributes(tmp_path, pinned_wheel, monkeypatch):
     """Apple Git's system attributes change `.mm` hunk headers; the reviewer's Git has none."""
-    from daydream import git_ops
     monkeypatch.delenv('GIT_ATTR_NOSYSTEM', raising=False)
-    task = tmp_path / 'task'
-    convert.render_task({'githubPrUrl': convert.PR_URL, 'project_main_language': 'PHP',
-        'source_commit': convert.BASE, 'target_commit': convert.HEAD, 'comments': []}, task)
-    repo = task / 'environment/repo'
-    repo.mkdir()
-    def git(*args):
-        return subprocess.check_output(['git', '-C', str(repo), *args], text=True).strip()
-    git('init', '-q')
-    (repo / 'file.php').write_text('base\n')
-    git('add', '.')
-    git('-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'base')
-    commit = git('rev-parse', 'HEAD')
-    metadata = (task / 'task.toml').read_text().replace(convert.BASE, commit).replace(convert.HEAD, commit)
-    (task / 'task.toml').write_text(metadata)
-    seen = []
-    real_diff = git_ops.diff
-    monkeypatch.setattr(git_ops, 'diff', lambda *args: seen.append(os.environ.get('GIT_ATTR_NOSYSTEM')) or real_diff(*args))
+    task, checkout = daydream_case(tmp_path, monkeypatch)
     convert.configure_daydream_task(task, pinned_wheel)
-    assert seen == ['1']
+    assert [environment.get('GIT_ATTR_NOSYSTEM') for environment in checkout.diff_environments] == ['1']

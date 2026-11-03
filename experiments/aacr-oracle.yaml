@@ -7,6 +7,8 @@ retry:
   max_retries: 0
 agents:
   - name: oracle
+verifier:
+  import_path: benchmarks.aacr.judge_verifier:PiJudgeVerifier
 environment:
   type: docker
   delete: true

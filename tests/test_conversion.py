@@ -5,7 +5,6 @@ import io
 import json
 import os
 from pathlib import Path
-import subprocess
 import sys
 import tempfile
 import tomllib
@@ -13,15 +12,24 @@ import unittest
 from unittest.mock import patch
 
 from benchmarks.aacr import convert
-from benchmarks.aacr.upstream import evaluate, schema
+from benchmarks.aacr.upstream import evaluate, repo_utils, schema
 from benchmarks.aacr.upstream.converters import aacr_bench
+from fake_git import BASE, HEAD, FakeGitCli
 
 
 class ConversionTests(unittest.TestCase):
+    def fake_git(self, **settings):
+        git = FakeGitCli()
+        for name, value in settings.items():
+            setattr(git, name, value)
+        self.enterContext(patch.object(convert, 'subprocess', git))
+        return git
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
+        self.git = self.fake_git()
         self.record = {
             'githubPrUrl': 'https://github.com/laravel/framework/pull/56591',
             'project_main_language': 'PHP',
@@ -81,6 +89,9 @@ class ConversionTests(unittest.TestCase):
         for path in task.rglob('*'):
             if path.is_file() and 'tests' not in path.relative_to(task).parts:
                 self.assertNotIn('synthetic verifier-only reference', path.read_text())
+        # The judge's login is uploaded by the verifier, never mounted.
+        self.assertEqual([path for path in (task / 'tests').rglob('*')
+                          if path.name.startswith(('docker-compose', 'compose'))], [])
 
     def test_upstream_schema_rejects_invalid_anchor_before_render(self):
         self.record['comments'][0]['from_line'] = -1
@@ -88,129 +99,65 @@ class ConversionTests(unittest.TestCase):
             convert.render_task(self.record, self.root / 'task')
         self.assertFalse((self.root / 'task/task.toml').exists())
 
-    def test_source_pin_rejects_wrong_checkout(self):
+    def test_source_pin_rejects_wrong_or_modified_checkout(self):
         source = self.root / 'source'
         source.mkdir()
-        subprocess.run(['git', 'init', '-q', str(source)], check=True)
+        self.git.checkout(source, 'c' * 40)
         with self.assertRaisesRegex(ValueError, 'AACR revision'):
             convert.generate_task(source, self.root / 'output')
-
-    def test_source_pin_rejects_modified_checkout(self):
-        source = self.root / 'source'
-        source.mkdir()
-        subprocess.run(['git', 'init', '-q', str(source)], check=True)
-        tracked = source / 'tracked'
-        tracked.write_text('original')
-        subprocess.run(['git', '-C', str(source), 'add', 'tracked'], check=True)
-        subprocess.run(['git', '-C', str(source), '-c', 'user.name=Test', '-c',
-                        'user.email=test@example.invalid', 'commit', '-qm', 'source'], check=True)
-        revision = subprocess.check_output(['git', '-C', str(source), 'rev-parse', 'HEAD'], text=True).strip()
-        tracked.write_text('operator modification')
-        with patch.object(convert, 'AACR_REVISION', revision):
+        self.git.checkout(source, 'c' * 40, status=' M tracked\n')
+        with patch.object(convert, 'AACR_REVISION', 'c' * 40):
             with self.assertRaisesRegex(ValueError, 'clean AACR checkout'):
                 convert.generate_task(source, self.root / 'output')
-        self.assertEqual(tracked.read_text(), 'operator modification')
+        self.assertFalse((self.root / 'output').exists())
 
-    def test_prepare_context_uses_isolated_repo_with_both_revisions(self):
-        origin = self.root / 'origin'
-        origin.mkdir()
-        subprocess.run(['git', 'init', '-q', str(origin)], check=True)
-        def git(*args):
-            return subprocess.check_output(['git', '-C', str(origin), *args], text=True).strip()
-        (origin / 'file.php').write_text('base\n')
-        git('add', 'file.php')
-        git('-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'base')
-        base = git('rev-parse', 'HEAD')
-        (origin / 'file.php').write_text('head\n')
-        git('add', 'file.php')
-        git('-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'head')
-        head = git('rev-parse', 'HEAD')
-        (origin / 'operator-file').write_text('preserve')
-        instance = schema.ReviewInstance('test', 'owner/name', base, head, str(origin))
-        task = self.root / 'task'
-        repo = convert.prepare_context(instance, task)
-        self.assertEqual(repo, task / 'environment/repo')
-        self.assertEqual(subprocess.check_output(['git', '-C', str(repo), 'rev-parse', 'HEAD'], text=True).strip(), head)
-        self.assertEqual(subprocess.check_output(['git', '-C', str(repo), 'status', '--porcelain'], text=True), '')
-        subprocess.run(['git', '-C', str(repo), 'cat-file', '-e', base + '^{commit}'], check=True)
-        self.assertEqual((origin / 'operator-file').read_text(), 'preserve')
+    def context(self, task='task'):
+        instance = schema.ReviewInstance('test', 'owner/name', BASE, HEAD, 'https://example.invalid/owner/name')
+        return convert.prepare_context(instance, self.root / task)
+
+    def test_prepare_context_fetches_only_the_pinned_revisions_with_local_lfs(self):
+        repo = self.context()
+        self.assertEqual(repo, self.root / 'task/environment/repo')
+        self.assertTrue(repo.is_dir())
+        self.assertEqual(sorted(path.name for path in repo.parent.iterdir()), ['repo'])
+        commands = self.git.commands
+        # LFS filters come from the context itself, not from host or image configuration.
+        self.assertLess(commands.index(('lfs', 'install', '--local', '--skip-repo')), commands.index(self.git.fetches()[0]))
+        self.assertIn(('remote', 'add', 'origin', 'https://example.invalid/owner/name'), commands)
+        self.assertEqual(self.git.fetches(), [('fetch', '--no-tags', '--depth=32', 'origin', BASE, HEAD)])
+        self.assertIn(('checkout', '--detach', HEAD), commands)
         with self.assertRaises(FileExistsError):
-            convert.prepare_context(instance, task)
+            self.context()
 
-    def test_context_configures_lfs_filters_without_ambient_host_configuration(self):
-        origin = self.root / 'origin'
-        origin.mkdir()
-        neutral = self.root / 'neutral.gitconfig'
-        neutral.touch()
-        def git(*args):
-            return subprocess.check_output(['git', '-C', str(origin), *args], text=True).strip()
-        contents = 'materialized LFS object\n' * 100
-        with patch.dict(os.environ, GIT_CONFIG_SYSTEM=str(neutral), GIT_CONFIG_GLOBAL=str(neutral)):
-            git('init', '-q')
-            git('lfs', 'install', '--local')
-            git('lfs', 'track', '*.bin')
-            (origin / 'asset.bin').write_text(contents)
-            git('add', '.')
-            git('-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'base')
-            head = git('rev-parse', 'HEAD')
-            self.assertTrue(git('show', 'HEAD:asset.bin').startswith('version https://git-lfs.github.com/spec/v1'))
-            instance = schema.ReviewInstance('test', 'owner/name', head, head, f'file://{origin}')
-            repo = convert.prepare_context(instance, self.root / 'task')
-        self.assertEqual((repo / 'asset.bin').read_text(), contents)
+    def test_prepare_context_rejects_a_checkout_that_is_not_the_clean_pinned_head(self):
+        self.git.context_status = ' M file.php\n'
+        with self.assertRaisesRegex(ValueError, 'clean pinned head'):
+            self.context()
+        self.assertEqual(list((self.root / 'task/environment').iterdir()), [])
 
-    def test_context_fetches_pinned_history_without_cloning_unrelated_history(self):
-        origin = self.root / 'origin'
-        origin.mkdir()
-        def git(*args):
-            return subprocess.check_output(['git', '-C', str(origin), *args], text=True).strip()
-        git('init', '-q')
-        for number in range(40):
-            (origin / 'file.php').write_text(str(number))
-            git('add', '.')
-            git('-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', str(number))
-        head = git('rev-parse', 'HEAD')
-        for distance in (1, 35):
-            with self.subTest(distance=distance):
-                base = git('rev-parse', f'HEAD~{distance}')
-                instance = schema.ReviewInstance('test', 'owner/name', base, head, str(origin))
-                repo = convert.prepare_context(instance, self.root / f'task-{distance}')
-                if distance == 1:
-                    self.assertLess(int(subprocess.check_output(['git', '-C', str(repo), 'rev-list', '--all', '--count'],
-                                                               text=True)), 40)
-                self.assertEqual(subprocess.check_output(['git', '-C', str(repo), 'merge-base', base, head],
-                                                        text=True).strip(), base)
-                self.assertEqual((repo / 'file.php').read_text(), '39')
-
-    def test_context_deepens_when_a_nearer_merge_base_is_hidden_by_shallow_history(self):
-        origin = self.root / 'origin'
-        origin.mkdir()
-        def git(*args):
-            return subprocess.check_output(['git', '-C', str(origin), *args], text=True).strip()
-        git('init', '-q')
-        (origin / 'file.php').write_text('context')
-        git('add', '.')
-        git('-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'root')
-        root = git('rev-parse', 'HEAD')
-        tree = git('rev-parse', 'HEAD^{tree}')
-        def commit(label, *parents):
-            arguments = [value for parent in parents for value in ('-p', parent)]
-            return git('-c', 'user.name=Test', '-c', 'user.email=test@example.invalid',
-                       'commit-tree', tree, *arguments, '-m', label)
-        nearer = commit('nearer common ancestor', root)
-        tips = []
-        for branch in ('base', 'head'):
-            tip = nearer
-            for number in range(40):
-                tip = commit(f'{branch}-{number}', tip)
-            tip = commit(f'{branch} merge', root, tip)
-            git('update-ref', f'refs/heads/{branch}', tip)
-            tips.append(tip)
-        base, head = tips
-        self.assertEqual(git('merge-base', base, head), nearer)
-        instance = schema.ReviewInstance('test', 'owner/name', base, head, str(origin))
-        repo = convert.prepare_context(instance, self.root / 'task')
-        self.assertEqual(subprocess.check_output(['git', '-C', str(repo), 'merge-base', base, head],
-                                                text=True).strip(), nearer)
+    def test_context_deepens_until_no_shallow_boundary_can_hide_a_nearer_merge_base(self):
+        scenarios = {
+            # An older common ancestor is visible, but a shallow boundary on one side
+            # could still hide a nearer one, so deepen once more.
+            'hidden nearer ancestor': ([
+                dict(merge_base='0' * 40, shallow=['1' * 40], exclusive=['1' * 40, '2' * 40]),
+                dict(merge_base='3' * 40, shallow=['4' * 40], exclusive=['2' * 40]),
+            ], ['--depth=32', '--deepen=32']),
+            # No common ancestor yet: keep doubling the depth while history is cut off.
+            'no visible ancestor': ([
+                dict(merge_base=None, shallow=['1' * 40], exclusive=[]),
+                dict(merge_base=None, shallow=['1' * 40], exclusive=[]),
+                dict(merge_base='3' * 40, shallow=[], exclusive=['2' * 40]),
+            ], ['--depth=32', '--deepen=32', '--deepen=64']),
+        }
+        for name, (rounds, fetches) in scenarios.items():
+            with self.subTest(name):
+                self.git = self.fake_git(rounds=rounds)
+                self.context(name.replace(' ', '-'))
+                self.assertEqual([args[2] for args in self.git.fetches()], fetches)
+        self.git = self.fake_git(rounds=[dict(merge_base=None, shallow=[], exclusive=[])])
+        with self.assertRaises(repo_utils.RepoError):
+            self.context('unrelated')
 
     def test_oracle_supplies_valid_fixed_finding_with_unknown_lines(self):
         task = self.root / 'task'
@@ -225,35 +172,22 @@ class ConversionTests(unittest.TestCase):
 
 
     def catalog_fixture(self, records):
-        origin = self.root / 'origin'
-        origin.mkdir()
-        def git(*args):
-            return subprocess.check_output(['git', '-C', str(origin), *args], text=True).strip()
-        git('init', '-q')
-        (origin / 'file.php').write_text('base\n')
-        git('add', '.')
-        git('-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'base')
-        base = git('rev-parse', 'HEAD')
-        (origin / 'file.php').write_text('head\n')
-        git('add', '.')
-        git('-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'head')
-        head = git('rev-parse', 'HEAD')
         for record in records:
-            record['source_commit'] = base
-            record['target_commit'] = head
+            record['source_commit'] = BASE
+            record['target_commit'] = HEAD
         source = self.root / 'source'
         dataset = source / 'dataset/positive_samples.json'
         dataset.parent.mkdir(parents=True)
+        self.git.checkout(source, 'c' * 40)
+        self.enterContext(patch.object(convert, 'AACR_REVISION', 'c' * 40))
+        self.enterContext(patch.object(schema.ReviewInstance, 'resolved_clone_url',
+                                       property(lambda _: 'https://example.invalid/origin')))
+        self.write_dataset(dataset, records)
+        return source
+
+    def write_dataset(self, dataset, records):
         dataset.write_text(json.dumps(records))
-        subprocess.run(['git', 'init', '-q', str(source)], check=True)
-        subprocess.run(['git', '-C', str(source), 'add', '.'], check=True)
-        subprocess.run(['git', '-C', str(source), '-c', 'user.name=Test', '-c',
-                        'user.email=test@example.invalid', 'commit', '-qm', 'dataset'], check=True)
-        revision = subprocess.check_output(['git', '-C', str(source), 'rev-parse', 'HEAD'], text=True).strip()
-        self.enterContext(patch.object(convert, 'AACR_REVISION', revision))
         self.enterContext(patch.object(convert, 'DATASET_SHA256', hashlib.sha256(dataset.read_bytes()).hexdigest()))
-        self.enterContext(patch.object(schema.ReviewInstance, 'resolved_clone_url', property(lambda _: str(origin))))
-        return source, origin
 
     def test_arbitrary_case_has_its_own_instruction_and_no_laravel_oracle(self):
         record = dict(self.record, githubPrUrl='https://github.com/owner/project/pull/17',
@@ -273,7 +207,7 @@ class ConversionTests(unittest.TestCase):
     def test_default_catalog_generates_every_case_with_retained_reference_accounting(self):
         records = [dict(self.record, githubPrUrl=f'https://github.com/owner/project{number}/pull/{number}')
                    for number in (2, 1)]
-        source, origin = self.catalog_fixture(records)
+        source = self.catalog_fixture(records)
         output = self.root / 'catalog'
         self.assertTrue(callable(getattr(convert, 'generate_catalog', None)), 'catalog conversion is missing')
         tasks = convert.generate_catalog(source, output)
@@ -281,8 +215,7 @@ class ConversionTests(unittest.TestCase):
         from harbor.models.task.task import Task
         for task in tasks:
             self.assertTrue(Task.is_valid_dir(task))
-            self.assertEqual(subprocess.check_output(['git', '-C', str(task / 'environment/repo'),
-                             'status', '--porcelain'], text=True), '')
+            self.assertTrue((task / 'environment/repo').is_dir())
             self.assertFalse((task / 'solution').exists())
             for path in task.rglob('*'):
                 if path.is_file() and 'tests' not in path.relative_to(task).parts and '.git' not in path.parts:
@@ -296,25 +229,18 @@ class ConversionTests(unittest.TestCase):
         self.assertEqual([case['status'] for case in report['cases']], ['generated', 'generated'])
         self.assertEqual(report['cases'][0]['base_commit'], records[0]['source_commit'])
         self.assertEqual(report['cases'][0]['head_commit'], records[0]['target_commit'])
-        self.assertEqual(subprocess.check_output(['git', '-C', str(origin), 'status', '--porcelain'], text=True), '')
 
     def test_catalog_reports_unavailable_revisions_and_keeps_other_cases(self):
         records = [dict(self.record, githubPrUrl=f'https://github.com/owner/project{number}/pull/{number}')
                    for number in (1, 2)]
-        source, _ = self.catalog_fixture(records)
+        source = self.catalog_fixture(records)
         records[0]['target_commit'] = '1' * 40
-        dataset = source / 'dataset/positive_samples.json'
-        dataset.write_text(json.dumps(records))
-        subprocess.run(['git', '-C', str(source), 'add', '.'], check=True)
-        subprocess.run(['git', '-C', str(source), '-c', 'user.name=Test', '-c',
-                        'user.email=test@example.invalid', 'commit', '-qm', 'unavailable'], check=True)
-        revision = subprocess.check_output(['git', '-C', str(source), 'rev-parse', 'HEAD'], text=True).strip()
+        self.git.unavailable.add('1' * 40)
+        self.write_dataset(source / 'dataset/positive_samples.json', records)
         output = self.root / 'catalog'
         self.assertTrue(callable(getattr(convert, 'generate_catalog', None)), 'catalog conversion is missing')
-        with patch.object(convert, 'AACR_REVISION', revision), patch.object(convert, 'DATASET_SHA256',
-                hashlib.sha256(dataset.read_bytes()).hexdigest()):
-            with self.assertRaisesRegex(ValueError, '1 of 2.*catalog.json'):
-                convert.generate_catalog(source, output)
+        with self.assertRaisesRegex(ValueError, '1 of 2.*catalog.json'):
+            convert.generate_catalog(source, output)
         report = json.loads((output / 'catalog.json').read_text())
         self.assertEqual(report['errors'], 1)
         self.assertEqual(report['generated_tasks'], 1)
@@ -332,27 +258,20 @@ class ConversionTests(unittest.TestCase):
             with self.subTest(duplicate=duplicate), tempfile.TemporaryDirectory() as temporary:
                 self.root = Path(temporary)
                 records = [dict(self.record), dict(self.record)]
-                source, _ = self.catalog_fixture(records)
+                source = self.catalog_fixture(records)
                 if duplicate == 'instance':
                     records[1]['githubPrUrl'] = records[1]['githubPrUrl'].replace('56591', '56592')
                 else:
                     records[1]['target_commit'] = '1' * 40
-                dataset = source / 'dataset/positive_samples.json'
-                dataset.write_text(json.dumps(records))
-                subprocess.run(['git', '-C', str(source), 'add', '.'], check=True)
-                subprocess.run(['git', '-C', str(source), '-c', 'user.name=Test', '-c',
-                                'user.email=test@example.invalid', 'commit', '-qm', 'duplicate'], check=True)
-                revision = subprocess.check_output(['git', '-C', str(source), 'rev-parse', 'HEAD'], text=True).strip()
-                with patch.object(convert, 'AACR_REVISION', revision), patch.object(convert, 'DATASET_SHA256',
-                        hashlib.sha256(dataset.read_bytes()).hexdigest()):
-                    with self.assertRaisesRegex(ValueError, 'duplicate.*' + duplicate):
-                        convert.generate_catalog(source, self.root / 'catalog')
+                self.write_dataset(source / 'dataset/positive_samples.json', records)
+                with self.assertRaisesRegex(ValueError, 'duplicate.*' + duplicate):
+                    convert.generate_catalog(source, self.root / 'catalog')
                 self.assertFalse((self.root / 'catalog').exists())
 
     def test_catalog_explicit_selection_and_existing_assets_are_preserved(self):
         records = [dict(self.record, githubPrUrl=f'https://github.com/owner/project{number}/pull/{number}')
                    for number in (1, 2)]
-        source, _ = self.catalog_fixture(records)
+        source = self.catalog_fixture(records)
         output = self.root / 'catalog'
         self.assertTrue(callable(getattr(convert, 'generate_catalog', None)), 'catalog conversion is missing')
         with self.assertRaisesRegex(ValueError, 'Unknown.*missing'):

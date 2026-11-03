@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { completeJudge, safeFailure } from '../benchmarks/aacr/pi_judge.mjs';
+import { refreshLogin } from '../benchmarks/aacr/pi_refresh.mjs';
 
 const request = {
   messages: [{ role: 'user', content: 'Original AACR prompt' }],
@@ -85,4 +86,26 @@ test('retains HTTP status and distinguishes authentication rejection', async () 
 test('rejects completion identity different from selected judge', async () => {
   const r = runtime({ ...response, provider: 'openai' });
   await assert.rejects(completeJudge(r, request), { category: 'runtime' });
+});
+
+test('host refresh asks Pi for the pinned judge model with the requested validity', async () => {
+  const calls = [];
+  const r = runtime();
+  r.getAuth = async (...args) => { calls.push(args); return { auth: { apiKey: 'token' }, source: 'OAuth' }; };
+  await refreshLogin(r, 1_800_000);
+  assert.deepEqual(calls, [[{ provider: 'openai-codex', id: 'gpt-6.1-sol' }, { minOAuthValidityMs: 1_800_000 }]]);
+});
+
+test('host refresh fails without a subscription login or when Pi cannot refresh', async () => {
+  const absent = runtime();
+  absent.isUsingSubscription = () => false;
+  absent.getAuth = () => assert.fail('must not refresh another credential');
+  await assert.rejects(refreshLogin(absent, 1_800_000), { category: 'authentication' });
+  for (const getAuth of [async () => { throw Object.assign(new Error('Bearer secret'), { code: 'oauth' }); },
+                         async () => undefined, async () => ({ auth: { apiKey: 'k' }, source: 'env' })]) {
+    const r = runtime();
+    r.getAuth = getAuth;
+    const error = await refreshLogin(r, 1_800_000).catch((e) => e);
+    assert.equal(safeFailure(error).category, 'authentication');
+  }
 });

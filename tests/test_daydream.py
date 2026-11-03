@@ -1,4 +1,4 @@
-"""Exercise the sandbox reviewer boundary with real Git and native terminal evidence."""
+"""Exercise the sandbox reviewer boundary with a faked Git checkout and native terminal evidence."""
 import asyncio
 import base64
 import hashlib
@@ -13,27 +13,17 @@ import uuid
 import pytest
 
 from benchmarks.aacr import daydream_entrypoint as entrypoint
+from fake_git import BASE, HEAD, FakeCheckout
 
 
 @pytest.fixture
 def review_case(tmp_path, monkeypatch):
-    from daydream import git_ops
-
     repo = tmp_path / 'repo'
     repo.mkdir()
-    def git(*args):
-        return subprocess.check_output(['git', '-C', str(repo), *args], text=True).strip()
-    git('init', '-q')
-    (repo / 'file.php').write_text('base\n')
-    git('add', '.')
-    git('-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'base')
-    base = git('rev-parse', 'HEAD')
     (repo / 'file.php').write_text('head\n')
-    git('add', '.')
-    git('-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'head')
-    head = git('rev-parse', 'HEAD')
-    patch = git_ops.diff(repo, base)
-    comparison = dict(base_sha=base, head_sha=head, merge_base_sha=base,
+    checkout = FakeCheckout(repo).install(monkeypatch)
+    patch = checkout.patch
+    comparison = dict(base_sha=BASE, head_sha=HEAD, merge_base_sha=BASE,
                       diff_key=hashlib.sha256(patch.encode()).hexdigest(),
                       patch_sha256=hashlib.sha256(patch.encode()).hexdigest())
     inputs = tmp_path / 'inputs'
@@ -58,7 +48,7 @@ def review_case(tmp_path, monkeypatch):
         'id_token': 'synthetic-id'}}))
     auth.chmod(0o600)
     return SimpleNamespace(repo=repo, inputs=inputs, artifacts=artifacts, logs=logs,
-                           invocation=invocation, comparison=comparison, git=git)
+                           invocation=invocation, comparison=comparison, checkout=checkout)
 
 
 def finalized(case, items, *, complete=True):
@@ -313,20 +303,37 @@ def test_copied_agent_logs_are_rejected_before_any_runtime_execution(tmp_path, p
     assert not (logs / 'request.json').exists()
 
 
-def test_native_namespace_failure_blocks_runtime_admission(tmp_path):
+@pytest.mark.parametrize('failure', ['namespace', 'whole-login-folder', None])
+def test_admission_failure_blocks_runtime_admission(tmp_path, failure):
     from benchmarks.aacr.daydream_agent import DaydreamAgent
     commands = []
     logs = tmp_path / 'agent'
     logs.mkdir()
+    # What the reviewer container mounts at /run/aacr-codex.
+    login = tmp_path / 'aacr-codex'
+    login.mkdir()
+    (login / 'auth.json').write_text('{}')
+    if failure == 'whole-login-folder':
+        (login / 'config.toml').write_text('')
+        (login / 'sessions').mkdir()
     class Environment:
         def is_path_mounted(self, environment_path, host_path):
             return environment_path == '/logs/agent' and host_path == logs
         async def exec(self, command, **kwargs):
             commands.append(command)
-            return SimpleNamespace(return_code=1 if command == 'unshare -Ur true' else 0)
-    with pytest.raises(RuntimeError, match='namespace'):
+            if command == 'unshare -Ur true':
+                return SimpleNamespace(return_code=1 if failure == 'namespace' else 0)
+            if '/run/aacr-codex' in command:
+                command = command.replace('/run/aacr-codex', str(login))
+                return SimpleNamespace(return_code=subprocess.run(command, shell=True).returncode)
+            return SimpleNamespace(return_code=0)
+    if failure is None:
         asyncio.run(DaydreamAgent(logs_dir=logs).install(Environment()))
-    assert commands == ['unshare -Ur true']
+        assert len(commands) == 3
+        return
+    with pytest.raises(RuntimeError, match='namespace' if failure == 'namespace' else 'only the Codex auth.json'):
+        asyncio.run(DaydreamAgent(logs_dir=logs).install(Environment()))
+    assert len(commands) == (1 if failure == 'namespace' else 2)
 
 
 @pytest.mark.parametrize('mismatch', ['stale', 'head', 'patch', 'request'])
@@ -336,7 +343,7 @@ def test_stale_or_mismatched_inputs_never_invoke_reviewer(review_case, monkeypat
     if mismatch == 'stale':
         (case.artifacts / 'findings.json').write_text('{"review_output": []}')
     elif mismatch == 'head':
-        case.git('checkout', '-q', case.comparison['base_sha'])
+        case.checkout.head = case.comparison['base_sha']
     elif mismatch == 'patch':
         (case.inputs / 'diff.patch').write_text('a different patch')
     else:

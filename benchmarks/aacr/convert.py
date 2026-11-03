@@ -186,8 +186,10 @@ def configure_daydream_task(task: Path, wheel: Path) -> None:
     (environment / 'docker-compose.yaml').write_text(
         'services:\n  main:\n    security_opt:\n      - seccomp=unconfined\n'
         '    volumes:\n      - type: bind\n'
-        '        source: ${AACR_CODEX_AUTH_DIR:?set the dedicated native Codex reviewer directory}\n'
-        '        target: /run/aacr-codex\n        bind:\n          create_host_path: false\n')
+        # Only the login file: Codex rewrites it in place without a lock file, so
+        # a refresh in the container reaches the host. Must stay writable.
+        '        source: ${AACR_CODEX_AUTH_DIR:?set to your Codex login folder, usually ~/.codex}/auth.json\n'
+        '        target: /run/aacr-codex/auth.json\n        bind:\n          create_host_path: false\n')
     # Keep Pi SDK/provider/model locked exactly as in the Oracle verifier.
     (task / 'tests/Dockerfile').write_text(
         f'FROM {NODE_IMAGE}\nRUN apt-get update && apt-get install -y --no-install-recommends '
