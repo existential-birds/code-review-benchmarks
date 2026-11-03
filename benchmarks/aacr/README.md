@@ -14,12 +14,9 @@ Latest results are in [the baseline report](../../docs/aacr-baseline.md).
 Scores measure agreement with AACR's annotated comments, not verified bug-finding
 accuracy. A finding that matches no comment may still be a real problem.
 
-- **Precision:** the share of Daydream's findings that match an annotated comment.
-- **Recall:** the share of annotated comments covered by a finding.
-- **Balanced score:** AACR's combined score, computed from those two.
-
 [`metric.py`](metric.py) pools raw counts across cases and calls AACR's unchanged
-`_compute_summary`, so these are pooled ratios, not averages of per-case ratios.
+`_compute_summary`, so precision, recall and the balanced score are pooled ratios,
+not averages of per-case ratios.
 
 A review must complete to be scored. If any part of it ends incomplete, the trial
 is recorded as an error and its references leave the denominators, so always read
@@ -27,7 +24,8 @@ scores alongside the failure count. Complete reviews with no findings are valid.
 
 ## Setup
 
-Runs use pinned inputs:
+Install the suite with the [quick start](../../README.md#quick-start). It uses
+these pins:
 
 | Input | Pin |
 |---|---|
@@ -35,30 +33,13 @@ Runs use pinned inputs:
 | Harbor | `6099b8cf2bfbbb3e7ff1eb2163bfc4524dbd9ba5` (0.24.0) |
 | Daydream wheel | see [`daydream-build.json`](daydream-build.json) |
 
-You need Docker, Git, Git LFS, `uv`, Python 3.14 for conversion, Node 22.19 or
-later, and an environment with the pinned Harbor. Examples run `harbor` from that
-environment.
+Examples below run `harbor` from the suite's `.venv`.
 
-Build the wheel from the pinned Daydream source, then install Daydream's locked
-runtime, the pinned Harbor, the wheel and this suite, in that order:
+### Logins
 
-```sh
-mkdir -p .cache/daydream-source
-git -C /path/to/daydream archive <source-revision> | tar -x -C .cache/daydream-source
-(cd .cache/daydream-source && uv build --wheel --out-dir ../daydream-wheel)
-
-uv pip install --python .venv/bin/python --require-hashes \
-  -r .cache/daydream-source/daydream/benchmark/harbor/runtime-requirements.lock
-uv pip install --python .venv/bin/python -e /path/to/pinned/harbor
-uv pip install --python .venv/bin/python --no-deps --reinstall \
-  .cache/daydream-wheel/daydream-0.30.0-py3-none-any.whl
-uv pip install --python .venv/bin/python --no-deps -e .
-npm ci --omit=dev --prefix benchmarks/aacr   # pinned Pi SDK, for the judge's login
-```
-
-Point both variables at your normal login folders. You don't need a separate login
-or a copy of `auth.json`, and copying one clones its refresh token, so the copy and
-the original would rotate it out from under each other:
+Point both variables at your normal login folders. Don't copy `auth.json`: a copy
+clones its refresh token, so the copy and the original would rotate it out from
+under each other.
 
 ```sh
 export AACR_CODEX_AUTH_DIR=~/.codex      # Daydream reviewer
@@ -80,9 +61,6 @@ assets and results:
   before scoring. If you raise the verifier timeout past about 20 minutes, set
   `min_judge_validity_sec` under `verifier.kwargs` to the new timeout plus 10
   minutes; otherwise the judge's token can expire mid-scoring and the trial fails.
-
-Tasks generated before these mounts changed still mount whole login folders.
-Trials refuse them, so regenerate them into a fresh output directory.
 
 ## Generate a catalog
 
@@ -117,8 +95,8 @@ took under 8 hours.
 
 | To change | Use |
 |---|---|
-| Select cases | `-i <name>`, repeatable, globs allowed. Requires `-p` |
-| Exclude cases | `-x <name>`, repeatable, globs allowed |
+| Select cases | `-i <name>`, repeatable, globs allowed, with `-p` |
+| Exclude cases | `-x <name>`, repeatable, globs allowed, with `-p` |
 | Attempts per case | `-k <count>` |
 | Concurrency | `-n <count>` |
 | Retries | `-r <count>`; keep at 0, see below |
@@ -128,6 +106,14 @@ Default limits are 5,400 seconds per review, 300 for verification and 1,200 per
 environment build. `experiments/aacr-pilot.yaml` selects a ten-case, one-per-language
 subset of a catalog at `artifacts/aacr/tasks`, the converter's default output. Pass it
 as a second `-c` in place of `-p`.
+
+To check the judge and scoring without running Daydream, generate the Laravel
+oracle case, which submits a fixed finding, and run it:
+
+```sh
+.venv/bin/python -m benchmarks.aacr.convert --upstream /path/to/clean/pinned/aacr-bench --oracle
+harbor run -c experiments/aacr-oracle.yaml
+```
 
 ## Rerun failed cases
 
@@ -169,11 +155,7 @@ Monetary figures are API-equivalent estimates, not subscription charges.
 
 ## Attribution
 
-The vendored evaluator in [`upstream/`](upstream/) comes from
-[Alibaba AACR-Bench](https://github.com/alibaba/aacr-bench) under the root
-[Apache-2.0 license](../../LICENSE). Generated repository contexts keep their own
-licenses. One local change: the converter rejects an existing raw-data file whose
-SHA-256 differs from its metadata when no download URL is available.
-
-See [Citing this suite](../../docs/citing.md) for AACR-Bench's citation and how this
-integration differs from upstream.
+[`upstream/`](upstream/) is AACR-Bench's evaluator, used under the
+[Apache-2.0 license](../../LICENSE) with the changes listed in
+[Citing this suite](../../docs/citing.md#where-the-code-comes-from). Generated
+repository contexts keep their own licenses.

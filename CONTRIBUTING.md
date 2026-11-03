@@ -36,3 +36,9 @@ item, and check one only after recording its evidence or why it doesn't apply. L
 failed, skipped or blocked items unchecked and explain them.
 
 Keep Git hooks enabled; see [AGENTS.md](AGENTS.md).
+
+## Agent skills
+
+This repository's agent skills live in [`.agents/skills/`](.agents/skills/) and are
+linked into `.claude/skills/`. The third-party skills they can draw on are pinned in
+`skills-lock.json`; restore them with `npx skills experimental_install`.

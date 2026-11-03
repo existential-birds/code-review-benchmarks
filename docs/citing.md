@@ -39,12 +39,20 @@ https://github.com/existential-birds/code-review-benchmarks
 | [`benchmarks/aacr/upstream/`](../benchmarks/aacr/upstream/) | AACR-Bench `evaluation/`, with changes listed below | Apache-2.0 |
 | AACR review cases and annotations | AACR-Bench, read at conversion and not stored here | AACR-Bench's license |
 | Repository contexts in generated tasks | Each reviewed project, not stored here | Each project's license |
+| [`.agents/skills/test-audit/`](../.agents/skills/test-audit/) | Adapted in part from [OpenClaw](https://github.com/openclaw/openclaw)'s test-audit guidance | [MIT](../.agents/skills/test-audit/LICENSE) |
 | Everything else in this repository | This suite | [Apache-2.0](../LICENSE) |
 
-The imported evaluator differs from AACR's source in two ways. Chinese comments and
-messages are translated to English, and the converter rejects an existing raw-data
-file whose SHA-256 differs from its metadata when no download URL is available.
-The scoring logic and judge prompts are unchanged.
+Only AACR's evaluator modules are imported; its reviewers, pipeline, hooks and MCP
+servers are not. They differ from AACR's source in three ways:
+
+- Chinese comments, docstrings and messages are translated to English, including
+  the judge-failure reason saved as `judge_reason`.
+- The converter rejects an existing raw-data file whose SHA-256 differs from its
+  metadata when no download URL is available.
+- A new [`__init__.py`](../benchmarks/aacr/upstream/__init__.py) makes AACR's flat
+  imports, such as `import judge`, resolve to the package's modules.
+
+The scoring logic, judge prompts and data field names are unchanged.
 
 ## AACR inputs
 
