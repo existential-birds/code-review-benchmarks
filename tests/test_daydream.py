@@ -1,4 +1,4 @@
-"""Exercise the sandbox reviewer boundary with real Git and native terminal evidence."""
+"""Exercise the sandbox reviewer boundary with a faked Git checkout and native terminal evidence."""
 import asyncio
 import base64
 import hashlib
@@ -13,27 +13,17 @@ import uuid
 import pytest
 
 from benchmarks.aacr import daydream_entrypoint as entrypoint
+from fake_git import BASE, HEAD, FakeCheckout
 
 
 @pytest.fixture
 def review_case(tmp_path, monkeypatch):
-    from daydream import git_ops
-
     repo = tmp_path / 'repo'
     repo.mkdir()
-    def git(*args):
-        return subprocess.check_output(['git', '-C', str(repo), *args], text=True).strip()
-    git('init', '-q')
-    (repo / 'file.php').write_text('base\n')
-    git('add', '.')
-    git('-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'base')
-    base = git('rev-parse', 'HEAD')
     (repo / 'file.php').write_text('head\n')
-    git('add', '.')
-    git('-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'head')
-    head = git('rev-parse', 'HEAD')
-    patch = git_ops.diff(repo, base)
-    comparison = dict(base_sha=base, head_sha=head, merge_base_sha=base,
+    checkout = FakeCheckout(repo).install(monkeypatch)
+    patch = checkout.patch
+    comparison = dict(base_sha=BASE, head_sha=HEAD, merge_base_sha=BASE,
                       diff_key=hashlib.sha256(patch.encode()).hexdigest(),
                       patch_sha256=hashlib.sha256(patch.encode()).hexdigest())
     inputs = tmp_path / 'inputs'
@@ -58,7 +48,7 @@ def review_case(tmp_path, monkeypatch):
         'id_token': 'synthetic-id'}}))
     auth.chmod(0o600)
     return SimpleNamespace(repo=repo, inputs=inputs, artifacts=artifacts, logs=logs,
-                           invocation=invocation, comparison=comparison, git=git)
+                           invocation=invocation, comparison=comparison, checkout=checkout)
 
 
 def finalized(case, items, *, complete=True):
@@ -353,7 +343,7 @@ def test_stale_or_mismatched_inputs_never_invoke_reviewer(review_case, monkeypat
     if mismatch == 'stale':
         (case.artifacts / 'findings.json').write_text('{"review_output": []}')
     elif mismatch == 'head':
-        case.git('checkout', '-q', case.comparison['base_sha'])
+        case.checkout.head = case.comparison['base_sha']
     elif mismatch == 'patch':
         (case.inputs / 'diff.patch').write_text('a different patch')
     else:
