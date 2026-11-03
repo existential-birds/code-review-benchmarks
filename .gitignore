@@ -30,7 +30,7 @@ node_modules/
 /results/
 /.cache/
 
-# Skills installed from skills-lock.json; only our own skills are tracked
+# Locally installed skills; only our own are tracked
 .agents/skills/*
 !.agents/skills/fetch-pr-feedback/
 !.agents/skills/prepare-implement/
@@ -43,3 +43,4 @@ node_modules/
 .firecrawl/
 .hermes/
 docs/agents/
+skills-lock.json

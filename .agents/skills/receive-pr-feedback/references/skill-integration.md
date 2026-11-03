@@ -1,6 +1,6 @@
 # Focused supporting guidance
 
-Use these skills only for the actual claim or approved fix, when they are installed from `skills-lock.json`. Repository guidance and [VERIFICATION.md](../VERIFICATION.md) remain sufficient if an optional skill is unavailable. Reading a supporting skill does not expand scope or authorization.
+Use these skills only for the actual claim or approved fix, when they are installed. Repository guidance and [VERIFICATION.md](../VERIFICATION.md) remain sufficient if an optional skill is unavailable. Reading a supporting skill does not expand scope or authorization.
 
 | Need | Skill | Use |
 | --- | --- | --- |
