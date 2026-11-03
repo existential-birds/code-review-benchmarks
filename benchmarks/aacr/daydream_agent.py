@@ -4,7 +4,6 @@ from __future__ import annotations
 import asyncio
 from contextlib import suppress
 import json
-from pathlib import Path
 from typing import Annotated
 import uuid
 
