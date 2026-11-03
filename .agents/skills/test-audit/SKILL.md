@@ -19,16 +19,13 @@ read-only. Loading this skill while authoring a test does not authorize a broade
 audit. Commit, push, publication, and changes to upstream repositories require
 existing user authorization.
 
-Read root `AGENTS.md`, [domain guidance](../../../docs/agents/domain.md),
-[GLOSSARY.md](../../../GLOSSARY.md), relevant [ADRs](../../../docs/adr/), and
-the requirements for the selected work. Before GitHub issue operations, read
-[the issue-tracker guide](../../../docs/agents/issue-tracker.md). Discover tests,
-configuration, commands, and CI from the actual checkout. The initial repository
-is a scaffold: planned benchmark paths are not evidence that a test suite exists.
+Read root `AGENTS.md`, [GLOSSARY.md](../../../GLOSSARY.md), relevant
+[ADRs](../../../docs/adr/), and the requirements for the selected work. Discover
+tests, configuration, commands, and CI from the actual checkout.
 
 Harbor owns execution controls. Before adding custom code, inspect the relevant
-source, documentation, and tests in `/Users/ka/github/harbor`; record the paths or
-symbols, built-in capability, and precise remaining gap as required by `AGENTS.md`.
+source, documentation, and tests in the pinned Harbor checkout; record the paths or
+symbols, built-in capability, and precise remaining gap as required by `CONTRIBUTING.md`.
 Prefer native Harbor configuration and supported extension points. Audit this
 repo's integration contract without duplicating Harbor's own test suite or
 editing Harbor, Daydream, or an upstream benchmark outside authorized scope.

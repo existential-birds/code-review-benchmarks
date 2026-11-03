@@ -15,18 +15,14 @@ A sweep request defaults to implementing supported refactors within its scope.
 Explicit review-only or planning requests stay read-only. Commit, push, merge,
 feature removal, and external changes require existing user authorization.
 
-Read root `AGENTS.md`, [domain guidance](../../../docs/agents/domain.md),
-[GLOSSARY.md](../../../GLOSSARY.md), relevant [ADRs](../../../docs/adr/), and
-the selected requirements and public contracts. Read
-[the issue-tracker guide](../../../docs/agents/issue-tracker.md) before GitHub
-issue operations. Pin a baseline, preserve pending work, and discover verification
-commands from actual configuration. Planned paths in the README do not establish
-that an implementation or test harness exists.
+Read root `AGENTS.md`, [GLOSSARY.md](../../../GLOSSARY.md), relevant
+[ADRs](../../../docs/adr/), and the selected requirements and public contracts.
+Pin a baseline, preserve pending work, and discover verification commands from
+actual configuration.
 
 In a PR, use the diff to enter whole owning workflows and their callers, including
 unchanged code. For a codebase sweep, inventory implemented subsystems. Honor the
-user's effort limit and report actual coverage; do not create speculative modules
-to refactor an empty scaffold.
+user's effort limit and report actual coverage; do not create speculative modules.
 
 ## Harbor before custom architecture
 
@@ -36,7 +32,7 @@ scheduling, result storage, aggregation, and inspection where supported. Look
 first for custom code that duplicates those responsibilities.
 
 Before writing custom code or replacing a wrapper, inspect relevant source,
-documentation, and tests in `/Users/ka/github/harbor`. Record exact paths or
+documentation, and tests in the pinned Harbor checkout. Record exact paths or
 symbols, what Harbor already provides, and the precise gap requiring integration
 code. Prefer native configuration and supported extension points. Trace the
 wrapper's callers and outputs before removing it so benchmark-specific scoring,

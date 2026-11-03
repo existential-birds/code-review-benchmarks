@@ -34,7 +34,7 @@ When the remote head moved after acquisition, refresh feedback and re-anchor the
 
 ## Checks and limits
 
-Discover checks from the current checkout's documented commands, dependency/config files, tests, hooks, and CI when present. This repository starts as a scaffold with planned `benchmarks/` and `experiments/`; distinguish planned behavior from implemented checks and report unavailable tests honestly.
+Discover checks from the current checkout's documented commands, dependency/config files, tests, hooks, and CI when present. Report unavailable tests honestly.
 
 Use native Harbor validation and run/inspection commands when supported. Before any custom code, record the required source/docs/tests capability inspection and precise gap. Do not replace native job selection, attempt count (`k`), scheduling, retries, result storage, or aggregation with custom loops.
 
