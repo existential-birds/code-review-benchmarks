@@ -12,9 +12,11 @@ findings match the annotated comments.
 Scores measure agreement with AACR's annotated comments, not verified bug-finding
 accuracy. A finding that matches no comment may still be a real problem.
 
-[`metric.py`](metric.py) pools raw counts across cases and calls AACR's unchanged
-`_compute_summary`, so precision, recall and the balanced score are pooled ratios,
-not averages of per-case ratios.
+A finding counts toward precision only if it matches a comment no earlier finding
+covered, so duplicates lower precision. The balanced score is the F1 of precision
+and recall, each rounded to three places first. [`metric.py`](metric.py) pools raw
+counts across cases and calls AACR's unchanged `_compute_summary`, so all three
+are pooled ratios, not averages of per-case ratios.
 
 A review must complete to be scored. If any part of it ends incomplete, the trial
 is recorded as an error and its references leave the denominators, so always read

@@ -2,24 +2,22 @@
 
 Measures how well [Daydream](https://github.com/existential-birds/daydream) reviews
 code, so we can tell whether a new version or configuration is actually better.
-Runs use [Harbor](https://github.com/harbor-framework/harbor): each pull request
-gets its own sandboxed review, then a separate judge scores the findings against
-human-annotated review comments.
-
-The first integrated benchmark is
+Each pull request in a benchmark becomes a [Harbor](https://github.com/harbor-framework/harbor)
+task: Daydream reviews it in a sandbox, then a separate judge matches the findings
+against human-annotated review comments. The first benchmark is
 [AACR-Bench](https://github.com/alibaba/aacr-bench).
+
+Scores are precision, recall and their F1, pooled across review cases. They aren't
+comparable with AACR-Bench's published results; see
+[how this suite differs](docs/citing.md#how-this-differs-from-aacr-bench).
 
 ## Quick start
 
-This reviews one pull request and scores it. You need:
+Requires Docker, Git LFS, [`uv`](https://docs.astral.sh/uv/), Node 22.19+, a Codex
+login for the reviewer, and [Pi](https://shittycodingagent.ai/) logged in to an
+OpenAI Codex subscription for the judge.
 
-- Docker, Git and Git LFS
-- [`uv`](https://docs.astral.sh/uv/) and Node 22.19 or later
-- A Codex login for the reviewer
-- [Pi](https://shittycodingagent.ai/) logged in to an OpenAI Codex subscription,
-  for the judge
-
-**1. Get the pinned sources.** The suite expects exact revisions of each project:
+**1. Clone the pinned sources:**
 
 ```sh
 git clone https://github.com/existential-birds/code-review-benchmarks
@@ -32,8 +30,8 @@ git -C aacr-bench checkout ee9d7fef70ef31acea2ff7ae316ce0a9575fe4df
 cd code-review-benchmarks
 ```
 
-**2. Build Daydream and install everything.** Conversion checks the wheel against
-the hash in [`daydream-build.json`](benchmarks/aacr/daydream-build.json):
+**2. Build Daydream and install.** Conversion rejects a wheel whose hash differs
+from [`daydream-build.json`](benchmarks/aacr/daydream-build.json).
 
 ```sh
 uv venv --python 3.14 .venv
@@ -48,21 +46,16 @@ uv pip install --python .venv/bin/python -e ../harbor
 uv pip install --python .venv/bin/python --no-deps --reinstall \
   .cache/daydream-wheel/daydream-0.30.0-py3-none-any.whl
 uv pip install --python .venv/bin/python --no-deps -e .
-npm ci --omit=dev --prefix benchmarks/aacr
+npm ci --omit=dev --prefix benchmarks/aacr   # Pi SDK; refreshes the judge's login on the host
 ```
 
-The last command installs the pinned Pi SDK, which refreshes the judge's login on
-your machine before scoring.
-
-**3. Point the suite at your logins.** Use your normal login folders, not a copy:
+**3. Point the suite at your login folders**, not copies
+([what each container sees](benchmarks/aacr/README.md#logins)):
 
 ```sh
 export AACR_CODEX_AUTH_DIR=~/.codex
 export AACR_PI_AUTH_DIR=~/.pi/agent
 ```
-
-The reviewer sees only your Codex `auth.json`. The judge gets only Pi's
-`openai-codex` login, refreshed on your machine first.
 
 **4. Generate one review case:**
 
@@ -74,7 +67,7 @@ The reviewer sees only your Codex `auth.json`. The judge gets only Pi's
   --task bluewave-labs-checkmate-1897
 ```
 
-**5. Run it and look at the result:**
+**5. Run it and open the viewer:**
 
 ```sh
 .venv/bin/harbor run -c experiments/aacr-baseline.yaml -p artifacts/aacr/quickstart \
@@ -82,38 +75,5 @@ The reviewer sees only your Codex `auth.json`. The judge gets only Pi's
 .venv/bin/harbor view jobs
 ```
 
-See [the AACR guide](benchmarks/aacr/README.md) to run the full catalog, rerun failed
-cases and read job output.
-
-## How scoring works
-
-- **Precision** is the share of findings that match an annotated comment.
-- **Recall** is the share of annotated comments covered by a finding.
-- **Balanced score** is AACR's combined score, computed from those two.
-
-Scores pool raw counts across review cases. A review must finish to be scored, so
-read scores alongside the failure count.
-
-Only compare runs that use the same review cases and scoring settings. Scores here
-aren't equivalent to those published by AACR-Bench; see
-[how this differs from upstream](docs/citing.md#how-this-differs-from-aacr-bench).
-
-## Repository layout
-
-```text
-benchmarks/aacr/  # AACR conversion, task templates, reviewer and judge adapters, scoring
-experiments/      # Harbor job configurations
-docs/             # Citation guide
-tests/            # Python and Node tests
-```
-
-Harbor owns execution, from task selection to result storage; this repository adds
-only what connects a benchmark to it. See [Harbor first](CONTRIBUTING.md#harbor-first).
-
-## Contributing and citation
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request. To cite results,
-cite the original benchmark and the exact commit of this suite; see
-[Citing this suite](docs/citing.md).
-
-Licensed under [Apache-2.0](LICENSE).
+The [AACR guide](benchmarks/aacr/README.md) covers full runs, reruns and reading
+results.
