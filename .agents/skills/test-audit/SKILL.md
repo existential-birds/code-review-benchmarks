@@ -19,9 +19,9 @@ read-only. Loading this skill while authoring a test does not authorize a broade
 audit. Commit, push, publication, and changes to upstream repositories require
 existing user authorization.
 
-Read root `AGENTS.md`, [GLOSSARY.md](../../../GLOSSARY.md), relevant
-[ADRs](../../../docs/adr/), and the requirements for the selected work. Discover
-tests, configuration, commands, and CI from the actual checkout.
+Read root `AGENTS.md`, [GLOSSARY.md](../../../GLOSSARY.md), and the
+requirements for the selected work. Discover tests, configuration, commands, and
+CI from the actual checkout.
 
 Harbor owns execution controls. Before adding custom code, inspect the relevant
 source, documentation, and tests in the pinned Harbor checkout; record the paths or

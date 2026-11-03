@@ -7,8 +7,6 @@ becomes a [Harbor](https://github.com/harbor-framework/harbor) task: Daydream
 reviews the change in a sandbox, then a separate judge decides which of its
 findings match the annotated comments.
 
-Latest results are in [the baseline report](../../docs/aacr-baseline.md).
-
 ## What the scores mean
 
 Scores measure agreement with AACR's annotated comments, not verified bug-finding
@@ -90,8 +88,9 @@ harbor run -c experiments/aacr-baseline.yaml -p artifacts/aacr/<fresh-catalog> \
   -k 1 -n 2 -r 0 --job-name <fresh-name>
 ```
 
-Add `--dry-run` or `--print-config` first to check the plan. A full run at `-n 2`
-took under 8 hours.
+Add `--dry-run` or `--print-config` first to check the plan. A full run of
+Daydream 0.30.0 at `-n 2` took under 8 hours and about 393 million reviewer input
+tokens, most of them cached: roughly $290 at API prices.
 
 | To change | Use |
 |---|---|
