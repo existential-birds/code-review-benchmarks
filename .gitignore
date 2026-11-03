@@ -30,6 +30,10 @@ node_modules/
 /results/
 /.cache/
 
+# Local Daydream review output
+.daydream/
+.review-output.md
+
 # Locally installed skills; only our own are tracked
 .agents/skills/*
 !.agents/skills/fetch-pr-feedback/
