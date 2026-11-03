@@ -81,6 +81,9 @@ class ConversionTests(unittest.TestCase):
         for path in task.rglob('*'):
             if path.is_file() and 'tests' not in path.relative_to(task).parts:
                 self.assertNotIn('synthetic verifier-only reference', path.read_text())
+        # The judge's login is uploaded by the verifier, never mounted.
+        self.assertEqual([path for path in (task / 'tests').rglob('*')
+                          if path.name.startswith(('docker-compose', 'compose'))], [])
 
     def test_upstream_schema_rejects_invalid_anchor_before_render(self):
         self.record['comments'][0]['from_line'] = -1

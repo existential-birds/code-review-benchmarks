@@ -3,11 +3,11 @@ import { readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-const PROVIDER = 'openai-codex';
-const MODEL = 'gpt-6.1-sol';
+export const PROVIDER = 'openai-codex';
+export const MODEL = 'gpt-6.1-sol';
 const SDK_VERSION = '1.4.0';
 
-function failure(category, message, details = {}) {
+export function failure(category, message, details = {}) {
   return Object.assign(new Error(message), { category, ...details });
 }
 
@@ -108,15 +108,19 @@ async function packageVersion(name) {
   }
 }
 
+export async function requirePinnedRuntime() {
+  const [major, minor] = process.versions.node.split('.').map(Number);
+  if (major < 22 || (major === 22 && minor < 19)) {
+    throw failure('runtime', 'Pi requires Node >=22.19');
+  }
+  for (const name of ['@earendil-works/pi-coding-agent', '@earendil-works/pi-ai']) {
+    if (await packageVersion(name) !== SDK_VERSION) throw failure('runtime', 'Wrong Pi SDK version');
+  }
+}
+
 async function main() {
   try {
-    const [major, minor] = process.versions.node.split('.').map(Number);
-    if (major < 22 || (major === 22 && minor < 19)) {
-      throw failure('runtime', 'Pi requires Node >=22.19');
-    }
-    for (const name of ['@earendil-works/pi-coding-agent', '@earendil-works/pi-ai']) {
-      if (await packageVersion(name) !== SDK_VERSION) throw failure('runtime', 'Wrong Pi SDK version');
-    }
+    await requirePinnedRuntime();
     let input = '';
     for await (const chunk of process.stdin) input += chunk;
     const request = JSON.parse(input);

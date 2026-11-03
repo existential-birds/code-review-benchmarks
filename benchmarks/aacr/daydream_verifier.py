@@ -3,10 +3,10 @@ from __future__ import annotations
 
 import json
 
-from harbor.verifier.verifier import Verifier
+from benchmarks.aacr.judge_verifier import PiJudgeVerifier
 
 
-class DaydreamVerifier(Verifier):
+class DaydreamVerifier(PiJudgeVerifier):
     """Keep the native verifier workflow and authenticate its process receipt."""
 
     async def verify(self):
@@ -25,6 +25,7 @@ class DaydreamVerifier(Verifier):
                 or type(receipt.get('return_code')) is not int or receipt['return_code'] != 0):
             raise RuntimeError('Daydream host invocation did not finish successfully')
         await self.environment.upload_file(receipt_path, '/tmp/aacr-host-receipt.json')
-        # The factory's custom-verifier seam uploads the trusted tests again;
-        # retain native uploads, reward cleanup, execution and result parsing.
+        # PiJudgeVerifier hands over the judge login; the factory's custom-verifier
+        # seam uploads the trusted tests again; retain native uploads, reward
+        # cleanup, execution and result parsing.
         return await super().verify()

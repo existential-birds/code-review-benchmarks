@@ -38,6 +38,11 @@ class DaydreamAgent(BaseInstalledAgent):
         result = await environment.exec('unshare -Ur true')
         if result.return_code != 0:
             raise RuntimeError('Native Codex namespace admission failed')
+        # Tasks generated before the mount changed still mount the whole login folder.
+        result = await environment.exec('test "$(ls -A /run/aacr-codex)" = auth.json')
+        if result.return_code != 0:
+            raise RuntimeError('The reviewer must see only the Codex auth.json; '
+                               'regenerate tasks made before the login mount changed')
         result = await environment.exec(
             "python -I -c \"from pathlib import Path; "
             "from benchmarks.aacr.daydream_entrypoint import verify_build; "

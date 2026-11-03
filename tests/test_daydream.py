@@ -313,20 +313,37 @@ def test_copied_agent_logs_are_rejected_before_any_runtime_execution(tmp_path, p
     assert not (logs / 'request.json').exists()
 
 
-def test_native_namespace_failure_blocks_runtime_admission(tmp_path):
+@pytest.mark.parametrize('failure', ['namespace', 'whole-login-folder', None])
+def test_admission_failure_blocks_runtime_admission(tmp_path, failure):
     from benchmarks.aacr.daydream_agent import DaydreamAgent
     commands = []
     logs = tmp_path / 'agent'
     logs.mkdir()
+    # What the reviewer container mounts at /run/aacr-codex.
+    login = tmp_path / 'aacr-codex'
+    login.mkdir()
+    (login / 'auth.json').write_text('{}')
+    if failure == 'whole-login-folder':
+        (login / 'config.toml').write_text('')
+        (login / 'sessions').mkdir()
     class Environment:
         def is_path_mounted(self, environment_path, host_path):
             return environment_path == '/logs/agent' and host_path == logs
         async def exec(self, command, **kwargs):
             commands.append(command)
-            return SimpleNamespace(return_code=1 if command == 'unshare -Ur true' else 0)
-    with pytest.raises(RuntimeError, match='namespace'):
+            if command == 'unshare -Ur true':
+                return SimpleNamespace(return_code=1 if failure == 'namespace' else 0)
+            if '/run/aacr-codex' in command:
+                command = command.replace('/run/aacr-codex', str(login))
+                return SimpleNamespace(return_code=subprocess.run(command, shell=True).returncode)
+            return SimpleNamespace(return_code=0)
+    if failure is None:
         asyncio.run(DaydreamAgent(logs_dir=logs).install(Environment()))
-    assert commands == ['unshare -Ur true']
+        assert len(commands) == 3
+        return
+    with pytest.raises(RuntimeError, match='namespace' if failure == 'namespace' else 'only the Codex auth.json'):
+        asyncio.run(DaydreamAgent(logs_dir=logs).install(Environment()))
+    assert len(commands) == (1 if failure == 'namespace' else 2)
 
 
 @pytest.mark.parametrize('mismatch', ['stale', 'head', 'patch', 'request'])

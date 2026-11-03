@@ -35,8 +35,9 @@ Runs use pinned inputs:
 | Harbor | `6099b8cf2bfbbb3e7ff1eb2163bfc4524dbd9ba5` (0.24.0) |
 | Daydream wheel | see [`daydream-build.json`](daydream-build.json) |
 
-You need Docker, Git, Git LFS, `uv`, Python 3.14 for conversion, and an
-environment with the pinned Harbor. Examples run `harbor` from that environment.
+You need Docker, Git, Git LFS, `uv`, Python 3.14 for conversion, Node 22.19 or
+later, and an environment with the pinned Harbor. Examples run `harbor` from that
+environment.
 
 Build the wheel from the pinned Daydream source, then install Daydream's locked
 runtime, the pinned Harbor, the wheel and this suite, in that order:
@@ -52,15 +53,36 @@ uv pip install --python .venv/bin/python -e /path/to/pinned/harbor
 uv pip install --python .venv/bin/python --no-deps --reinstall \
   .cache/daydream-wheel/daydream-0.30.0-py3-none-any.whl
 uv pip install --python .venv/bin/python --no-deps -e .
+npm ci --omit=dev --prefix benchmarks/aacr   # pinned Pi SDK, for the judge's login
 ```
 
-Review and judging use separate subscription logins, kept outside task assets and
-results. The directories must stay writable so tokens can refresh:
+Point both variables at your normal login folders. You don't need a separate login
+or a copy of `auth.json`, and copying one clones its refresh token, so the copy and
+the original would rotate it out from under each other:
 
 ```sh
-export AACR_CODEX_AUTH_DIR=/path/to/codex-login   # Daydream reviewer
-export AACR_PI_AUTH_DIR=/path/to/pi-login         # Judge; use Pi's /login for OpenAI Codex
+export AACR_CODEX_AUTH_DIR=~/.codex      # Daydream reviewer
+export AACR_PI_AUTH_DIR=~/.pi/agent      # Judge; use Pi's /login for OpenAI Codex
 ```
+
+Neither container sees the rest of these folders, and logins stay out of task
+assets and results:
+
+- **Reviewer:** only the Codex `auth.json` is mounted, and it stays writable, so
+  Codex saves a refresh made during the review to your file. Codex must keep its
+  login in `auth.json`, not in the system keyring. The review container has network
+  access while it holds your Codex session, so a hostile review case could try to
+  send that session elsewhere.
+- **Judge:** nothing is mounted. Before scoring, the verifier refreshes Pi's
+  `openai-codex` login on your machine with the pinned SDK, under Pi's own lock, when
+  less than 30 minutes remain. It then uploads a copy holding only that login's
+  access token, without the refresh token. If the refresh fails, the trial stops
+  before scoring. If you raise the verifier timeout past about 20 minutes, set
+  `min_judge_validity_sec` under `verifier.kwargs` to the new timeout plus 10
+  minutes; otherwise the judge's token can expire mid-scoring and the trial fails.
+
+Tasks generated before these mounts changed still mount whole login folders.
+Trials refuse them, so regenerate them into a fresh output directory.
 
 ## Generate a catalog
 
