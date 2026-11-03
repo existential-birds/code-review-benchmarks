@@ -1,0 +1,21 @@
+# Scores ReviewBench's own true-positive findings, to check the judge without
+# running Daydream. Supply the catalog with -p and pick tasks with -i or -l.
+job_name: reviewbench-oracle
+jobs_dir: jobs
+n_attempts: 1
+n_concurrent_trials: 1
+retry:
+  max_retries: 0
+agents:
+  - name: oracle
+verifier:
+  import_path: benchmarks.pi.verifier:PiJudgeVerifier
+  kwargs:
+    min_judge_validity_sec: 7800
+environment:
+  type: docker
+  delete: true
+metrics:
+  - type: uv-script
+    kwargs:
+      script_path: benchmarks/reviewbench/metric.py

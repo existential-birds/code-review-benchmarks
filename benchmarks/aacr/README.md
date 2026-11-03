@@ -31,7 +31,7 @@ these pins:
 |---|---|
 | AACR source | `ee9d7fef70ef31acea2ff7ae316ce0a9575fe4df` |
 | Harbor | `6099b8cf2bfbbb3e7ff1eb2163bfc4524dbd9ba5` (0.24.0) |
-| Daydream wheel | see [`daydream-build.json`](daydream-build.json) |
+| Daydream | see [`build.json`](../daydream/build.json), shared by every benchmark |
 
 Examples below run `harbor` from the suite's `.venv`.
 
@@ -42,8 +42,8 @@ clones its refresh token, so the copy and the original would rotate it out from
 under each other.
 
 ```sh
-export AACR_CODEX_AUTH_DIR=~/.codex      # Daydream reviewer
-export AACR_PI_AUTH_DIR=~/.pi/agent      # Judge; use Pi's /login for OpenAI Codex
+export REVIEWER_CODEX_AUTH_DIR=~/.codex   # Daydream reviewer
+export JUDGE_PI_AUTH_DIR=~/.pi/agent      # Judge; use Pi's /login for OpenAI Codex
 ```
 
 Neither container sees the rest of these folders, and logins stay out of task
@@ -67,11 +67,11 @@ assets and results:
 ```sh
 .venv/bin/python -m benchmarks.aacr.convert \
   --upstream /path/to/clean/pinned/aacr-bench \
-  --output artifacts/aacr/<fresh-catalog> \
-  --daydream-wheel .cache/daydream-wheel/daydream-0.30.0-py3-none-any.whl
+  --output artifacts/aacr/<fresh-catalog>
 ```
 
-Use a new output directory each time; the converter won't overwrite one. A full
+Every task gets the Daydream build from the quick start. Use a new output directory
+each time; the converter won't overwrite one. A full
 catalog takes about 46 GB. Add `--task <case>` (repeatable) to generate only
 selected cases.
 

@@ -31,9 +31,9 @@ def test_composed_pilot_selects_ten_cases_and_expands_independent_attempts(tmp_p
     assert len(plan.trial_configs) == 10
     assert config.n_attempts == config.n_concurrent_trials == 1
     assert config.retry.max_retries == 0
-    assert all(trial.agent.import_path == 'benchmarks.aacr.daydream_agent:DaydreamAgent'
+    assert all(trial.agent.import_path == 'benchmarks.daydream.agent:DaydreamAgent'
                and trial.agent.kwargs['capture_data'] is True
-               and trial.verifier.import_path == 'benchmarks.aacr.daydream_verifier:DaydreamVerifier'
+               and trial.verifier.import_path == 'benchmarks.daydream.verifier:DaydreamVerifier'
                and trial.environment.kwargs['auto_mounting'] is True for trial in plan.trial_configs)
     assert all(type(metric).__name__ == 'UvScript' for metrics in plan.metrics.values() for metric in metrics)
 

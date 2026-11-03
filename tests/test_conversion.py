@@ -283,14 +283,15 @@ class ConversionTests(unittest.TestCase):
         self.assertEqual((output / 'catalog.json').read_bytes(), before)
         self.assertFalse((output / 'owner-project1-1').exists())
 
-    def test_cli_requires_the_reviewer_wheel_outside_the_oracle_fixture(self):
+    def test_cli_requires_the_pinned_reviewer_build_outside_the_oracle_fixture(self):
+        missing = FileNotFoundError('Build the pinned Daydream first')
         for arguments in (['--upstream', 'source'], ['--upstream', 'source', '--task', 'owner-project-1']):
             with self.subTest(arguments=arguments), patch.object(sys, 'argv', ['convert', *arguments]), \
-                    patch.object(convert, 'generate_catalog') as generate, redirect_stderr(io.StringIO()):
-                with self.assertRaises(SystemExit):
+                    patch.object(convert.build, 'pinned_wheel', side_effect=missing), \
+                    patch.object(convert, 'generate_catalog') as generate:
+                with self.assertRaisesRegex(FileNotFoundError, 'Build the pinned Daydream'):
                     convert.main()
                 generate.assert_not_called()
-
 
 if __name__ == '__main__':
     unittest.main()

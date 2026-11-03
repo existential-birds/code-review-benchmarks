@@ -12,7 +12,8 @@ import uuid
 
 import pytest
 
-from benchmarks.aacr import daydream_entrypoint as entrypoint
+from benchmarks.daydream import entrypoint
+from benchmarks.daydream.build import BUILD
 from fake_git import BASE, HEAD, FakeCheckout
 
 
@@ -28,10 +29,12 @@ def review_case(tmp_path, monkeypatch):
                       patch_sha256=hashlib.sha256(patch.encode()).hexdigest())
     inputs = tmp_path / 'inputs'
     inputs.mkdir()
+    artifacts = tmp_path / 'artifacts'
+    (inputs / 'case.json').write_text(json.dumps({'format': 'aacr', 'repository': str(repo),
+                                                  'findings': str(artifacts / 'findings.json')}))
     (inputs / 'comparison.json').write_text(json.dumps(comparison))
     (inputs / 'diff.patch').write_text(patch)
     (inputs / 'build.json').write_text(json.dumps({'source_commit': 'immutable-test-build'}))
-    artifacts = tmp_path / 'artifacts'
     proof = artifacts / 'daydream'
     proof.mkdir(parents=True)
     invocation = str(uuid.uuid4())
@@ -66,8 +69,7 @@ def finalized(case, items, *, complete=True):
 
 
 def run_case(case, **kwargs):
-    return asyncio.run(entrypoint.review_once(repository=case.repo, inputs=case.inputs,
-        artifacts=case.artifacts, agent_logs=case.logs, invocation_id=case.invocation,
+    return asyncio.run(entrypoint.review_once(case_dir=case.inputs, artifacts=case.artifacts, agent_logs=case.logs, invocation_id=case.invocation,
         credential_home=case.inputs / 'credential-store', **kwargs))
 
 
@@ -183,7 +185,7 @@ def test_native_credential_admission_blocks_inference(review_case, monkeypatch, 
     assert run_case(case) != 0
     proof = json.loads((case.artifacts / 'daydream/execution.json').read_text())
     assert proof['status'] == 'failed'
-    assert any('SubscriptionAuthError' in message for message in proof['diagnostics'])
+    assert any('subscription login' in message for message in proof['diagnostics'])
     assert not (case.artifacts / 'findings.json').exists()
 
 
@@ -218,7 +220,7 @@ def test_unsuccessful_invocation_retains_evidence_without_findings(review_case, 
 @pytest.mark.parametrize('outcome,capture_data', [(0, False), (0, True), (7, False),
     ('cancelled', False), ('cancelled_download', False), ('cancelled_receipt', False)])
 def test_installed_agent_requires_process_success_and_populates_usage(tmp_path, outcome, capture_data):
-    from benchmarks.aacr.daydream_agent import DaydreamAgent
+    from benchmarks.daydream.agent import DaydreamAgent
     from harbor.models.agent.context import AgentContext
 
     class Environment:
@@ -241,7 +243,7 @@ def test_installed_agent_requires_process_success_and_populates_usage(tmp_path, 
             Path(target_path).write_text(json.dumps({'usage': {'prompt_tokens': 120,
                 'cached_tokens': 70, 'completion_tokens': 11}, 'elapsed_seconds': 5}))
         async def exec(self, command, **kwargs):
-            if '-m benchmarks.aacr.daydream_entrypoint' in command:
+            if '-m benchmarks.daydream.entrypoint' in command:
                 self.invocations.append(command)
                 if outcome == 'cancelled':
                     raise asyncio.CancelledError
@@ -282,7 +284,7 @@ def test_installed_agent_requires_process_success_and_populates_usage(tmp_path, 
 
 @pytest.mark.parametrize('phase', ['install', 'run'])
 def test_copied_agent_logs_are_rejected_before_any_runtime_execution(tmp_path, phase):
-    from benchmarks.aacr.daydream_agent import DaydreamAgent
+    from benchmarks.daydream.agent import DaydreamAgent
     from harbor.models.agent.context import AgentContext
     logs = tmp_path / 'agent'
     logs.mkdir()
@@ -303,19 +305,21 @@ def test_copied_agent_logs_are_rejected_before_any_runtime_execution(tmp_path, p
     assert not (logs / 'request.json').exists()
 
 
-@pytest.mark.parametrize('failure', ['namespace', 'whole-login-folder', None])
+@pytest.mark.parametrize('failure', ['namespace', 'whole-login-folder', 'older-build', None])
 def test_admission_failure_blocks_runtime_admission(tmp_path, failure):
-    from benchmarks.aacr.daydream_agent import DaydreamAgent
+    from benchmarks.daydream.agent import DaydreamAgent
     commands = []
     logs = tmp_path / 'agent'
     logs.mkdir()
-    # What the reviewer container mounts at /run/aacr-codex.
-    login = tmp_path / 'aacr-codex'
+    # What the reviewer container mounts at /run/reviewer-codex.
+    login = tmp_path / 'reviewer-codex'
     login.mkdir()
     (login / 'auth.json').write_text('{}')
     if failure == 'whole-login-folder':
         (login / 'config.toml').write_text('')
         (login / 'sessions').mkdir()
+    # The Daydream build a task was generated with, as its image holds it.
+    baked = dict(BUILD, version='0.0.1', source_commit='0' * 40) if failure == 'older-build' else BUILD
     class Environment:
         def is_path_mounted(self, environment_path, host_path):
             return environment_path == '/logs/agent' and host_path == logs
@@ -323,17 +327,21 @@ def test_admission_failure_blocks_runtime_admission(tmp_path, failure):
             commands.append(command)
             if command == 'unshare -Ur true':
                 return SimpleNamespace(return_code=1 if failure == 'namespace' else 0)
-            if '/run/aacr-codex' in command:
-                command = command.replace('/run/aacr-codex', str(login))
+            if '/run/reviewer-codex' in command:
+                command = command.replace('/run/reviewer-codex', str(login))
                 return SimpleNamespace(return_code=subprocess.run(command, shell=True).returncode)
+            if command == 'cat /opt/daydream-case/build.json':
+                return SimpleNamespace(return_code=0, stdout=json.dumps(dict(baked, python='3.14.3')))
             return SimpleNamespace(return_code=0)
     if failure is None:
         asyncio.run(DaydreamAgent(logs_dir=logs).install(Environment()))
-        assert len(commands) == 3
+        assert len(commands) == 4
         return
-    with pytest.raises(RuntimeError, match='namespace' if failure == 'namespace' else 'only the Codex auth.json'):
+    match = {'namespace': 'namespace', 'whole-login-folder': 'only the Codex auth.json',
+             'older-build': 'generated for Daydream 0.0.1; regenerate it for the pinned'}[failure]
+    with pytest.raises(RuntimeError, match=match):
         asyncio.run(DaydreamAgent(logs_dir=logs).install(Environment()))
-    assert len(commands) == (1 if failure == 'namespace' else 2)
+    assert len(commands) == {'namespace': 1, 'whole-login-folder': 2, 'older-build': 3}[failure]
 
 
 @pytest.mark.parametrize('mismatch', ['stale', 'head', 'patch', 'request'])
@@ -370,3 +378,40 @@ def test_sigterm_joins_native_finalization_and_flushes_partial_recorders(monkeyp
         return await entrypoint._main(str(uuid.uuid4()))
     assert asyncio.run(run()) == 130
     assert observed == ['flushed', 'finalized']
+
+
+def test_reviewbench_format_sends_line_findings_and_counts_file_level_ones(review_case, monkeypatch):
+    from daydream import runner
+    case = review_case
+    pr = {'repo': 'https://github.com/owner/project', 'pr_number': 17, 'base': BASE, 'head': HEAD}
+    output = case.artifacts / 'out/findings.json'
+    (case.inputs / 'case.json').write_text(json.dumps({'format': 'reviewbench', 'repository': str(case.repo),
+        'findings': str(output), 'base': BASE, 'pr': pr, 'description': 'Title\n\nBody'}))
+    items = [{'file': 'file.php', 'line': 3, 'summary': 'Off by one', 'description': 'Skips the last row'},
+             {'file': 'file.php', 'line': None, 'description': 'A whole-file concern'}]
+    async def inference(config, *, review_result_handler, execution):
+        assert config.frozen_author_description.head_sha == HEAD
+        assert config.frozen_author_description.description == 'Title\n\nBody'
+        stage = Path(config.dump_artifacts)
+        stage.mkdir(exist_ok=True)
+        (stage / 'trajectory.json').write_text(json.dumps({'session_id': str(uuid.uuid4())}))
+        review_result_handler(finalized(case, items))
+        return 0
+    monkeypatch.setattr(runner, 'run', inference)
+    assert run_case(case) == 0
+    assert json.loads(output.read_text()) == {'pr': pr, 'agent': 'daydream', 'findings': [
+        {'producer': 'daydream', 'file': 'file.php', 'start_line': 3, 'end_line': 3,
+         'message': 'Off by one\n\nSkips the last row'}]}
+    proof = json.loads((case.artifacts / 'daydream/execution.json').read_text())
+    assert proof['status'] == 'complete' and proof['omitted_findings'] == 1
+
+
+def test_freeze_comparison_records_what_the_image_holds(review_case):
+    case = review_case
+    for name in ('comparison.json', 'diff.patch'):
+        (case.inputs / name).unlink()
+    (case.inputs / 'case.json').write_text(json.dumps({'format': 'reviewbench', 'repository': str(case.repo),
+                                                      'base': BASE}))
+    assert entrypoint.freeze_comparison(case.inputs) == case.comparison
+    assert json.loads((case.inputs / 'comparison.json').read_text()) == case.comparison
+    assert (case.inputs / 'diff.patch').read_text() == case.checkout.patch

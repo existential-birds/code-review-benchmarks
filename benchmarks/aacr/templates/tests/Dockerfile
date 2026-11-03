@@ -4,6 +4,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends python3 python3
 COPY . /tests/
 RUN python3 -m venv /opt/scorer \
     && /opt/scorer/bin/pip install --no-cache-dir /tests/suite \
-    && npm ci --omit=dev --prefix /tests/suite/benchmarks/aacr
+    && npm ci --omit=dev --prefix /tests/suite/benchmarks/pi
 ENV PATH="/opt/scorer/bin:$PATH"
 WORKDIR /tests/suite

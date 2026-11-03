@@ -1,15 +1,18 @@
-"""Supported Harbor installed-agent seam for the AACR Daydream reviewer."""
+"""Supported Harbor installed-agent seam for the Daydream reviewer, in any benchmark."""
 from __future__ import annotations
 
 import asyncio
 from contextlib import suppress
 import json
+import shlex
 from typing import Annotated
 import uuid
 
 from harbor.agents.capabilities import AgentCapabilities
 from harbor.agents.installed.base import BaseInstalledAgent
 from harbor.agents.options import Cli, InstalledAgentOptions
+
+from benchmarks.daydream.build import BUILD, CASE_DIR, CODEX_LOGIN_DIR
 
 
 class DaydreamOptions(InstalledAgentOptions):
@@ -26,7 +29,10 @@ class DaydreamAgent(BaseInstalledAgent):
 
     @staticmethod
     def name() -> str:
-        return 'daydream-aacr'
+        return 'daydream'
+
+    def get_version_command(self) -> str:
+        return "python -I -c \"import importlib.metadata as m; print(m.version('daydream'))\""
 
     def _require_shared_logs(self, environment) -> None:
         if not environment.is_path_mounted('/logs/agent', self.logs_dir):
@@ -37,22 +43,30 @@ class DaydreamAgent(BaseInstalledAgent):
         result = await environment.exec('unshare -Ur true')
         if result.return_code != 0:
             raise RuntimeError('Native Codex namespace admission failed')
-        # Tasks generated before the mount changed still mount the whole login folder.
-        result = await environment.exec('test "$(ls -A /run/aacr-codex)" = auth.json')
+        result = await environment.exec(f'test "$(ls -A {CODEX_LOGIN_DIR})" = auth.json')
         if result.return_code != 0:
             raise RuntimeError('The reviewer must see only the Codex auth.json; '
                                'regenerate tasks made before the login mount changed')
-        result = await environment.exec(
-            "python -I -c \"from pathlib import Path; "
-            "from benchmarks.aacr.daydream_entrypoint import verify_build; "
-            "verify_build(Path('/opt/aacr/build.json'))\"")
+        # A catalog keeps the Daydream it was generated with; refuse one that
+        # predates the suite's current pin instead of measuring an old reviewer.
+        result = await environment.exec(f'cat {CASE_DIR}/build.json')
+        try:
+            baked = json.loads(result.stdout or '')
+        except ValueError:
+            baked = {}
+        if result.return_code != 0 or any(baked.get(key) != BUILD[key] for key in BUILD):
+            raise RuntimeError(f'Task was generated for Daydream {baked.get("version")}; '
+                               f'regenerate it for the pinned {BUILD["version"]}')
+        probe = ('from pathlib import Path; from benchmarks.daydream.entrypoint import verify_build; '
+                 f"verify_build(Path('{CASE_DIR}/build.json'))")
+        result = await environment.exec('python -I -c ' + shlex.quote(probe))
         if result.return_code != 0:
             raise RuntimeError('Pinned Daydream runtime admission failed')
 
     async def run(self, instruction, environment, context) -> None:
         self._require_shared_logs(environment)
         if self.extra_env:
-            raise ValueError('AACR baseline configuration uses the baked runtime and dedicated credential mount')
+            raise ValueError('Daydream uses the baked runtime and dedicated credential mount')
         invocation = str(uuid.uuid4())
         receipt = {'invocation_id': invocation, 'status': 'failed', 'return_code': None}
         # Trial root is outside Harbor's reviewer-writable log/artifact mounts.
@@ -69,10 +83,9 @@ class DaydreamAgent(BaseInstalledAgent):
         try:
             await environment.upload_file(receipt_path, '/logs/artifacts/daydream/host-receipt.json')
             result = await environment.exec(
-                f'python -I -m benchmarks.aacr.daydream_entrypoint --invocation {invocation} '
+                f'python -I -m benchmarks.daydream.entrypoint --invocation {invocation} '
                 + self.build_cli_flags()
-                + ' > /logs/agent/daydream.stdout.log 2> /logs/agent/daydream.stderr.log',
-                cwd='/workspace/repo')
+                + ' > /logs/agent/daydream.stdout.log 2> /logs/agent/daydream.stderr.log')
             receipt['return_code'] = result.return_code
             if result.return_code != 0:
                 raise RuntimeError('Daydream invocation failed; inspect retained execution evidence')
@@ -116,5 +129,6 @@ class DaydreamAgent(BaseInstalledAgent):
         context.metadata = {**(context.metadata or {}),
             'elapsed_seconds': execution.get('elapsed_seconds'),
             'review_status': execution.get('status'),
+            'omitted_findings': execution.get('omitted_findings'),
             'build': execution.get('build'),
             'resolved_configuration': execution.get('resolved_configuration')}

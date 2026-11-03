@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { completeJudge, safeFailure } from '../benchmarks/aacr/pi_judge.mjs';
-import { refreshLogin } from '../benchmarks/aacr/pi_refresh.mjs';
+import { completeJudge, safeFailure } from '../benchmarks/pi/pi_judge.mjs';
+import { refreshLogin } from '../benchmarks/pi/pi_refresh.mjs';
 
 const request = {
   messages: [{ role: 'user', content: 'Original AACR prompt' }],

@@ -20,6 +20,13 @@ AACR-Bench [asks for this paper](https://github.com/alibaba/aacr-bench#-citation
 }
 ```
 
+ReviewBench, developed by GitHub, has no paper; cite its repository at the pinned
+commit:
+
+```text
+ReviewBench. https://github.com/review-bench/ReviewBench, commit 4f04392d6bf4941ab6f8a3ea0c15b449f4458864.
+```
+
 ## Cite this suite
 
 Identify the exact release or commit, because conversion and scoring can change
@@ -38,6 +45,8 @@ https://github.com/existential-birds/code-review-benchmarks
 |---|---|---|
 | [`benchmarks/aacr/upstream/`](../benchmarks/aacr/upstream/) | AACR-Bench `evaluation/`, with changes listed below | Apache-2.0 |
 | AACR review cases and annotations | AACR-Bench, read at conversion and not stored here | AACR-Bench's license |
+| [`benchmarks/reviewbench/upstream/metric.py`](../benchmarks/reviewbench/upstream/metric.py) | ReviewBench `scripts/harbor/metric.py`, unchanged | [MIT](../benchmarks/reviewbench/upstream/LICENSE) |
+| ReviewBench tasks, golden findings and judge | ReviewBench's exporter, run at conversion and not stored here | [MIT](../benchmarks/reviewbench/upstream/LICENSE) |
 | Repository contexts in generated tasks | Each reviewed project, not stored here | Each project's license |
 | [`.agents/skills/test-audit/`](../.agents/skills/test-audit/) | Adapted in part from [OpenClaw](https://github.com/openclaw/openclaw)'s test-audit guidance | [MIT](../.agents/skills/test-audit/LICENSE) |
 | Everything else in this repository | This suite | [Apache-2.0](../LICENSE) |
@@ -95,7 +104,32 @@ Together they hold 87 reference findings:
 | Incomplete review | Only a missing result file is excluded from metrics | The trial fails with no score, even if findings were retained |
 | Metrics | File-level semantic metrics by default | The same metrics through AACR's `_compute_summary`, pooled across scored trials by [`metric.py`](../benchmarks/aacr/metric.py) |
 
+## ReviewBench inputs
+
+| Input | Value |
+|---|---|
+| Tasks, judge and golden findings | [`review-bench/ReviewBench`](https://github.com/review-bench/ReviewBench) at `4f04392d6bf4941ab6f8a3ea0c15b449f4458864` |
+| Review cases | The 219-PR full set, or its 25-PR test set with `--split test` |
+| Repository contexts | ReviewBench's `review-bench/<owner>_<repo>` GitHub mirrors, fetched when each task image builds |
+
+## How this differs from ReviewBench
+
+| Area | ReviewBench | This suite |
+|---|---|---|
+| Tasks | Written by its `scripts/harbor/export.ts` | The same exporter's tasks, with Daydream in the review image and the judge pointed at a Pi login |
+| Reviewer | Any agent that writes its findings file | Daydream's complete review pipeline. Findings without a line in the head are left out and counted |
+| Review network | Public model API hosts | `chatgpt.com` and `auth.openai.com`, for Codex's subscription login |
+| Review timeout | 900 seconds | 5,400 seconds |
+| Judge | Claude Opus 5 through `api.anthropic.com`, for the leaderboard and the public Harbor dataset | `gpt-6.1-sol` on an OpenAI Codex subscription, through ReviewBench's own Pi SDK 0.75.5 |
+| Matching, classification and prompts | — | Unchanged |
+| Incomplete runs | Every score is withheld unless all planned trials scored | Scored trials are pooled and missing ones counted, by [`metric.py`](../benchmarks/reviewbench/metric.py) |
+| Repeated attempts | Independent rounds, reported as means and standard deviations | Pooled with the other trials |
+
 ## Score equivalence
+
+Neither benchmark's scores here are meant to be comparable with its published
+results. ReviewBench's leaderboard and public dataset use a Claude Opus 5 judge,
+and no run here has been checked against them.
 
 No equivalence with AACR-Bench's published scores has been validated. These scores
 haven't been compared with AACR's results or with its own pipeline on the same

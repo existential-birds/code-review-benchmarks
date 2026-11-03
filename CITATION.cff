@@ -56,3 +56,10 @@ references:
         value: "arXiv:2601.19494"
     url: https://arxiv.org/abs/2601.19494
     repository-code: https://github.com/alibaba/aacr-bench
+  - type: software
+    title: ReviewBench
+    authors:
+      - name: GitHub
+    repository-code: https://github.com/review-bench/ReviewBench
+    commit: 4f04392d6bf4941ab6f8a3ea0c15b449f4458864
+    license: MIT
