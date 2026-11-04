@@ -24,6 +24,8 @@ PR_URL = 'https://github.com/laravel/framework/pull/56591'
 BASE = '6d94b16fd5f4f72bb741f9b900b83179c8ab46c9'
 HEAD = '0a5238acfc4ca99c363283bf3bb16e20905f2a39'
 PACKAGE = Path(__file__).resolve().parent
+# Cases a tuning loop never sees; dev is every other case.
+HOLDOUT = PACKAGE / 'holdout.txt'
 
 
 def task_name(record: dict) -> str:
@@ -250,15 +252,21 @@ def generate_task(upstream: Path, output: Path, *, daydream: bool = False) -> Pa
     return write_task(records[0], output, daydream)
 
 
-def generate_catalog(upstream: Path, output: Path, *, daydream: bool = False,
+def generate_catalog(upstream: Path, output: Path, *, daydream: bool = False, split: str = 'full',
                      task_names: list[str] | None = None, build_file: Path | None = None) -> list[Path]:
     """Generate every selected case and retain explicit revision/conversion failures."""
     records = load_records(upstream)
     total = len(records)
+    if split != 'full':
+        held_out = {line for line in HOLDOUT.read_text().splitlines() if not line.startswith('#')}
+        # A stale name would quietly move its case into dev.
+        if stale := held_out - {task_name(record) for record in records}:
+            raise ValueError(f'holdout.txt lists unknown AACR cases: {sorted(stale)}')
+        records = [record for record in records if (task_name(record) in held_out) == (split == 'holdout')]
     if task_names is not None:
         unknown = set(task_names) - {task_name(record) for record in records}
         if unknown:
-            raise ValueError(f'Unknown AACR task names: {sorted(unknown)}')
+            raise ValueError(f'Unknown AACR task names in the {split} set: {sorted(unknown)}')
         records = [record for record in records if task_name(record) in task_names]
         if not records:
             raise ValueError('Select at least one AACR task')
@@ -268,7 +276,7 @@ def generate_catalog(upstream: Path, output: Path, *, daydream: bool = False,
         if destination.exists():
             raise FileExistsError(f'Refusing to replace generated catalog assets: {destination}')
     output.mkdir(parents=True, exist_ok=True)
-    report = dict(aacr_revision=AACR_REVISION, dataset_sha256=DATASET_SHA256,
+    report = dict(aacr_revision=AACR_REVISION, dataset_sha256=DATASET_SHA256, split=split,
                   total_records=total, selected_records=len(records), generated_tasks=0,
                   reference_findings=0, errors=0, cases=[])
     tasks = []
@@ -299,19 +307,22 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--upstream', required=True, type=Path, help='Clean checkout of the pinned Alibaba AACR source')
     parser.add_argument('--output', type=Path, default=Path('artifacts/aacr/tasks'))
-    parser.add_argument('--task', action='append', dest='task_names', help='Exact case to convert; repeat to select several')
+    parser.add_argument('--split', choices=('full', 'dev', 'holdout'), default='full',
+                        help='All 196 cases, the dev cases for tuning, or the held-out cases in holdout.txt')
+    parser.add_argument('--task', action='append', dest='task_names',
+                        help='Exact case to convert from the split; repeat to select several')
     parser.add_argument('--oracle', action='store_true', help='Generate only the pinned Laravel Oracle fixture')
     parser.add_argument('--build', type=Path, dest='build_file',
                         help="A candidate's build.json from benchmarks.daydream.build --candidate; omit for the pin")
     arguments = parser.parse_args()
     if arguments.oracle:
-        if arguments.task_names or arguments.build_file:
-            parser.error('--oracle cannot be combined with --task or --build')
+        if arguments.task_names or arguments.build_file or arguments.split != 'full':
+            parser.error('--oracle cannot be combined with --task, --build or --split')
         print(generate_task(arguments.upstream, arguments.output))
     else:
         build.built_wheel(arguments.build_file)  # fail before converting anything
-        generate_catalog(arguments.upstream, arguments.output, daydream=True, task_names=arguments.task_names,
-                         build_file=arguments.build_file)
+        generate_catalog(arguments.upstream, arguments.output, daydream=True, split=arguments.split,
+                         task_names=arguments.task_names, build_file=arguments.build_file)
         print(arguments.output / 'catalog.json')
 
 
