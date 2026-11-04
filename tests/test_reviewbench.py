@@ -80,7 +80,8 @@ def test_task_runs_the_pinned_daydream_and_points_the_judge_at_its_login(tmp_pat
         convert.configure_task(changed, build.reviewer_image())
 
 
-def test_catalog_keeps_selected_tasks_and_drops_the_exporters_stale_manifest(tmp_path, monkeypatch, pinned_wheel):
+def test_catalog_keeps_selected_tasks_and_drops_the_exporters_stale_manifest(tmp_path, monkeypatch, pinned_wheel,
+                                                                              candidate_build):
     names = ['owner_a_1-aaaaaaaa', 'owner_b_2-bbbbbbbb', 'owner_c_3-cccccccc']
     splits = []
     def export(upstream, destination, split):
@@ -95,13 +96,19 @@ def test_catalog_keeps_selected_tasks_and_drops_the_exporters_stale_manifest(tmp
     with pytest.raises(ValueError, match="Unknown ReviewBench task names in the test set: \\['owner_z_9-zzzzzzzz'\\]"):
         convert.generate_catalog(tmp_path / 'upstream', output, split='test', task_names=['owner_z_9-zzzzzzzz'])
     assert not output.exists()
-    tasks = convert.generate_catalog(tmp_path / 'upstream', output, split='test', task_names=[names[1]])
+    tasks = convert.generate_catalog(tmp_path / 'upstream', output, split='test', task_names=[names[1]],
+                                     build_file=candidate_build)
     assert splits == ['test', 'test']
     assert tasks == [output / names[1]]
     assert sorted(path.name for path in output.iterdir()) == ['catalog.json', names[1]]
     catalog = json.loads((output / 'catalog.json').read_text())
     assert catalog['tasks'] == [names[1]] and catalog['judge'] == f'openai-codex/{MODEL}'
     assert catalog['reviewbench_revision'] == convert.REVIEWBENCH_REVISION
+    # A candidate catalog says so, and so does each task, so its scores can't pass for the pin's.
+    assert catalog['daydream']['candidate'] is True and catalog['daydream']['source_commit'] == 'c' * 40
+    metadata = tomllib.loads((tasks[0] / 'task.toml').read_text())['metadata']
+    assert metadata['daydream_candidate'] is True
+    assert (tasks[0] / 'environment/daydream-case/build.json').read_text().count('"candidate": true') == 1
     with pytest.raises(FileExistsError, match='Refusing to replace'):
         convert.generate_catalog(tmp_path / 'upstream', output)
 

@@ -1,8 +1,8 @@
 """Export the pinned ReviewBench catalog as Harbor tasks reviewed by Daydream.
 
 ReviewBench's own exporter writes each task: its frozen pull request, golden
-findings and unchanged judge. This only swaps in the pinned Daydream reviewer and
-points the judge at a Pi subscription login.
+findings and unchanged judge. This only swaps in the pinned Daydream reviewer, or
+a candidate build, and points the judge at a Pi subscription login.
 """
 from __future__ import annotations
 
@@ -68,7 +68,7 @@ def export(upstream: Path, destination: Path, split: str) -> None:
 
 
 def configure_task(task: Path, image: tuple[str, dict[str, bytes], dict]) -> None:
-    """Install the pinned Daydream into an exported task's reviewer image."""
+    """Install the pinned Daydream, or a candidate, into an exported task's reviewer image."""
     suffix, assets, identity = image
     environment = task / 'environment'
     pr = json.loads((environment / 'pr.json').read_text())
@@ -98,16 +98,15 @@ def configure_task(task: Path, image: tuple[str, dict[str, bytes], dict]) -> Non
         raise ValueError(f'Unexpected ReviewBench task.toml: {task.name}')
     config = config.replace(placeholder, json.dumps(JUDGE_AUTH_DIR))
     config = config.replace('keywords = ["code-review", "reviewbench"]', 'keywords = ["code-review", "reviewbench", "daydream"]')
-    config = config.replace('[metadata]\n', '[metadata]\n' + ''.join(f'daydream_{key} = {json.dumps(identity[key])}\n'
-        for key in ('source_commit', 'wheel_sha256', 'codex_cli', 'reviewer_runtime_lock_sha256')))
+    config = config.replace('[metadata]\n', '[metadata]\n' + build.task_metadata(identity))
     (task / 'task.toml').write_text(config)
 
 
 def generate_catalog(upstream: Path, output: Path, *, split: str = 'full',
-                     task_names: list[str] | None = None) -> list[Path]:
+                     task_names: list[str] | None = None, build_file: Path | None = None) -> list[Path]:
     upstream, output = Path(upstream).resolve(), Path(output).resolve()
     check_source(upstream)
-    image = build.reviewer_image()
+    image = build.reviewer_image(build_file)
     if output.exists():
         raise FileExistsError(f'Refusing to replace generated catalog: {output}')
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -143,9 +142,11 @@ def main() -> None:
                         help="ReviewBench's 219-PR full set or its 25-PR test set")
     parser.add_argument('--task', action='append', dest='task_names',
                         help='Exact task to generate from the split; repeat to select several')
+    parser.add_argument('--build', type=Path, dest='build_file',
+                        help="A candidate's build.json from benchmarks.daydream.build --candidate; omit for the pin")
     arguments = parser.parse_args()
     tasks = generate_catalog(arguments.upstream, arguments.output, split=arguments.split,
-                             task_names=arguments.task_names)
+                             task_names=arguments.task_names, build_file=arguments.build_file)
     print(f'{len(tasks)} tasks in {arguments.output}')
 
 

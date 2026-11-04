@@ -49,19 +49,21 @@ class DaydreamAgent(BaseInstalledAgent):
                                'regenerate tasks made before the login mount changed')
         # A catalog keeps the Daydream it was generated with; refuse one that
         # predates the suite's current pin instead of measuring an old reviewer.
+        # A candidate task names its own build, which verify_build checks below.
         result = await environment.exec(f'cat {CASE_DIR}/build.json')
         try:
             baked = json.loads(result.stdout or '')
         except ValueError:
             baked = {}
-        if result.return_code != 0 or any(baked.get(key) != BUILD[key] for key in BUILD):
+        if result.return_code != 0 or (baked.get('candidate') is not True
+                                       and any(baked.get(key) != BUILD[key] for key in BUILD)):
             raise RuntimeError(f'Task was generated for Daydream {baked.get("version")}; '
                                f'regenerate it for the pinned {BUILD["version"]}')
         probe = ('from pathlib import Path; from benchmarks.daydream.entrypoint import verify_build; '
                  f"verify_build(Path('{CASE_DIR}/build.json'))")
         result = await environment.exec('python -I -c ' + shlex.quote(probe))
         if result.return_code != 0:
-            raise RuntimeError('Pinned Daydream runtime admission failed')
+            raise RuntimeError('Daydream runtime admission failed')
 
     async def run(self, instruction, environment, context) -> None:
         self._require_shared_logs(environment)
