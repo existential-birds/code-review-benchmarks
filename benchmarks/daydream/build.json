@@ -1,7 +1,7 @@
 {
-  "source_commit": "10a7b63cce018a0eedb9173c5b6e19e806a70921",
-  "version": "0.33.0",
-  "wheel_name": "daydream-0.33.0-py3-none-any.whl",
-  "wheel_sha256": "f881c3efa1ce6f060331ac86ef416434b4228a9711f298d895f0823ad08a65b1",
+  "source_commit": "00d83d604e3b11ed2745f4806e711af4b7b973c8",
+  "version": "0.34.0",
+  "wheel_name": "daydream-0.34.0-py3-none-any.whl",
+  "wheel_sha256": "c81c45e4acedbd106a39782b256aae781c15495390139662dc6fd4c3e6e2c67d",
   "codex_cli": "0.163.0"
 }
