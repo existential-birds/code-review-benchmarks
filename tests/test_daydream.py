@@ -305,7 +305,7 @@ def test_copied_agent_logs_are_rejected_before_any_runtime_execution(tmp_path, p
     assert not (logs / 'request.json').exists()
 
 
-@pytest.mark.parametrize('failure', ['namespace', 'whole-login-folder', 'older-build', None])
+@pytest.mark.parametrize('failure', ['namespace', 'whole-login-folder', 'older-build', None, 'candidate'])
 def test_admission_failure_blocks_runtime_admission(tmp_path, failure):
     from benchmarks.daydream.agent import DaydreamAgent
     commands = []
@@ -318,8 +318,10 @@ def test_admission_failure_blocks_runtime_admission(tmp_path, failure):
     if failure == 'whole-login-folder':
         (login / 'config.toml').write_text('')
         (login / 'sessions').mkdir()
-    # The Daydream build a task was generated with, as its image holds it.
-    baked = dict(BUILD, version='0.0.1', source_commit='0' * 40) if failure == 'older-build' else BUILD
+    # The Daydream build a task was generated with, as its image holds it. A candidate
+    # differs from the pin like an older build, but names itself as a candidate.
+    older = dict(BUILD, version='0.0.1', source_commit='0' * 40)
+    baked = {'older-build': older, 'candidate': dict(older, candidate=True)}.get(failure, BUILD)
     class Environment:
         def is_path_mounted(self, environment_path, host_path):
             return environment_path == '/logs/agent' and host_path == logs
@@ -333,7 +335,7 @@ def test_admission_failure_blocks_runtime_admission(tmp_path, failure):
             if command == 'cat /opt/daydream-case/build.json':
                 return SimpleNamespace(return_code=0, stdout=json.dumps(dict(baked, python='3.14.3')))
             return SimpleNamespace(return_code=0)
-    if failure is None:
+    if failure in (None, 'candidate'):
         asyncio.run(DaydreamAgent(logs_dir=logs).install(Environment()))
         assert len(commands) == 4
         return

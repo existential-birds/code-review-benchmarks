@@ -47,6 +47,7 @@ def test_daydream_task_freezes_runtime_comparison_and_keeps_oracle_separate(tmp_
     assert not (task / 'tests/docker-compose.yaml').exists()
     assert config.get('artifacts', []) == []
     assert config['metadata']['daydream_wheel_sha256'] == hashlib.sha256(wheel.read_bytes()).hexdigest()
+    assert 'daydream_candidate' not in config['metadata']
     assert '--daydream-proof /logs/artifacts/daydream' in (task / 'tests/test.sh').read_text()
     assert '--host-receipt /tmp/daydream-host-receipt.json' in (task / 'tests/test.sh').read_text()
     assert not (task / 'solution').exists()
@@ -57,6 +58,21 @@ def test_daydream_task_freezes_runtime_comparison_and_keeps_oracle_separate(tmp_
     # Only the reviewer image gets the entrypoint; the verifier installs the whole suite itself.
     assert (task / 'environment/daydream-suite/benchmarks/daydream/entrypoint.py').is_file()
     assert 'daydream-suite' not in (task / 'tests/Dockerfile').read_text()
+
+
+def test_candidate_task_installs_the_candidate_for_reviewer_and_verifier(tmp_path, monkeypatch, candidate_build):
+    task, _ = daydream_case(tmp_path, monkeypatch)
+    convert.configure_daydream_task(task, candidate_build)
+    candidate = json.loads(candidate_build.read_text())
+    wheel = (candidate_build.parent / candidate['wheel_name']).read_bytes()
+    # The verifier imports Daydream too, so both images must hold the same build.
+    assert (task / 'environment' / candidate['wheel_name']).read_bytes() == wheel
+    assert (task / 'tests' / candidate['wheel_name']).read_bytes() == wheel
+    baked = json.loads((task / 'environment/daydream-case/build.json').read_text())
+    assert {key: baked[key] for key in candidate} == candidate
+    assert (task / 'tests/build.json').read_bytes() == (task / 'environment/daydream-case/build.json').read_bytes()
+    metadata = tomllib.loads((task / 'task.toml').read_text())['metadata']
+    assert metadata['daydream_candidate'] is True and metadata['daydream_source_commit'] == 'c' * 40
 
 
 @pytest.mark.parametrize('pr_url', [convert.PR_URL, 'https://github.com/owner/project/pull/17'])

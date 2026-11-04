@@ -136,13 +136,13 @@ def prepare_context(instance: schema.ReviewInstance, task: Path) -> Path:
     return repository
 
 
-def configure_daydream_task(task: Path) -> None:
-    """Make a rendered task run the pinned Daydream reviewer."""
+def configure_daydream_task(task: Path, build_file: Path | None = None) -> None:
+    """Make a rendered task run the pinned Daydream reviewer, or a candidate build."""
     from daydream import git_ops
     from daydream.deep.artifacts import diff_key
 
-    suffix, assets, identity = build.reviewer_image()
-    verifier_suffix, verifier_assets, _ = build.reviewer_image(entrypoint=False)
+    suffix, assets, identity = build.reviewer_image(build_file)
+    verifier_suffix, verifier_assets, _ = build.reviewer_image(build_file, entrypoint=False)
     environment = task / 'environment'
     metadata = tomllib.loads((task / 'task.toml').read_text())['metadata']
     repo = environment / 'repo'
@@ -192,8 +192,7 @@ def configure_daydream_task(task: Path) -> None:
     config = config.replace('review case and subscription judge',
                             'review case with the complete Daydream reviewer and subscription judge')
     config = config.replace('["code-review", "aacr"]', '["code-review", "aacr", "daydream"]')
-    config += ''.join(f'daydream_{key} = {json.dumps(identity[key])}\n'
-        for key in ('source_commit', 'wheel_sha256', 'codex_cli', 'reviewer_runtime_lock_sha256'))
+    config += build.task_metadata(identity)
     (task / 'task.toml').write_text(config)
     if (task / 'solution').exists():
         shutil.rmtree(task / 'solution')
@@ -227,7 +226,7 @@ def load_records(upstream: Path) -> list[dict]:
     return sorted(records, key=task_name)
 
 
-def write_task(record: dict, output: Path, daydream: bool) -> Path:
+def write_task(record: dict, output: Path, daydream: bool, build_file: Path | None = None) -> Path:
     destination = output / task_name(record)
     if destination.exists():
         raise FileExistsError(f'Refusing to replace generated task: {destination}')
@@ -236,7 +235,7 @@ def write_task(record: dict, output: Path, daydream: bool) -> Path:
         instance = render_task(record, stage)
         prepare_context(instance, stage)
         if daydream:
-            configure_daydream_task(stage)
+            configure_daydream_task(stage, build_file)
         stage.rename(destination)
     return destination
 
@@ -252,7 +251,7 @@ def generate_task(upstream: Path, output: Path, *, daydream: bool = False) -> Pa
 
 
 def generate_catalog(upstream: Path, output: Path, *, daydream: bool = False,
-                     task_names: list[str] | None = None) -> list[Path]:
+                     task_names: list[str] | None = None, build_file: Path | None = None) -> list[Path]:
     """Generate every selected case and retain explicit revision/conversion failures."""
     records = load_records(upstream)
     total = len(records)
@@ -281,7 +280,7 @@ def generate_catalog(upstream: Path, output: Path, *, daydream: bool = False,
                     reference_findings=len(instance.reference_comments))
         report['reference_findings'] += case['reference_findings']
         try:
-            tasks.append(write_task(record, output, daydream))
+            tasks.append(write_task(record, output, daydream, build_file))
         except Exception as error:
             case.update(status='error', error=f'{type(error).__name__}: {error}')
             report['errors'] += 1
@@ -302,14 +301,17 @@ def main() -> None:
     parser.add_argument('--output', type=Path, default=Path('artifacts/aacr/tasks'))
     parser.add_argument('--task', action='append', dest='task_names', help='Exact case to convert; repeat to select several')
     parser.add_argument('--oracle', action='store_true', help='Generate only the pinned Laravel Oracle fixture')
+    parser.add_argument('--build', type=Path, dest='build_file',
+                        help="A candidate's build.json from benchmarks.daydream.build --candidate; omit for the pin")
     arguments = parser.parse_args()
     if arguments.oracle:
-        if arguments.task_names:
-            parser.error('--oracle cannot be combined with --task')
+        if arguments.task_names or arguments.build_file:
+            parser.error('--oracle cannot be combined with --task or --build')
         print(generate_task(arguments.upstream, arguments.output))
     else:
-        build.pinned_wheel()  # fail before converting anything
-        generate_catalog(arguments.upstream, arguments.output, daydream=True, task_names=arguments.task_names)
+        build.built_wheel(arguments.build_file)  # fail before converting anything
+        generate_catalog(arguments.upstream, arguments.output, daydream=True, task_names=arguments.task_names,
+                         build_file=arguments.build_file)
         print(arguments.output / 'catalog.json')
 
 

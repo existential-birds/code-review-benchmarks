@@ -287,7 +287,7 @@ class ConversionTests(unittest.TestCase):
         missing = FileNotFoundError('Build the pinned Daydream first')
         for arguments in (['--upstream', 'source'], ['--upstream', 'source', '--task', 'owner-project-1']):
             with self.subTest(arguments=arguments), patch.object(sys, 'argv', ['convert', *arguments]), \
-                    patch.object(convert.build, 'pinned_wheel', side_effect=missing), \
+                    patch.object(convert.build, 'built_wheel', side_effect=missing), \
                     patch.object(convert, 'generate_catalog') as generate:
                 with self.assertRaisesRegex(FileNotFoundError, 'Build the pinned Daydream'):
                     convert.main()

@@ -14,7 +14,8 @@ see [score equivalence](docs/citing.md#score-equivalence).
 Every benchmark runs the one Daydream build pinned in
 [`benchmarks/daydream/build.json`](benchmarks/daydream/build.json). To measure another
 version, change that file, rebuild and regenerate the catalogs; Harbor refuses to run
-a task generated for a different pin.
+a task generated for a different pin. To score an unreleased commit without changing
+the pin, use a [candidate build](#score-an-unreleased-daydream-commit).
 
 ## Quick start
 
@@ -79,3 +80,17 @@ export JUDGE_PI_AUTH_DIR=~/.pi/agent
 The [AACR guide](benchmarks/aacr/README.md) covers full runs, reruns and reading
 results. The [ReviewBench guide](benchmarks/reviewbench/README.md) runs the same
 reviewer and logins on ReviewBench's pull requests.
+
+## Score an unreleased Daydream commit
+
+Build the commit as a candidate, then generate a fresh catalog with the `build.json`
+it prints. ReviewBench's converter takes the same `--build`. The catalog runs as
+usual.
+
+```sh
+.venv/bin/python -m benchmarks.daydream.build ../daydream --candidate <commit>
+.venv/bin/python -m benchmarks.aacr.convert --upstream ../aacr-bench \
+  --output artifacts/aacr/<fresh-catalog> --build <printed build.json>
+```
+
+Published results use only the pin.
