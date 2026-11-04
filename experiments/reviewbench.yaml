@@ -1,0 +1,28 @@
+# Shared native settings; supply the catalog with -p.
+jobs_dir: jobs
+n_attempts: 1
+n_concurrent_trials: 1
+retry:
+  max_retries: 0
+agents:
+  - import_path: benchmarks.daydream.agent:DaydreamAgent
+    # ReviewBench's tasks allow 15 minutes; a complete Daydream review needs more.
+    override_timeout_sec: 5400
+    kwargs:
+      capture_data: true
+verifier:
+  import_path: benchmarks.daydream.verifier:DaydreamVerifier
+  kwargs:
+    # Past the tasks' 7,200-second verifier timeout, so the judge's login can't expire mid-scoring.
+    min_judge_validity_sec: 7800
+environment:
+  type: docker
+  delete: true
+  override_cpus: 4
+  override_memory_mb: 8192
+  kwargs:
+    auto_mounting: true
+metrics:
+  - type: uv-script
+    kwargs:
+      script_path: benchmarks/reviewbench/metric.py

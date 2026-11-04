@@ -41,7 +41,7 @@ class PiJudgeClient:
         details = {}
         try:
             process = await asyncio.create_subprocess_exec(
-                "node", str(Path(__file__).with_name("pi_judge.mjs")),
+                "node", str(Path(__file__).parents[1] / "pi" / "pi_judge.mjs"),
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,

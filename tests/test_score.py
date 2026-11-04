@@ -424,7 +424,7 @@ def test_native_verifier_keeps_host_completion_authoritative_after_sandbox_forge
     import shutil
     import yaml
     from benchmarks.aacr import convert
-    from benchmarks.aacr.daydream_agent import DaydreamAgent
+    from benchmarks.daydream.agent import DaydreamAgent
     from harbor.models.agent.context import AgentContext
     from harbor.models.task.config import TaskOS
     from harbor.models.task.task import Task
@@ -451,7 +451,7 @@ def test_native_verifier_keeps_host_completion_authoritative_after_sandbox_forge
         async def download_file(self, source_path, target_path):
             shutil.copyfile(proof / 'execution.json', target_path)
         async def exec(self, command, **kwargs):
-            if '-m benchmarks.aacr.daydream_entrypoint' in command:
+            if '-m benchmarks.daydream.entrypoint' in command:
                 if outcome == 'cancelled':
                     raise asyncio.CancelledError
                 if outcome == 'timeout':
@@ -496,12 +496,12 @@ def test_native_verifier_keeps_host_completion_authoritative_after_sandbox_forge
     if outcome == 'missing':
         (trial.trial_dir / 'daydream-receipt.json').unlink(missing_ok=True)
 
-    from benchmarks.aacr import judge_verifier
+    from benchmarks.pi import verifier as judge_verifier
     pi_home = tmp_path / 'pi-agent'
     pi_home.mkdir()
     (pi_home / 'auth.json').write_text(json.dumps({'openai-codex': {'type': 'oauth', 'access': 'a',
         'refresh': 'r', 'accountId': 'account', 'expires': (time.time() + 3600) * 1000}}))
-    monkeypatch.setenv('AACR_PI_AUTH_DIR', str(pi_home))
+    monkeypatch.setenv('JUDGE_PI_AUTH_DIR', str(pi_home))
     async def fresh_login(auth_path, min_validity_ms):
         pass
     monkeypatch.setattr(judge_verifier, 'refresh_host_login', fresh_login)
@@ -521,10 +521,10 @@ def test_native_verifier_keeps_host_completion_authoritative_after_sandbox_forge
                     and host_path == trial.artifacts_dir / 'logs/artifacts'))
         judge_login = None
         async def upload_file(self, source_path, target_path):
-            if target_path == '/run/aacr-pi/auth.json':
+            if target_path == '/run/judge-pi/auth.json':
                 self.judge_login = json.loads(Path(source_path).read_text())
                 return
-            assert target_path == '/tmp/aacr-host-receipt.json'
+            assert target_path == '/tmp/daydream-host-receipt.json'
             shutil.copyfile(source_path, self.receipt)
         async def upload_dir(self, source_dir, target_dir):
             assert target_dir == '/tests'

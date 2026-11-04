@@ -22,9 +22,11 @@ from harbor.verifier.verifier import Verifier
 
 PACKAGE = Path(__file__).resolve().parent
 PROVIDER = 'openai-codex'
-JUDGE_AUTH_PATH = '/run/aacr-pi/auth.json'
-# Above the 300-second verifier timeout plus Pi's 5-minute refresh threshold,
-# with room for a --verifier-timeout-multiplier up to about 4.
+MODEL = 'gpt-6.1-sol'
+JUDGE_AUTH_DIR = '/run/judge-pi'
+# Above AACR's 300-second verifier timeout plus Pi's 5-minute refresh threshold,
+# with room for a --verifier-timeout-multiplier up to about 4. Benchmarks with a
+# longer verifier timeout raise it in their experiment configuration.
 DEFAULT_MIN_VALIDITY_SEC = 30 * 60
 
 
@@ -73,14 +75,14 @@ class PiJudgeVerifier(Verifier):
             raise ValueError('min_judge_validity_sec must be a positive number of seconds')
 
     async def upload_judge_login(self) -> None:
-        directory = os.environ.get('AACR_PI_AUTH_DIR')
+        directory = os.environ.get('JUDGE_PI_AUTH_DIR')
         if not directory:
-            raise JudgeLoginError('Set AACR_PI_AUTH_DIR to your Pi login folder (usually ~/.pi/agent)')
+            raise JudgeLoginError('Set JUDGE_PI_AUTH_DIR to your Pi login folder (usually ~/.pi/agent)')
         # Keep Pi's own path (not resolved) so the lock sits where Pi itself puts it.
         auth_path = Path(directory) / 'auth.json'
         if not auth_path.is_file():
             # Pi would otherwise create an empty login here.
-            raise JudgeLoginError('No Pi login found at $AACR_PI_AUTH_DIR/auth.json')
+            raise JudgeLoginError('No Pi login found at $JUDGE_PI_AUTH_DIR/auth.json')
         min_validity_ms = self.min_judge_validity_sec * 1000
         await refresh_host_login(auth_path, min_validity_ms)
         credential = read_login(auth_path)
@@ -92,15 +94,15 @@ class PiJudgeVerifier(Verifier):
         # No -p: the folder already existing means a task generated before the
         # mount was removed still mounts the host login there, and the upload
         # would overwrite it.
-        result = await self.environment.exec('mkdir -m 700 /run/aacr-pi', user='root')
+        result = await self.environment.exec(f'mkdir -m 700 {JUDGE_AUTH_DIR}', user='root')
         if result.return_code != 0:
-            raise JudgeLoginError('The judge container already has /run/aacr-pi; '
+            raise JudgeLoginError(f'The judge container already has {JUDGE_AUTH_DIR}; '
                                   'regenerate tasks made before the login mount was removed')
-        descriptor, temporary = tempfile.mkstemp(prefix='aacr-pi-', suffix='.json')
+        descriptor, temporary = tempfile.mkstemp(prefix='judge-pi-', suffix='.json')
         try:
             with os.fdopen(descriptor, 'w', encoding='utf-8') as handle:
                 json.dump({PROVIDER: dict(credential, refresh='')}, handle)
-            await self.environment.upload_file(temporary, JUDGE_AUTH_PATH)
+            await self.environment.upload_file(temporary, f'{JUDGE_AUTH_DIR}/auth.json')
         finally:
             os.unlink(temporary)
 

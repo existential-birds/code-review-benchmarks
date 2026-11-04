@@ -1,8 +1,13 @@
-"""One sandbox-side native Daydream review, with fail-closed finalized output."""
+"""One sandbox-side native Daydream review, with fail-closed finalized output.
+
+Each task's case directory names the repository, where its findings go and in
+which benchmark's format; the review itself is the same for every benchmark.
+"""
 from __future__ import annotations
 
 import argparse
 import asyncio
+import base64
 from contextlib import contextmanager
 from dataclasses import asdict
 import hashlib
@@ -17,8 +22,9 @@ import tempfile
 import time
 import uuid
 
-
-DAYDREAM_REVISION = '5bae1ac09918ecf8d095aaf6d283235ca1ad83a8'
+# Where the reviewer image puts the task's case files and the mounted Codex login.
+CASE_DIR = Path('/opt/daydream-case')
+CODEX_LOGIN_DIR = Path('/run/reviewer-codex')
 
 
 def _write_json(path: Path, value) -> None:
@@ -32,8 +38,6 @@ def _write_json(path: Path, value) -> None:
 def verify_build(path: Path) -> dict:
     """Check the baked wheel, dependency lock, and native CLI before admission."""
     build = json.loads(path.read_text())
-    if build['source_commit'] != DAYDREAM_REVISION:
-        raise ValueError('Daydream source pin differs')
     wheel = Path('/opt') / build['wheel_name']
     if hashlib.sha256(wheel.read_bytes()).hexdigest() != build['wheel_sha256']:
         raise ValueError('Daydream wheel hash differs')
@@ -57,27 +61,67 @@ def _comparison(repository: Path, base: str) -> tuple[dict, str]:
         diff_key=diff_key(patch), patch_sha256=hashlib.sha256(patch.encode()).hexdigest()), patch
 
 
-def _translate(items: list[dict]) -> dict:
+def freeze_comparison(case_dir: Path) -> dict:
+    """Record the comparison a task image holds, for benchmarks that fetch it at build time."""
+    case = json.loads((case_dir / 'case.json').read_text())
+    comparison, patch = _comparison(Path(case['repository']), case['base'])
+    (case_dir / 'comparison.json').write_text(json.dumps(comparison, indent=2) + '\n')
+    (case_dir / 'diff.patch').write_text(patch)
+    return comparison
+
+
+def _relative_file(item: dict) -> str:
+    file = item.get('file')
+    if (not isinstance(file, str) or not file.strip() or '\\' in file
+            or PurePosixPath(file).is_absolute() or '..' in PurePosixPath(file).parts):
+        raise ValueError('Finalized finding has no repository-relative file context')
+    return file
+
+
+def _description(item: dict) -> str:
+    return '\n\n'.join(value.strip() for key in ('description', 'rationale', 'evidence')
+                       if isinstance(value := item.get(key), str) and value.strip())
+
+
+def _line(item: dict) -> int | None:
+    line = item.get('line')
+    # Native file-level locations may use null or a nonpositive hint.
+    if line is not None and type(line) is not int:
+        raise ValueError('Finalized finding line is malformed')
+    return line if line is not None and line > 0 else None
+
+
+def _aacr_findings(items: list[dict], case: dict) -> tuple[dict, int, int]:
     """AACR admits file-level findings; impose no new-side diff-anchor policy."""
     findings = []
     for item in items:
-        file = item.get('file')
-        if (not isinstance(file, str) or not file.strip() or '\\' in file
-                or PurePosixPath(file).is_absolute() or '..' in PurePosixPath(file).parts):
-            raise ValueError('Finalized finding has no repository-relative file context')
-        description = '\n\n'.join(value.strip() for key in ('description', 'rationale', 'evidence')
-            if isinstance(value := item.get(key), str) and value.strip())
+        file, description, line = _relative_file(item), _description(item), _line(item)
         summary = item.get('summary', item.get('title', ''))
         if not isinstance(summary, str) or not (summary.strip() or description):
             raise ValueError('Finalized finding has no text')
-        line = item.get('line')
-        # Native file-level locations may use null or a nonpositive hint.
-        if line is not None and type(line) is not int:
-            raise ValueError('Finalized finding line is malformed')
-        line = line if line is not None and line > 0 else None
         findings.append(dict(file=file, start_line=line, end_line=line,
                              summary=summary, description=description))
-    return {'review_output': findings}
+    return {'review_output': findings}, len(findings), 0
+
+
+def _reviewbench_findings(items: list[dict], case: dict) -> tuple[dict, int, int]:
+    """ReviewBench requires a HEAD line, so file-level findings are counted, not sent."""
+    findings, omitted = [], 0
+    for item in items:
+        file, line = _relative_file(item), _line(item)
+        if line is None:
+            omitted += 1
+            continue
+        summary = item.get('summary', item.get('title', ''))
+        message = '\n\n'.join(text for text in (summary.strip() if isinstance(summary, str) else '',
+                                                _description(item)) if text)
+        if not message:
+            raise ValueError('Finalized finding has no text')
+        findings.append(dict(producer='daydream', file=file, start_line=line, end_line=line, message=message))
+    return {'pr': case['pr'], 'agent': 'daydream', 'findings': findings}, len(findings), omitted
+
+
+FORMATS = {'aacr': _aacr_findings, 'reviewbench': _reviewbench_findings}
 
 
 def _configuration(config, backend, staged: Path) -> dict:
@@ -142,53 +186,83 @@ def _isolated_environment(private: Path):
         os.environ.update(previous)
 
 
-async def review_once(*, repository: Path, inputs: Path, artifacts: Path, agent_logs: Path,
+def _check_codex_login(auth: Path) -> None:
+    """Admit a refreshable ChatGPT subscription login, never an API key."""
+    try:
+        value = json.loads(auth.read_text()) if auth.is_file() and not auth.is_symlink() else None
+        tokens = value['tokens']
+        if value['auth_mode'] != 'chatgpt' or value.get('OPENAI_API_KEY') or not all(
+                isinstance(tokens.get(key), str) and tokens[key]
+                for key in ('access_token', 'refresh_token', 'account_id', 'id_token')):
+            raise ValueError
+        payload = tokens['access_token'].split('.')[1]
+        claims = json.loads(base64.urlsafe_b64decode(payload + '=' * (-len(payload) % 4)))
+        if type(claims.get('exp')) not in (int, float):
+            raise ValueError
+    except (OSError, ValueError, TypeError, KeyError, IndexError, AttributeError):
+        raise ValueError('The reviewer needs a Codex ChatGPT subscription login, not an API key') from None
+
+
+@contextmanager
+def _codex_home(login: Path, private: Path):
+    """A disposable Codex home whose only state is a link to the mounted login."""
+    auth = login / 'auth.json'
+    _check_codex_login(auth)
+    home = private / 'codex'
+    home.mkdir(mode=0o700)
+    # Codex rewrites the linked file in place, so a refresh reaches the host login.
+    (home / 'auth.json').symlink_to(auth)
+    (home / 'config.toml').write_text('model_provider = "openai"\ncli_auth_credentials_store = "file"\n')
+    yield home
+
+
+async def review_once(*, case_dir: Path, artifacts: Path, agent_logs: Path,
                       invocation_id: str, credential_home: Path, capture_data: bool = False) -> int:
     """Invoke the complete pipeline once; publish only after successful finalization."""
     from daydream import git_ops, runner
     from daydream.backends import BackendExecutionInput
-    from daydream.benchmark.reviewbench.harbor_auth import reviewer_credentials
     from daydream.config_file import DaydreamFileConfig
     from daydream.git_ops import StaticGitHubAuth
     from daydream.github_app import GitHubExecutionInput
     from daydream.review_profile import resolve_harbor_profile
     from daydream.review_result import validate_terminal_result
-    from daydream.run_config import RunConfig
+    from daydream.run_config import FrozenAuthorDescription, RunConfig
     from daydream.runner import RunnerExecutionInput
 
     started = time.monotonic()
     proof = artifacts / 'daydream'
-    output = artifacts / 'findings.json'
     execution_path = proof / 'execution.json'
     prior_execution = execution_path.exists()
     record = dict(schema_version=1, invocation_id=invocation_id, status='failed',
         runner_exit_code=None, terminal_result=None, analyzed_comparison={}, post_comparison={},
-        usage={}, retained_findings=[], resolved_configuration={}, build={}, findings_sha256=None,
-        diagnostics=[], elapsed_seconds=0,
+        usage={}, retained_findings=[], omitted_findings=0, resolved_configuration={}, build={},
+        findings_sha256=None, diagnostics=[], elapsed_seconds=0,
         cost_interpretation='API-equivalent estimate when available; subscription charges unknown')
     try:
         if str(uuid.UUID(invocation_id)) != invocation_id:
             raise ValueError('Invalid invocation identity')
+        case = json.loads((case_dir / 'case.json').read_text())
+        repository, output, translate = Path(case['repository']), Path(case['findings']), FORMATS[case['format']]
         if prior_execution or output.exists() or (agent_logs / 'daydream').exists():
             raise ValueError('Prior reviewer artifacts exist; use a fresh trial')
         if json.loads((proof / 'request.json').read_text()) != {'invocation_id': invocation_id}:
             raise ValueError('Invocation request identity differs')
-        expected = json.loads((inputs / 'comparison.json').read_text())
-        record['build'] = json.loads((inputs / 'build.json').read_text())
+        expected = json.loads((case_dir / 'comparison.json').read_text())
+        record['build'] = json.loads((case_dir / 'build.json').read_text())
         actual, patch = _comparison(repository, expected['base_sha'])
         record['analyzed_comparison'] = actual
-        if actual != expected or patch.encode() != (inputs / 'diff.patch').read_bytes():
+        if actual != expected or patch.encode() != (case_dir / 'diff.patch').read_bytes():
             raise ValueError('Pinned comparison differs from repository')
         if git_ops.status_porcelain(repository).strip():
             raise ValueError('Reviewer repository is not clean')
+        description = case.get('description')
         finalized = []
-        with tempfile.TemporaryDirectory(prefix='aacr-daydream-') as temporary:
+        with tempfile.TemporaryDirectory(prefix='daydream-review-') as temporary:
             private = Path(temporary)
             staged = private / 'native-evidence'
             staged.mkdir()
             with (_isolated_environment(private) as controls,
-                  reviewer_credentials(credential_home, private / 'codex', backend='codex') as role_home):
-                (role_home / 'config.toml').write_text('model_provider = "openai"\ncli_auth_credentials_store = "file"\n')
+                  _codex_home(credential_home, private) as role_home):
                 controls['CODEX_HOME'] = str(role_home)
                 backend = BackendExecutionInput.from_environment(controls, backend='codex')
                 config = RunConfig(target=str(repository), backend='codex', output_mode='review',
@@ -198,7 +272,9 @@ async def review_once(*, repository: Path, inputs: Path, artifacts: Path, agent_
                     archive=False, run_eval=False,
                     discover_github_provenance=False, base=expected['base_sha'],
                     approved_head_sha=expected['head_sha'], file_config=DaydreamFileConfig(),
-                    review_profile=resolve_harbor_profile(env={}), dump_artifacts=str(staged))
+                    review_profile=resolve_harbor_profile(env={}), dump_artifacts=str(staged),
+                    frozen_author_description=FrozenAuthorDescription(expected['head_sha'], description)
+                        if description else None)
                 execution = RunnerExecutionInput(backend, GitHubExecutionInput(auth=StaticGitHubAuth(controls)),
                     backends={'codex': backend})
                 try:
@@ -234,10 +310,10 @@ async def review_once(*, repository: Path, inputs: Path, artifacts: Path, agent_
                     raise ValueError('Native invocation did not exit successfully')
                 if not (agent_logs / 'trajectory.json').is_file():
                     raise ValueError('Native trajectory unavailable')
-                findings = _translate(record['retained_findings'])
+                findings, count, record['omitted_findings'] = translate(record['retained_findings'], case)
                 _write_json(output, findings)
                 record['findings_sha256'] = hashlib.sha256(output.read_bytes()).hexdigest()
-                record['status'] = 'complete' if findings['review_output'] else 'completed_empty'
+                record['status'] = 'complete' if count else 'completed_empty'
         return 0
     except BaseException as error:
         record['diagnostics'].append(type(error).__name__ + ': ' + str(error))
@@ -265,10 +341,9 @@ async def _main(invocation: str, capture_data: bool = False) -> int:
                     flush_active_signal_recorders()
             loop.add_signal_handler(signal.SIGTERM, interrupt)
             try:
-                result = await review_once(repository=Path('/workspace/repo'), inputs=Path('/opt/aacr'),
-                    artifacts=Path('/logs/artifacts'), agent_logs=Path('/logs/agent'),
-                    invocation_id=invocation, credential_home=Path('/run/aacr-codex'),
-                    capture_data=capture_data)
+                result = await review_once(case_dir=CASE_DIR, artifacts=Path('/logs/artifacts'),
+                    agent_logs=Path('/logs/agent'), invocation_id=invocation,
+                    credential_home=CODEX_LOGIN_DIR, capture_data=capture_data)
             finally:
                 loop.remove_signal_handler(signal.SIGTERM)
     except asyncio.CancelledError:
@@ -278,8 +353,14 @@ async def _main(invocation: str, capture_data: bool = False) -> int:
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--invocation', required=True)
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument('--invocation', help='Review once for this host-issued invocation')
+    mode.add_argument('--freeze-comparison', action='store_true',
+                      help="Record the task image's comparison in its case directory")
     parser.add_argument('--capture-data', action='store_true',
                         help='Retain native local JSONL capture under the trial agent logs')
     args = parser.parse_args()
-    raise SystemExit(asyncio.run(_main(args.invocation, args.capture_data)))
+    if args.freeze_comparison:
+        print(json.dumps(freeze_comparison(CASE_DIR)))
+    else:
+        raise SystemExit(asyncio.run(_main(args.invocation, args.capture_data)))

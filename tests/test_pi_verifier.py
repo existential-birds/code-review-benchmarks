@@ -10,7 +10,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from benchmarks.aacr import judge_verifier
+from benchmarks.pi import verifier as judge_verifier
 from harbor.verifier.verifier import Verifier
 
 HOUR_MS = 3600 * 1000
@@ -45,7 +45,7 @@ def judge(tmp_path, monkeypatch):
     home.mkdir()
     (home / 'auth.json').write_text(json.dumps(login(int(time.time() * 1000) - 1000,
         anthropic={'type': 'oauth', 'access': 'other-provider', 'refresh': 'r', 'expires': 1})))
-    monkeypatch.setenv('AACR_PI_AUTH_DIR', str(home))
+    monkeypatch.setenv('JUDGE_PI_AUTH_DIR', str(home))
     scratch = tmp_path / 'host-tmp'
     scratch.mkdir()
     monkeypatch.setattr(tempfile, 'tempdir', str(scratch))
@@ -74,9 +74,9 @@ def test_uploads_only_the_refreshed_openai_codex_access_before_scoring(judge, kw
     verifier = judge_verifier.PiJudgeVerifier(task=None, trial_paths=None, environment=judge.environment, **kwargs)
     assert asyncio.run(verifier.verify()) == 'scored'
     assert judge.refreshes == [(judge.home / 'auth.json', validity_ms)]
-    assert judge.environment.calls == [('exec', 'mkdir -m 700 /run/aacr-pi', 'root'),
-                                       ('upload', '/run/aacr-pi/auth.json'), ('native-verify',)]
-    uploaded, mode, source = judge.environment.uploads['/run/aacr-pi/auth.json']
+    assert judge.environment.calls == [('exec', 'mkdir -m 700 /run/judge-pi', 'root'),
+                                       ('upload', '/run/judge-pi/auth.json'), ('native-verify',)]
+    uploaded, mode, source = judge.environment.uploads['/run/judge-pi/auth.json']
     host = json.loads((judge.home / 'auth.json').read_text())['openai-codex']
     assert host['refresh'] == 'new-refresh'
     # Without a refresh token the container can't rotate the host login.
@@ -104,16 +104,16 @@ def test_any_login_failure_stops_the_trial_before_scoring(judge, monkeypatch, fa
             pass
         monkeypatch.setattr(judge_verifier, 'refresh_host_login', refresh)
     elif failure == 'no-variable':
-        monkeypatch.delenv('AACR_PI_AUTH_DIR')
+        monkeypatch.delenv('JUDGE_PI_AUTH_DIR')
     elif failure == 'old-task-mount':
-        # An old task's compose file mounts the host login at /run/aacr-pi.
+        # An old task's compose file mounts the host login at /run/judge-pi.
         judge.environment.login_folder_exists = True
     else:
         missing = judge.home.parent / 'missing'
-        monkeypatch.setenv('AACR_PI_AUTH_DIR', str(missing))
+        monkeypatch.setenv('JUDGE_PI_AUTH_DIR', str(missing))
     with pytest.raises(judge_verifier.JudgeLoginError):
         asyncio.run(judge.verifier.verify())
-    assert judge.environment.calls == ([('exec', 'mkdir -m 700 /run/aacr-pi', 'root')]
+    assert judge.environment.calls == ([('exec', 'mkdir -m 700 /run/judge-pi', 'root')]
                                        if failure == 'old-task-mount' else [])
     assert judge.environment.uploads == {}
     assert list(judge.scratch.iterdir()) == []
@@ -125,7 +125,7 @@ def test_any_login_failure_stops_the_trial_before_scoring(judge, monkeypatch, fa
 
 @pytest.mark.skipif(shutil.which('node') is None
                     or not (judge_verifier.PACKAGE / 'node_modules/@earendil-works/pi-coding-agent').is_dir(),
-                    reason='host refresh needs Node and the pinned Pi SDK in benchmarks/aacr/node_modules')
+                    reason='host refresh needs Node and the pinned Pi SDK in benchmarks/pi/node_modules')
 def test_pinned_sdk_leaves_a_fresh_login_untouched_and_rejects_a_missing_one(tmp_path):
     auth_path = tmp_path / 'auth.json'
     auth_path.write_text(json.dumps(login(int(time.time() * 1000) + 10 * HOUR_MS)))

@@ -5,12 +5,11 @@ n_concurrent_trials: 1
 retry:
   max_retries: 0
 agents:
-  - import_path: benchmarks.aacr.daydream_agent:DaydreamAgent
+  - import_path: benchmarks.daydream.agent:DaydreamAgent
     kwargs:
-      version: 0.30.0
       capture_data: true
 verifier:
-  import_path: benchmarks.aacr.daydream_verifier:DaydreamVerifier
+  import_path: benchmarks.daydream.verifier:DaydreamVerifier
 environment:
   type: docker
   delete: true

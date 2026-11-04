@@ -1,4 +1,4 @@
-// Apache-2.0. Public Pi SDK bridge for AACR's one-user-message text scorer.
+// Apache-2.0. Public Pi SDK bridge for a judge that sends one user message, such as AACR's scorer.
 import { readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -28,7 +28,7 @@ export async function completeJudge(runtime, request) {
   if (!Array.isArray(request?.messages) || request.messages.length !== 1
       || request.messages[0]?.role !== 'user'
       || typeof request.messages[0].content !== 'string') {
-    throw failure('request', 'Expected AACR single user prompt');
+    throw failure('request', 'Expected a single user prompt');
   }
   if (!runtime.isUsingSubscription(PROVIDER)
       || (await runtime.checkAuth(PROVIDER))?.type !== 'oauth') {
@@ -126,7 +126,7 @@ async function main() {
     const request = JSON.parse(input);
     const { ModelRuntime } = await import('@earendil-works/pi-coding-agent');
     const runtime = await ModelRuntime.create({
-      authPath: '/run/aacr-pi/auth.json', modelsPath: null, allowModelNetwork: false,
+      authPath: '/run/judge-pi/auth.json', modelsPath: null, allowModelNetwork: false,
     });
     process.stdout.write(JSON.stringify(await completeJudge(runtime, request)) + '\n');
   } catch (error) {
