@@ -112,11 +112,18 @@ def generate_catalog(upstream: Path, output: Path, *, split: str = 'full',
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='.reviewbench-', dir=output.parent) as temporary:
         staged = Path(temporary) / 'catalog'
-        export(upstream, staged, split)
+        # The exporter knows only full and test; dev is the full set less the test set.
+        export(upstream, staged, 'full' if split == 'dev' else split)
         # The exporter's manifest and metric hash tasks as exported; Harbor runs
         # the changed tasks from the directory, scored by this suite's metric.
         (staged / 'dataset.toml').unlink()
         (staged / 'metric.py').unlink()
+        if split == 'dev':
+            held_out = Path(temporary) / 'test'
+            export(upstream, held_out, 'test')
+            for task in held_out.iterdir():
+                if task.is_dir():
+                    shutil.rmtree(staged / task.name)
         names = sorted(path.name for path in staged.iterdir())
         if task_names is not None:
             unknown = set(task_names) - set(names)
@@ -138,8 +145,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--upstream', required=True, type=Path, help='Clean checkout of the pinned ReviewBench source')
     parser.add_argument('--output', type=Path, default=Path('artifacts/reviewbench/tasks'))
-    parser.add_argument('--split', choices=('full', 'test'), default='full',
-                        help="ReviewBench's 219-PR full set or its 25-PR test set")
+    parser.add_argument('--split', choices=('full', 'dev', 'test'), default='full',
+                        help="ReviewBench's 219-PR full set, the 194 PRs outside its test set, or its 25-PR test set")
     parser.add_argument('--task', action='append', dest='task_names',
                         help='Exact task to generate from the split; repeat to select several')
     parser.add_argument('--build', type=Path, dest='build_file',

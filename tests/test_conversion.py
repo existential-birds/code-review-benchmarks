@@ -283,6 +283,28 @@ class ConversionTests(unittest.TestCase):
         self.assertEqual((output / 'catalog.json').read_bytes(), before)
         self.assertFalse((output / 'owner-project1-1').exists())
 
+    def test_dev_and_holdout_split_the_full_catalog_by_the_committed_list(self):
+        records = [dict(self.record, githubPrUrl=f'https://github.com/owner/project{number}/pull/{number}')
+                   for number in (1, 2, 3)]
+        source = self.catalog_fixture(records)
+        holdout = self.root / 'holdout.txt'
+        holdout.write_text('# Rule comment\nowner-project2-2\n')
+        self.enterContext(patch.object(convert, 'HOLDOUT', holdout))
+        names = {split: [task.name for task in convert.generate_catalog(source, self.root / split, split=split)]
+                 for split in ('full', 'dev', 'holdout')}
+        self.assertEqual(names, {'full': ['owner-project1-1', 'owner-project2-2', 'owner-project3-3'],
+                                 'dev': ['owner-project1-1', 'owner-project3-3'], 'holdout': ['owner-project2-2']})
+        report = json.loads((self.root / 'holdout/catalog.json').read_text())
+        self.assertEqual((report['split'], report['total_records'], report['selected_records']), ('holdout', 3, 1))
+        with self.assertRaisesRegex(ValueError, r"Unknown AACR task names in the dev set: \['owner-project2-2'\]"):
+            convert.generate_catalog(source, self.root / 'refused', split='dev', task_names=['owner-project2-2'])
+        self.assertFalse((self.root / 'refused').exists())
+        tasks = convert.generate_catalog(source, self.root / 'one', split='holdout', task_names=['owner-project2-2'])
+        self.assertEqual([task.name for task in tasks], ['owner-project2-2'])
+        holdout.write_text('owner-project2-2\nrenamed-case-9\n')
+        with self.assertRaisesRegex(ValueError, r"holdout.txt lists unknown AACR cases: \['renamed-case-9'\]"):
+            convert.generate_catalog(source, self.root / 'stale', split='dev')
+
     def test_cli_requires_the_pinned_reviewer_build_outside_the_oracle_fixture(self):
         missing = FileNotFoundError('Build the pinned Daydream first')
         for arguments in (['--upstream', 'source'], ['--upstream', 'source', '--task', 'owner-project-1']):

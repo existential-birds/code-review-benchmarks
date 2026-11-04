@@ -75,9 +75,15 @@ each time; the converter won't overwrite one. A full
 catalog takes about 46 GB. Add `--task <case>` (repeatable) to generate only
 selected cases.
 
+To tune Daydream without fitting it to every case, add `--split dev` for the cases to
+tune on, and `--split holdout` only to confirm a change on the 59 cases listed in
+[`holdout.txt`](holdout.txt), which tuning never sees. The default, `--split full`,
+generates all 196. `--task` must name a case in the chosen split.
+
 Eleven pinned commits no longer exist upstream, so a full conversion generates 185
 of 196 cases and **exits 1**. That is expected. `catalog.json` records every case
-and its error.
+and its error. Five of the eleven are held out, so `dev` generates 131 of 137 cases
+and `holdout` 54 of 59, and both also exit 1.
 
 ## Run
 

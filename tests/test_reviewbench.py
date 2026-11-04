@@ -113,7 +113,29 @@ def test_catalog_keeps_selected_tasks_and_drops_the_exporters_stale_manifest(tmp
         convert.generate_catalog(tmp_path / 'upstream', output)
 
 
-@pytest.mark.parametrize('problem', ['revision', 'dirty', 'no-npm-ci', 'metric', None])
+def test_dev_split_is_the_full_set_less_the_exporters_test_set(tmp_path, monkeypatch, pinned_wheel):
+    exported = {'full': ['owner_a_1-aaaaaaaa', 'owner_b_2-bbbbbbbb', 'owner_c_3-cccccccc'],
+                'test': ['owner_b_2-bbbbbbbb']}
+    def export(upstream, destination, split):
+        for name in exported[split]:
+            exported_task(destination / name, name)
+        (destination / 'dataset.toml').write_text('[[tasks]]\n')
+        (destination / 'metric.py').write_text('EXPECTED_TASKS = {}\n')
+    monkeypatch.setattr(convert, 'check_source', lambda upstream: None)
+    monkeypatch.setattr(convert, 'export', export)
+    names = {split: [task.name for task in convert.generate_catalog(tmp_path / 'upstream', tmp_path / split, split=split)]
+             for split in ('full', 'dev', 'test')}
+    assert names == {'full': exported['full'], 'dev': ['owner_a_1-aaaaaaaa', 'owner_c_3-cccccccc'],
+                     'test': exported['test']}
+    assert sorted(path.name for path in (tmp_path / 'dev').iterdir()) == ['catalog.json', *names['dev']]
+    assert json.loads((tmp_path / 'dev/catalog.json').read_text())['split'] == 'dev'
+    with pytest.raises(ValueError, match="Unknown ReviewBench task names in the dev set: \\['owner_b_2-bbbbbbbb'\\]"):
+        convert.generate_catalog(tmp_path / 'upstream', tmp_path / 'refused', split='dev',
+                                 task_names=['owner_b_2-bbbbbbbb'])
+    assert not (tmp_path / 'refused').exists()
+
+
+@pytest.mark.parametrize('problem',['revision', 'dirty', 'no-npm-ci', 'metric', None])
 def test_source_must_be_the_clean_pinned_checkout_with_its_exporter_installed(tmp_path, monkeypatch, problem):
     upstream = tmp_path / 'ReviewBench'
     if problem != 'no-npm-ci':

@@ -63,8 +63,10 @@ Desktop works).
   --upstream ../ReviewBench --output artifacts/reviewbench/<fresh-catalog>
 ```
 
-This writes all 219 tasks; add `--split test` for the 25-PR test set, and `--task
-<name>` (repeatable) to generate only selected ones. Use a new output directory each
+This writes all 219 tasks. To tune Daydream, use `--split dev` for the 194 PRs
+outside the test set, and `--split test` for ReviewBench's 25-PR test set only to
+confirm a change, since tuning never sees it. Add `--task <name>` (repeatable) to
+generate only selected tasks from the chosen split. Use a new output directory each
 time. The catalog is small: each task's image fetches its pull request from
 ReviewBench's GitHub mirror when Harbor first builds it.
 
