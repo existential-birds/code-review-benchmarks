@@ -1,0 +1,51 @@
+name: Tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: code-review-benchmarks
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+
+      - name: Clone pinned sources
+        run: |
+          git clone --quiet https://github.com/harbor-framework/harbor
+          git -C harbor checkout --quiet 6099b8cf2bfbbb3e7ff1eb2163bfc4524dbd9ba5
+          git clone --quiet https://github.com/existential-birds/daydream
+
+      - name: Install (README quick start)
+        working-directory: code-review-benchmarks
+        run: |
+          uv venv --python 3.14 .venv
+          .venv/bin/python -m benchmarks.daydream.build ../daydream
+          uv pip install --python .venv/bin/python --require-hashes \
+            -r .cache/daydream/runtime-requirements.lock
+          uv pip install --python .venv/bin/python -e ../harbor
+          uv pip install --python .venv/bin/python --no-deps --reinstall .cache/daydream/daydream-*.whl
+          uv pip install --python .venv/bin/python --no-deps -e .
+          uv pip install --python .venv/bin/python pytest==8.4.2
+          npm ci --omit=dev --prefix benchmarks/pi
+
+      - name: Test
+        working-directory: code-review-benchmarks
+        run: |
+          .venv/bin/python -m pytest tests -q
+          node --test tests/pi_judge.test.mjs

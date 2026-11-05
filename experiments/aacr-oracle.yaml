@@ -1,4 +1,4 @@
-# One verification fixture, using only native Harbor execution controls.
+# Scores the Laravel oracle task, to check the judge without running Daydream.
 job_name: aacr-oracle
 jobs_dir: jobs
 n_attempts: 1

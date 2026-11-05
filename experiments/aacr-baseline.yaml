@@ -1,4 +1,4 @@
-# Shared native settings; supply exactly one dataset source in an overlay or -p.
+# Shared AACR settings; give the catalog with -p or a second -c.
 jobs_dir: jobs
 n_attempts: 1
 n_concurrent_trials: 1

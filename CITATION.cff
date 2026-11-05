@@ -5,8 +5,8 @@ message: >-
 type: software
 title: Code Review Benchmarks
 abstract: >-
-  Harbor-based evaluation suite for measuring the effects of changes to
-  Daydream and comparing other code-review agents.
+  Harbor-based benchmarks that measure how changes to Daydream affect the
+  quality of its code reviews.
 authors:
   - given-names: Kevin
     family-names: Anderson

@@ -1,40 +1,31 @@
 # Local configuration
 .env
 .env.*
-!.env.example
-!.env.*.example
 .DS_Store
 .vscode/
 
-# Python environments and caches
+# Python
 .venv/
 __pycache__/
 *.py[cod]
 .pytest_cache/
-.mypy_cache/
-.ruff_cache/
-.coverage
-.coverage.*
-htmlcov/
 build/
 dist/
 *.egg-info/
 
-# Node dependencies
+# Node
 node_modules/
 
-# Generated benchmark assets and execution evidence
-/artifacts/
-/snapshots/
-/jobs/
-/results/
+# Daydream builds, generated catalogs and Harbor jobs
 /.cache/
+/artifacts/
+/jobs/
 
-# Local Daydream review output
+# Daydream review output
 .daydream/
 .review-output.md
 
-# Locally installed skills; only our own are tracked
+# Installed agent skills; only the repository's own are tracked
 .agents/skills/*
 !.agents/skills/fetch-pr-feedback/
 !.agents/skills/prepare-implement/
@@ -42,9 +33,3 @@ node_modules/
 !.agents/skills/refactor-audit/
 !.agents/skills/respond-pr-feedback/
 !.agents/skills/test-audit/
-
-# Local agent tooling
-.firecrawl/
-.hermes/
-docs/agents/
-skills-lock.json

@@ -83,9 +83,8 @@ Include:
   evaluation runs within the requested scope and use native Harbor controls.
 - Review and completion criteria: requested acceptance criteria met, applicable
   checks run, actionable review findings addressed, and actual failures, skips,
-  or missing checks reported. Reference local `code-review` and `pr` skills when
-  applicable and available; keep the prompt executable without them. If using
-  `implement`, state these repository-specific criteria alongside it.
+  or missing checks reported. Reference locally installed review or PR skills
+  when useful, but keep the prompt executable without them.
 - For authorized Git operations, stage related paths explicitly and keep normal
   hooks enabled. Fix hook failures on the current branch and retry, or report
   the blocker. For an authorized PR, use the current repository PR guidance,

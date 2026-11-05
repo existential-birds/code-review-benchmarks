@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "code-review-benchmarks"
 version = "0.1.0"
-description = "Harbor-based evaluation suite for code review agents"
+description = "Harbor-based benchmarks for Daydream's code reviews"
 requires-python = ">=3.11"
 license = "Apache-2.0"
 dependencies = ["typing-extensions==4.16.0"]
@@ -17,7 +17,7 @@ test = ["pytest==8.4.2"]
 include = ["benchmarks*"]
 
 [tool.setuptools.package-data]
-"benchmarks.aacr" = ["templates/**/*"]
+"benchmarks.aacr" = ["holdout.txt", "templates/**/*"]
 "benchmarks.daydream" = ["build.json"]
 "benchmarks.pi" = ["*.mjs", "package*.json"]
 

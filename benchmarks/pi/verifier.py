@@ -66,7 +66,7 @@ def read_login(auth_path: Path):
 
 
 class PiJudgeVerifier(Verifier):
-    """Native verification, after uploading a fresh copy of the judge's credential."""
+    """Harbor's verifier, after uploading a fresh copy of the judge's login."""
 
     def __init__(self, *args, min_judge_validity_sec: int = DEFAULT_MIN_VALIDITY_SEC, **kwargs):
         super().__init__(*args, **kwargs)

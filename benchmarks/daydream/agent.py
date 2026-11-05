@@ -1,4 +1,4 @@
-"""Supported Harbor installed-agent seam for the Daydream reviewer, in any benchmark."""
+"""Harbor installed agent that runs the Daydream reviewer for every benchmark."""
 from __future__ import annotations
 
 import asyncio
@@ -16,13 +16,13 @@ from benchmarks.daydream.build import BUILD, CASE_DIR, CODEX_LOGIN_DIR
 
 
 class DaydreamOptions(InstalledAgentOptions):
-    """Native Harbor option for retaining Daydream's local capture records."""
+    """Keep Daydream's data-capture records in the trial's agent logs."""
 
     capture_data: Annotated[bool, Cli('--capture-data')] = False
 
 
 class DaydreamAgent(BaseInstalledAgent):
-    """Use the baked native runtime; Harbor owns trial execution and storage."""
+    """Runs the Daydream build baked into the task image."""
 
     capabilities = AgentCapabilities(atif=True)
     options_model = DaydreamOptions
@@ -36,20 +36,19 @@ class DaydreamAgent(BaseInstalledAgent):
 
     def _require_shared_logs(self, environment) -> None:
         if not environment.is_path_mounted('/logs/agent', self.logs_dir):
-            raise RuntimeError('Daydream requires shared native agent logs; configure auto_mounting=true')
+            raise RuntimeError('Daydream requires shared agent logs; configure auto_mounting=true')
 
     async def install(self, environment) -> None:
         self._require_shared_logs(environment)
         result = await environment.exec('unshare -Ur true')
         if result.return_code != 0:
-            raise RuntimeError('Native Codex namespace admission failed')
+            raise RuntimeError('Codex needs user namespaces in the reviewer container')
         result = await environment.exec(f'test "$(ls -A {CODEX_LOGIN_DIR})" = auth.json')
         if result.return_code != 0:
             raise RuntimeError('The reviewer must see only the Codex auth.json; '
                                'regenerate tasks made before the login mount changed')
-        # A catalog keeps the Daydream it was generated with; refuse one that
-        # predates the suite's current pin instead of measuring an old reviewer.
-        # A candidate task names its own build, which verify_build checks below.
+        # Refuse a catalog generated for another pin instead of measuring an old
+        # reviewer. A candidate task names its own build, checked by verify_build.
         result = await environment.exec(f'cat {CASE_DIR}/build.json')
         try:
             baked = json.loads(result.stdout or '')
@@ -63,7 +62,7 @@ class DaydreamAgent(BaseInstalledAgent):
                  f"verify_build(Path('{CASE_DIR}/build.json'))")
         result = await environment.exec('python -I -c ' + shlex.quote(probe))
         if result.return_code != 0:
-            raise RuntimeError('Daydream runtime admission failed')
+            raise RuntimeError('The baked Daydream build failed its checks')
 
     async def run(self, instruction, environment, context) -> None:
         self._require_shared_logs(environment)
@@ -71,7 +70,7 @@ class DaydreamAgent(BaseInstalledAgent):
             raise ValueError('Daydream uses the baked runtime and dedicated credential mount')
         invocation = str(uuid.uuid4())
         receipt = {'invocation_id': invocation, 'status': 'failed', 'return_code': None}
-        # Trial root is outside Harbor's reviewer-writable log/artifact mounts.
+        # The trial root is outside the mounts the reviewer can write.
         receipt_path = self.logs_dir.parent / 'daydream-receipt.json'
         receipt_path.write_text(json.dumps(receipt) + '\n')
         request_path = self.logs_dir / 'request.json'
@@ -100,8 +99,7 @@ class DaydreamAgent(BaseInstalledAgent):
             await environment.upload_file(receipt_path, '/logs/artifacts/daydream/host-receipt.json')
         except BaseException as error:
             receipt['status'] = 'cancelled' if isinstance(error, asyncio.CancelledError) else 'failed'
-            # The separate verifier reads this host-only document even when the
-            # interrupted reviewer transport cannot accept remote invalidation.
+            # The verifier reads this host copy even if the upload below fails.
             receipt_path.write_text(json.dumps(receipt) + '\n')
             with suppress(Exception, asyncio.CancelledError):
                 await asyncio.wait_for(asyncio.shield(environment.upload_file(

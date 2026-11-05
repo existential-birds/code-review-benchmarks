@@ -1,7 +1,7 @@
 # /// script
 # requires-python = ">=3.11"
 # ///
-"""Pool scored ReviewBench rewards through Harbor's native uv-script interface.
+"""Pool scored ReviewBench rewards into one metric; Harbor runs this as a uv script.
 
 ReviewBench's own metric withholds every score unless all planned trials scored.
 This pools the counts of the trials that did, using its unchanged count checks and
@@ -15,7 +15,7 @@ import json
 from pathlib import Path
 import sys
 
-# uv executes this file in an isolated dependency environment from any cwd.
+# uv runs this file in its own environment, from any working directory.
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from benchmarks.reviewbench.upstream.metric import COUNTS, ratios, read_counts
 

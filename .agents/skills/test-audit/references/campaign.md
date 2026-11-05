@@ -112,6 +112,6 @@ Report the skill's handoff fields, baseline/final counts, retired layers, keeper
 preservation gaps and mutation results, defect controls, and comparable runtime
 when requested. Distinguish completed scope from remaining work.
 
-Adapted from Daydream Cloud's test-audit campaign guidance, which credits
+Adapted in part from
 [OpenClaw's campaign guide](https://github.com/openclaw/openclaw/blob/main/.agents/skills/test-audit/CAMPAIGN.md).
 OpenClaw's copyright and MIT terms are retained in the [license](../LICENSE).

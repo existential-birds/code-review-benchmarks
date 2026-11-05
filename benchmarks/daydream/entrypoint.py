@@ -1,4 +1,4 @@
-"""One sandbox-side native Daydream review, with fail-closed finalized output.
+"""Run one Daydream review inside the task sandbox and write its findings.
 
 Each task's case directory names the repository, where its findings go and in
 which benchmark's format; the review itself is the same for every benchmark.
@@ -36,7 +36,7 @@ def _write_json(path: Path, value) -> None:
 
 
 def verify_build(path: Path) -> dict:
-    """Check the baked wheel, dependency lock, and native CLI before admission."""
+    """Check the baked wheel, dependency lock and Codex CLI against the build."""
     build = json.loads(path.read_text())
     wheel = Path('/opt') / build['wheel_name']
     if hashlib.sha256(wheel.read_bytes()).hexdigest() != build['wheel_sha256']:
@@ -47,7 +47,7 @@ def verify_build(path: Path) -> dict:
         raise ValueError('Installed Daydream version differs')
     actual = subprocess.check_output(['codex', '--version'], text=True).strip()
     if actual != 'codex-cli ' + build['codex_cli']:
-        raise ValueError('Native Codex CLI version differs')
+        raise ValueError('Codex CLI version differs')
     return build
 
 
@@ -85,14 +85,14 @@ def _description(item: dict) -> str:
 
 def _line(item: dict) -> int | None:
     line = item.get('line')
-    # Native file-level locations may use null or a nonpositive hint.
+    # File-level findings have a null or nonpositive line.
     if line is not None and type(line) is not int:
         raise ValueError('Finalized finding line is malformed')
     return line if line is not None and line > 0 else None
 
 
 def _aacr_findings(items: list[dict], case: dict) -> tuple[dict, int, int]:
-    """AACR admits file-level findings; impose no new-side diff-anchor policy."""
+    """AACR accepts file-level findings, so every finding is kept."""
     findings = []
     for item in items:
         file, description, line = _relative_file(item), _description(item), _line(item)
@@ -139,8 +139,8 @@ def _configuration(config, backend, staged: Path) -> dict:
         'phase_defaults': {phase: {'model': _resolved_model(config, phase),
             'reasoning_effort': _resolved_reasoning_effort(config, phase)}
             for phase in sorted(PHASE_DEFAULT_MODELS['codex'])},
-        # runner.run may replace RunConfig before selecting routes. The native
-        # artifact owns the actual wonder decision and per-group arbiter efforts.
+        # Read routing from the run's own record: runner.run may replace
+        # RunConfig before it routes.
         'latency_routing': read_routing_record(staged / 'deep'),
         'fanout_concurrency': backend.fanout_concurrency,
         'retry_policy': asdict(backend.retry_policy),
@@ -148,7 +148,7 @@ def _configuration(config, backend, staged: Path) -> dict:
 
 
 def _publish_evidence(staged: Path, logs: Path) -> None:
-    """Keep the native run layout so joined sibling references still resolve."""
+    """Copy Daydream's run artifacts, keeping their layout so cross-references resolve."""
     from daydream.trajectory import RUN_DOCUMENT_NAME, run_directory
     evidence = logs / 'daydream'
     evidence.mkdir(parents=True, exist_ok=False)
@@ -158,11 +158,11 @@ def _publish_evidence(staged: Path, logs: Path) -> None:
         document = json.loads(trajectory.read_bytes())
         session_id = document['session_id']
         if str(uuid.UUID(session_id)) != session_id:
-            raise ValueError('Invalid native trajectory identity')
+            raise ValueError('Invalid trajectory session ID')
         bundle = run_directory(evidence, session_id)
     for source in sorted(staged.rglob('*')):
         if source.is_symlink():
-            raise ValueError('Unexpected native evidence symlink')
+            raise ValueError('Unexpected symlink in run artifacts')
         if source.is_file():
             target = bundle / source.relative_to(staged)
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -218,7 +218,7 @@ def _codex_home(login: Path, private: Path):
 
 async def review_once(*, case_dir: Path, artifacts: Path, agent_logs: Path,
                       invocation_id: str, credential_home: Path, capture_data: bool = False) -> int:
-    """Invoke the complete pipeline once; publish only after successful finalization."""
+    """Run the complete pipeline once; write findings only if it finishes cleanly."""
     from daydream import git_ops, runner
     from daydream.backends import BackendExecutionInput
     from daydream.config_file import DaydreamFileConfig
@@ -282,7 +282,7 @@ async def review_once(*, case_dir: Path, artifacts: Path, agent_logs: Path,
                         review_result_handler=finalized.append, execution=execution)
                 except BaseException as error:
                     record['status'] = 'cancelled' if isinstance(error, asyncio.CancelledError) else 'failed'
-                    record['diagnostics'].append('Native invocation raised ' + type(error).__name__)
+                    record['diagnostics'].append('Daydream raised ' + type(error).__name__)
                 finally:
                     record['resolved_configuration'] = _configuration(config, backend, staged)
                     if finalized:
@@ -292,24 +292,24 @@ async def review_once(*, case_dir: Path, artifacts: Path, agent_logs: Path,
                     record['post_comparison'], _ = _comparison(repository, expected['base_sha'])
                     _publish_evidence(staged, agent_logs)
                 if len(finalized) != 1:
-                    raise ValueError('Expected exactly one finalized native review')
+                    raise ValueError('Expected exactly one finalized review')
                 terminal = record['terminal_result']
                 validate_terminal_result(terminal, expected_head_sha=expected['head_sha'])
                 revision = terminal['analyzed_revision']
                 if any(revision.get(key) != expected[key] for key in ('head_sha', 'merge_base_sha', 'diff_key')):
-                    raise ValueError('Native analyzed revision differs from pinned comparison')
+                    raise ValueError('Analyzed revision differs from the pinned comparison')
                 if record['post_comparison'] != expected:
                     raise ValueError('Reviewer changed the pinned comparison')
                 from daydream.deep.orchestrator import _has_non_daydream_worktree_changes
                 if _has_non_daydream_worktree_changes(git_ops.status_porcelain(repository)):
-                    raise ValueError('Reviewer changed files outside native review artifacts')
+                    raise ValueError('Reviewer changed files outside its review artifacts')
                 if terminal['analysis_state'] != 'complete' or terminal['pipeline_state'] != 'completed':
                     record['status'] = 'incomplete'
-                    raise ValueError('Native review did not complete analysis')
+                    raise ValueError('Review did not complete analysis')
                 if record['runner_exit_code'] != 0 or record['diagnostics']:
-                    raise ValueError('Native invocation did not exit successfully')
+                    raise ValueError('Daydream did not exit successfully')
                 if not (agent_logs / 'trajectory.json').is_file():
-                    raise ValueError('Native trajectory unavailable')
+                    raise ValueError('Trajectory unavailable')
                 findings, count, record['omitted_findings'] = translate(record['retained_findings'], case)
                 _write_json(output, findings)
                 record['findings_sha256'] = hashlib.sha256(output.read_bytes()).hexdigest()
@@ -358,7 +358,7 @@ if __name__ == '__main__':
     mode.add_argument('--freeze-comparison', action='store_true',
                       help="Record the task image's comparison in its case directory")
     parser.add_argument('--capture-data', action='store_true',
-                        help='Retain native local JSONL capture under the trial agent logs')
+                        help="Keep Daydream's JSONL data capture in the trial's agent logs")
     args = parser.parse_args()
     if args.freeze_comparison:
         print(json.dumps(freeze_comparison(CASE_DIR)))

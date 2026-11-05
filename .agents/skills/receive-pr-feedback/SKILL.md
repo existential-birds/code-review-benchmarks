@@ -16,7 +16,7 @@ Verify feedback against the current checkout, account for every claim, and imple
 5. Dispatch approved work through **Subagent fixes**, review the integrated diff, and validate the final combined tree. Report each item's actual outcome, including unresolved or blocked work.
 6. Follow **Publication and response handoff** only within the user's authorization.
 
-Read [references/skill-integration.md](references/skill-integration.md) when choosing diagnosis, test, design, or domain guidance. These are focused supporting tools, not a requirement to launch unrelated audits.
+Use [test-audit](../test-audit/SKILL.md) when a fix adds or changes tests.
 
 ## Fix-launch decision
 

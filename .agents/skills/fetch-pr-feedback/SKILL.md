@@ -146,7 +146,7 @@ Filters: author excluded; current user excluded; resolved threads excluded
 ## Reviewer: reviewer-login
 
 ### Line-Specific Comments
-**File:** `benchmarks/aacr/converter.py:42` (RIGHT; illustrative path)
+**File:** `benchmarks/aacr/convert.py:42` (RIGHT)
 **Comment:** <REST ID> | **Node:** <node ID> | **Thread:** <thread ID>
 **URL:** <exact comment URL> | **Resolved:** false | **Outdated:** false
 **Reply parent:** <ID or null> | **Review:** <review ID>

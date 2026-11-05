@@ -1,4 +1,4 @@
-"""Convert the pinned AACR catalog into isolated native Harbor review tasks."""
+"""Convert the pinned AACR-Bench dataset into Harbor review tasks."""
 from __future__ import annotations
 
 import argparse
@@ -24,7 +24,7 @@ PR_URL = 'https://github.com/laravel/framework/pull/56591'
 BASE = '6d94b16fd5f4f72bb741f9b900b83179c8ab46c9'
 HEAD = '0a5238acfc4ca99c363283bf3bb16e20905f2a39'
 PACKAGE = Path(__file__).resolve().parent
-# Cases a tuning loop never sees; dev is every other case.
+# Held-out cases; the dev split is every other case.
 HOLDOUT = PACKAGE / 'holdout.txt'
 
 
@@ -107,10 +107,10 @@ def prepare_context(instance: schema.ReviewInstance, task: Path) -> Path:
             return result
         prepared.mkdir()
         git('init', '-q')
-        # Configure LFS filters per context instead of relying on ambient configuration.
+        # Configure LFS for this repository only, not from host configuration.
         git('lfs', 'install', '--local', '--skip-repo')
         git('remote', 'add', 'origin', instance.resolved_clone_url)
-        # Materialize both pinned trees without copying a project's entire history.
+        # Fetch both pinned commits and only as much history as their merge base needs.
         revisions = (instance.base_commit, instance.head_commit)
         git('fetch', '--no-tags', '--depth=32', 'origin', *revisions)
         depth = 32
@@ -120,8 +120,8 @@ def prepare_context(instance: schema.ReviewInstance, task: Path) -> Path:
             shallow_path = prepared / '.git/shallow'
             boundaries = set(shallow_path.read_text().splitlines()) if shallow_path.exists() else set()
             if common.returncode == 0:
-                # A visible older common ancestor is insufficient if a shallower
-                # side branch can still hide a nearer one before that candidate.
+                # A shallow boundary between this merge base and either commit
+                # could hide a nearer one, so deepen until there is none.
                 exclusive = set(git('rev-list', *revisions, '^' + common.stdout.strip()).stdout.splitlines())
                 if not boundaries.intersection(exclusive):
                     break
@@ -166,7 +166,7 @@ def configure_daydream_task(task: Path, build_file: Path | None = None) -> None:
     (case / 'build.json').write_text(json.dumps(identity, indent=2) + '\n')
     shutil.copy2(case / 'comparison.json', task / 'tests/comparison.json')
     shutil.copy2(case / 'build.json', task / 'tests/build.json')
-    # Reference annotations and the independent judge transport remain verifier-only.
+    # Reference annotations and the judge stay in the verifier's assets only.
     build.write_assets(environment, assets)
     build.write_assets(task / 'tests', verifier_assets)
     (environment / 'Dockerfile').write_text(
@@ -177,7 +177,7 @@ def configure_daydream_task(task: Path, build_file: Path | None = None) -> None:
         f'COPY repo/ /workspace/repo/\nCOPY daydream-case/ {build.CASE_DIR}/\n'
         'WORKDIR /workspace/repo\n')
     (environment / 'docker-compose.yaml').write_text(build.codex_login_compose())
-    # The verifier installs the same locked Pi SDK as the oracle task's verifier.
+    # The verifier installs the same locked Pi SDK as the oracle task.
     (task / 'tests/Dockerfile').write_text(
         f'FROM {build.NODE_IMAGE}\nRUN apt-get update && apt-get install -y --no-install-recommends '
         'git ca-certificates && rm -rf /var/lib/apt/lists/*\n' + verifier_suffix +

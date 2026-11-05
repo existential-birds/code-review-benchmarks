@@ -1,4 +1,4 @@
-"""Fail-closed boundary around AACR's unchanged single-case evaluator."""
+"""Score one completed review with AACR's unchanged evaluator; any failure leaves no reward."""
 from __future__ import annotations
 
 import argparse
@@ -46,7 +46,7 @@ def _validate_findings(path: Path) -> dict:
 
 def _validate_daydream_completion(instance, findings_path: Path, findings: dict,
                                   proof: Path, comparison_path: Path, host_receipt_path: Path) -> dict:
-    """Require this invocation's process success and native completed analysis."""
+    """Require that this invocation exited successfully and Daydream completed its analysis."""
     expected = json.loads(comparison_path.read_text())
     revision_lengths = {'base_sha': 40, 'head_sha': 40, 'merge_base_sha': 40,
                         'diff_key': 64, 'patch_sha256': 64}
@@ -60,11 +60,11 @@ def _validate_daydream_completion(instance, findings_path: Path, findings: dict,
     request = json.loads((proof / 'request.json').read_text())
     receipt = json.loads((proof / 'host-receipt.json').read_text())
     host_receipt = json.loads(host_receipt_path.read_text())
-    # DaydreamVerifier transfers host-only process state directly to this
-    # isolated verifier; the reviewer cannot author this copy.
+    # DaydreamVerifier uploads the host's receipt straight to this verifier, so
+    # the reviewer can't write this copy.
     if (host_receipt_path.resolve() == (proof / 'host-receipt.json').resolve()
             or host_receipt != receipt or type(host_receipt.get('return_code')) is not int):
-        raise VerificationError('Daydream native host receipt is missing or differs from sandbox evidence')
+        raise VerificationError('Daydream host receipt is missing or differs from the sandbox copy')
     execution = json.loads((proof / 'execution.json').read_text())
     invocation = request['invocation_id']
     if (not isinstance(invocation, str) or str(uuid.UUID(invocation)) != invocation
@@ -110,8 +110,7 @@ class _VerdictGuard:
             evidence['response'] = content
             if not isinstance(content, str) or not content.strip():
                 raise VerificationError('Judge returned no text')
-            # Match precisely AACR's last recognized bracketed-array rule. Do
-            # not impose last-line placement or alter its index filtering.
+            # AACR reads the last bracketed array; require one that parses.
             matches = re.findall(r'\[[\d,\s]*\]', content.strip())
             if not matches:
                 raise VerificationError('Judge returned no verdict array')
@@ -151,12 +150,11 @@ async def score_case(instance_path: Path, findings_path: Path, output_dir: Path,
         if any(value is not None for value in (daydream_proof, comparison_path, host_receipt_path)):
             diagnostic['stage'] = 'reviewer_completion'
             if any(value is None for value in (daydream_proof, comparison_path, host_receipt_path)):
-                raise VerificationError('Daydream requires completion proof, expected comparison and native host receipt')
+                raise VerificationError('Daydream requires completion proof, the expected comparison and the host receipt')
             diagnostic['reviewer'] = _validate_daydream_completion(
                 instance, Path(findings_path), findings, Path(daydream_proof), Path(comparison_path),
                 Path(host_receipt_path))
-        # Use AACR's own finding loader and exact case filename. These are
-        # verifier evidence, never reviewer context or instructions.
+        # AACR's evaluator loads findings from its own file layout.
         results_dir = output_dir / 'findings'
         results_dir.mkdir(exist_ok=True)
         _write_json(config.result_path(results_dir, instance.instance_id), findings)
@@ -168,8 +166,8 @@ async def score_case(instance_path: Path, findings_path: Path, output_dir: Path,
         _write_json(output_dir / 'diagnostic.json', diagnostic)
         old_mock, old_client = judge.USE_MOCK_LLM, judge._llm_client
         old_model = os.environ.get(config.JUDGE_MODEL_VAR)
-        # AACR otherwise silently selects mock mode when no API key exists.
-        # Install the real adapter explicitly; no dummy key and no fallback.
+        # Without an API key AACR silently falls back to mock matching, so
+        # install the Pi judge explicitly.
         judge.USE_MOCK_LLM = False
         judge._llm_client = guard
         os.environ[config.JUDGE_MODEL_VAR] = 'gpt-6.1-sol'

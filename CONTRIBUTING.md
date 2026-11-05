@@ -13,7 +13,8 @@ uv pip install --python .venv/bin/python pytest==8.4.2
 node --test tests/pi_judge.test.mjs
 ```
 
-Use the terms in the [glossary](GLOSSARY.md).
+CI runs the same install and tests on every pull request. Use the terms in the
+[glossary](GLOSSARY.md).
 
 ## Harbor first
 

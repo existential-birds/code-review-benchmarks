@@ -8,12 +8,12 @@ import { MODEL, PROVIDER, failure, requirePinnedRuntime, safeFailure } from './p
 // minOAuthValidityMs remains, then rejects a token that is still too short.
 export async function refreshLogin(runtime, minOAuthValidityMs) {
   if (!runtime.isUsingSubscription(PROVIDER)) {
-    throw failure('authentication', 'Native Pi subscription login required');
+    throw failure('authentication', 'Pi subscription login required');
   }
   const model = runtime.getModel(PROVIDER, MODEL);
   if (!model) throw failure('runtime', 'Pinned judge model unavailable');
   const auth = await runtime.getAuth(model, { minOAuthValidityMs });
-  if (auth?.source !== 'OAuth') throw failure('authentication', 'Native Pi subscription login required');
+  if (auth?.source !== 'OAuth') throw failure('authentication', 'Pi subscription login required');
 }
 
 async function main() {

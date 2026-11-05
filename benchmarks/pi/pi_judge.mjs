@@ -32,14 +32,14 @@ export async function completeJudge(runtime, request) {
   }
   if (!runtime.isUsingSubscription(PROVIDER)
       || (await runtime.checkAuth(PROVIDER))?.type !== 'oauth') {
-    throw failure('authentication', 'Native Pi subscription login required');
+    throw failure('authentication', 'Pi subscription login required');
   }
   const model = runtime.getModel(PROVIDER, MODEL);
   if (!model) throw failure('runtime', 'Pinned judge model unavailable');
   let httpStatus = null;
   const options = {
-    // The subscription endpoint rejects temperature (confirmed HTTP 400).
-    // Preserve AACR's requested value in Python evidence, not the wire request.
+    // The subscription endpoint rejects temperature with HTTP 400, so AACR's
+    // requested value is kept in the evidence but not sent.
     transport: 'sse', maxRetries: 0,
     onResponse: ({ status }) => { httpStatus = status; },
   };

@@ -1,4 +1,4 @@
-"""Bridge host-owned process completion into Harbor's isolated verifier."""
+"""Pass the host's record of the review process to Harbor's separate verifier."""
 from __future__ import annotations
 
 import json
@@ -10,11 +10,11 @@ HOST_RECEIPT = '/tmp/daydream-host-receipt.json'
 
 
 class DaydreamVerifier(PiJudgeVerifier):
-    """Keep the native verifier workflow and authenticate its process receipt."""
+    """Verify only after the host saw Daydream exit successfully."""
 
     async def verify(self):
-        # Reviewer logs include the verifier log mount. Discard a forged/stale
-        # reward even when receipt admission fails before native verification.
+        # The reviewer can write the verifier's log mount, so discard any reward
+        # there before checking the receipt.
         self.trial_paths.reward_json_path.unlink(missing_ok=True)
         self.trial_paths.reward_text_path.unlink(missing_ok=True)
         if (self.environment.environment_dir.resolve() != self.task.paths.tests_dir.resolve()
@@ -28,6 +28,6 @@ class DaydreamVerifier(PiJudgeVerifier):
                 or type(receipt.get('return_code')) is not int or receipt['return_code'] != 0):
             raise RuntimeError('Daydream host invocation did not finish successfully')
         await self.environment.upload_file(receipt_path, HOST_RECEIPT)
-        # PiJudgeVerifier uploads the judge login, then Harbor's native verify
-        # uploads the trusted tests, runs them and parses the reward.
+        # PiJudgeVerifier uploads the judge login, then Harbor uploads the tests,
+        # runs them and reads the reward.
         return await super().verify()
