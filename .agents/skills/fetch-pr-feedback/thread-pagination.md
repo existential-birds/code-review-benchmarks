@@ -1,9 +1,7 @@
 # Review-thread pagination
 
-Use explicit cursor loops so thread pagination and each thread's comment
-pagination are independently complete. Preserve every page as a distinct file in
-the acquisition directory. The following queries are executable first-page
-examples; repeat them with `-F cursor="$NEXT_CURSOR"` for subsequent pages.
+Page threads and each thread's comments separately, saving every page as its own
+file. Repeat each query with `-F cursor="$NEXT_CURSOR"` for later pages.
 
 ## Threads
 
@@ -51,19 +49,16 @@ jq -e '
 ' "$FEEDBACK_DIR/thread-page-001.json" > /dev/null
 ```
 
-After each successful page, read
-`.data.repository.pullRequest.reviewThreads.pageInfo`. If `hasNextPage` is true,
-require a nonempty `endCursor` different from the cursor just used. Pass it as
-`cursor` on the next call and use a new page filename. Merge all thread nodes by
-`id` only after the final page reports false. Retain resolution and outdated state
-on each thread, including threads whose comments will later be excluded.
+After each page, read `reviewThreads.pageInfo`. If `hasNextPage` is true, require a
+nonempty `endCursor` that differs from the last one, and fetch the next page into a
+new file. Merge thread nodes by `id` only after the last page, keeping each thread's
+resolution and outdated state.
 
 ## Comments within a thread
 
-For **each** collected thread whose initial `comments.pageInfo.hasNextPage` is
-true, fetch its remaining comment pages using the following query. `THREAD_ID`
-is that thread's node ID and `NEXT_CURSOR` is its initial comments end cursor.
-`THREAD_INDEX` and `PAGE_INDEX` are unique local integer counters for filenames.
+For each thread whose first `comments` page has `hasNextPage: true`, fetch the rest,
+starting from that page's `endCursor`. `THREAD_INDEX` and `PAGE_INDEX` are local
+counters for file names.
 
 ```bash
 gh api graphql -f thread="$THREAD_ID" -F cursor="$NEXT_CURSOR" \
@@ -96,10 +91,7 @@ jq -e --arg thread "$THREAD_ID" '
 ' "$FEEDBACK_DIR/thread-$THREAD_INDEX-comment-page-$PAGE_INDEX.json" > /dev/null
 ```
 
-Read `.data.node.comments.pageInfo` after each page, applying the same cursor
-checks. Combine the initial and subsequent comments by node `id`; associate every
-`databaseId` with the parent thread's `id`, `isResolved`, and `isOutdated`.
-Completion requires the last comments page of **every** thread to report
-`hasNextPage: false`. Report null comment database IDs as unmatched evidence when
-they cannot be joined to REST; never silently discard a page or assume a limit
-of 100 is sufficient.
+Apply the same cursor checks. Merge comments by node `id`, and map every `databaseId`
+to its thread's `id`, `isResolved` and `isOutdated`. Paging is done when every
+thread's last comment page reports `hasNextPage: false`. Report null `databaseId`s as
+unmatched; never drop a page or assume 100 is enough.

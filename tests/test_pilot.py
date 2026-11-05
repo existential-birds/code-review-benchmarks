@@ -1,4 +1,4 @@
-"""Exercise composed AACR settings through Harbor's native plan boundary."""
+"""AACR experiment settings as Harbor composes them into a job plan."""
 import asyncio
 from pathlib import Path
 

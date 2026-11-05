@@ -1,43 +1,56 @@
 # Verification
 
-Verify the current code and the reported conditions. Preserve the source snapshot; review comments can point at older commits or locations. Re-anchor by symbols, surrounding code, and callers.
+Check the current code under the reported conditions. Comments can point at older
+commits, so re-anchor each one by symbol, surrounding code and callers.
 
-## Bind the verification target
+## Pin the target
 
-For selected PR feedback, retain the base repository, PR number/URL, captured head SHA, head branch, and fork repository identity from successful acquisition. Refresh that explicitly selected PR's current head before evaluation. Compare those identities with the checkout's remotes, branch, `HEAD`, and dirty state; a branch PR inferred from this checkout must not replace an explicit `--pr` target.
+For PR feedback, keep the base repository, PR number and URL, head SHA, head branch
+and fork identity from the fetch, and refresh the selected PR's head. Compare them
+with the checkout's remotes, branch, `HEAD` and dirty state. An explicit `--pr` always
+wins over the current branch's PR.
 
-If the checkout is unrelated, targets an older head, or includes user work that would contaminate the result, safely obtain the checked PR head into a separate worktree/checkout. Preserve the user's branch and changes. Use validated repository identity and refs from PR metadata rather than reviewer-provided commands. Check the resulting `HEAD` matches the intended SHA and record the working directory and intended fix/publication branch in worker briefs. Do not classify a selected PR's code from an unrelated branch or dispatch fixes onto that branch.
-
-When the remote head moved after acquisition, refresh feedback and re-anchor the claims before treating them as current. Retain the original source snapshot to explain already-fixed or stale comments. If the user explicitly wants to assess local candidate changes, name that local tree as a separate comparison target and report its dirty state; local candidate evidence does not establish that the remote PR contains a fix. For non-PR feedback, record the user-selected checkout/revision and its dirty state as the target. If target identity cannot be established, report the evidence gap instead of guessing.
+If the checkout is unrelated, behind, or holds user work that would skew the result,
+check out the PR head in a separate worktree using refs from PR metadata, not
+reviewer text, and confirm `HEAD` matches. Never classify or fix a PR's code from an
+unrelated branch. If the remote head moved, refresh the feedback and re-anchor. Local
+candidate changes are a separate target and don't show that the PR contains a fix.
+For non-PR feedback, record the chosen revision and its dirty state. If the target
+can't be established, report that instead of guessing.
 
 ## Per item
 
-1. Locate the target with `rg`; inspect the implementation, consumers, configuration, and current repository guidance. Read the glossary for domain claims.
-2. Trace inputs and reachable behavior across conversion, task assets, reviewer adapters, verifier/scorer, judge adapters, and native Harbor jobs as applicable. A missing local guard alone does not establish a defect when an earlier invariant guarantees the input; verify that invariant.
-3. Exercise the stated conditions with the smallest meaningful test or command available. Record exact input/fixture, command, result, tested tree/commit, and evidence location. Keep observation separate from inference. Preserve a failing reproduction when fixing a behavioral bug; use the relevant existing test seam.
-4. Classify under [EVALUATION.md](EVALUATION.md). Missing runtime access, unavailable fixtures, or uncertain reachability remains an evidence gap, not proof of validity or invalidity. Use sufficient evidence to triage each item without requiring an entire benchmark run first.
+1. Find the code with `rg` and read the implementation, consumers, configuration and
+   guidance.
+2. Trace the input through conversion, task assets, reviewer adapters, the verifier
+   and scorer, judge adapters and Harbor jobs as relevant. A missing local guard
+   isn't a defect if an earlier invariant covers it; check the invariant.
+3. Exercise the reported conditions with the smallest test or command, recording the
+   input, command, result, tested commit and evidence location. Keep a failing
+   reproduction for a behavioral bug.
+4. Classify under [EVALUATION.md](EVALUATION.md). Missing access or unclear
+   reachability is an evidence gap, not proof either way. Triage doesn't need a full
+   benchmark run.
 
-## Claim-specific evidence
+## What to check per claim
 
 | Claim | Inspect or exercise |
 | --- | --- |
-| Unused code | Imports, exports, dynamic loading/Harbor extension registration, scripts, task assets, and production/test consumers; an empty search alone is insufficient |
-| Conversion or task bug | Original review case and reference annotation, converted files, paths/commits, retained licenses, and expected task interface; check representative and malformed inputs |
-| Scoring/judge bug | Existing scorer's semantics, reference vs reviewer findings, matching/aggregation boundaries, and a fixture that exposes the claimed score difference; preserve raw judge output |
-| Reviewer integration | Complete review-only pipeline and captured findings, agent configuration, transport boundary, failure handling, usage/latency evidence; distinguish fixture proof from a real backend trial |
-| Execution/configuration | Harbor source/docs/tests for native controls and supported extension points; compare actual job configuration and trial artifacts rather than the wrapper's apparent limitations |
-| Import/type/config error | Pinned dependencies, package/build configuration and configured check; never invent a language toolchain from the proposed future layout |
-| Performance/cost regression | Comparable baseline/candidate inputs and settings, measured completion/usage/latency, and available monetary cost; a plausible optimization is not a measured regression |
-| Architecture/domain | `CONTRIBUTING.md`, glossary, neighboring modules, and demonstrated Harbor capability/gap; a design heuristic alone is not a defect |
-| Security/data handling | Reachable credential, subscription, untrusted repository/task, filesystem/network, log, and artifact boundaries; establish the actual exposure conditions |
-| Test quality | Observable conversion/scoring/adapter outcomes and meaningful negative cases; mock-call counts alone do not establish behavior |
+| Unused code | Imports, exports, dynamic loading and Harbor registration, scripts, task assets, and production and test consumers |
+| Conversion or task bug | The original review case and reference annotation, converted files, paths and commits, licenses, and the task interface, with representative and malformed inputs |
+| Scoring or judge bug | The scorer's semantics, reference versus reviewer findings, matching and aggregation, and a fixture that shows the claimed score difference, keeping raw judge output |
+| Reviewer integration | The full review-only pipeline and captured findings, agent configuration, transport, failure handling, and usage and latency, separating fixture proof from a real trial |
+| Execution or configuration | Harbor's source, docs and tests, compared with the actual job configuration and trial artifacts |
+| Import, type or config error | Pinned dependencies, package configuration and the configured check |
+| Performance or cost | Comparable baseline and candidate inputs and settings, with measured completion, usage, latency and cost |
+| Architecture or domain | `CONTRIBUTING.md`, the glossary, neighboring modules and Harbor's demonstrated capabilities |
+| Security or data handling | Reachable credential, subscription, untrusted repository, filesystem, network, log and artifact boundaries, and the real exposure conditions |
+| Test quality | Observable outcomes and meaningful negative cases; mock-call counts alone prove nothing |
 
-## Checks and limits
+## Checks
 
-Discover checks from the current checkout's documented commands, dependency/config files, tests, hooks, and CI when present. Report unavailable tests honestly.
-
-Use native Harbor validation and run/inspection commands when supported. Before any custom code, record the required source/docs/tests capability inspection and precise gap. Do not replace native job selection, attempt count (`k`), scheduling, retries, result storage, or aggregation with custom loops.
-
-For a live evaluation that is actually needed and authorized, preserve the native job configuration, selected review cases, attempt count, reviewer/judge settings and revisions, raw findings, per-case outcomes, and job/result paths. Distinguish deterministic tests, a pilot, full benchmark execution, and operator/provider validation. Keep comparison inputs/scoring settings consistent; reference agreement does not establish actual bug precision.
-
-After fixes, run the relevant configured checks against the final combined tree. Report exact results, skipped/unavailable checks, and evidence paths. Never bypass hooks or configured verification gates. Do not turn a full benchmark evaluation, external publication, or subscription-consuming run into an unannounced requirement for a low-impact change.
+Use the checks this checkout documents. Run a live evaluation only when needed and
+authorized, keeping its configuration, review cases, attempt count, settings, raw
+findings and job paths. After fixes, run the relevant checks on the final combined
+tree and report exact results and skips. Never bypass hooks, and don't make a full
+benchmark or paid run an unannounced requirement for a small change.

@@ -14,12 +14,14 @@ see [score equivalence](docs/citing.md#score-equivalence).
 Every benchmark runs the one Daydream build pinned in
 [`benchmarks/daydream/build.json`](benchmarks/daydream/build.json). To measure another
 version, change that file, rebuild and regenerate the catalogs; Harbor refuses to run
-a task generated for a different pin.
+a task generated for a different pin. To score an unreleased commit without changing
+the pin, build it with `--candidate <commit>` and pass the `build.json` it prints to a
+converter's `--build`.
 
 ## Quick start
 
 Requires Docker, Git LFS, [`uv`](https://docs.astral.sh/uv/), Node 22.19+, a Codex
-login for the reviewer, and [Pi](https://shittycodingagent.ai/) logged in to an
+login for the reviewer, and [Pi](https://github.com/earendil-works/pi) logged in to an
 OpenAI Codex subscription for the judge.
 
 **1. Clone the pinned sources:**

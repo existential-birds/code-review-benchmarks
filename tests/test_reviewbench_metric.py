@@ -24,7 +24,7 @@ def reward(overall, **strata):
             **{f'{prefix}.{key}': value for prefix, group in groups.items() for key, value in group.items()}}
 
 
-def test_native_harbor_metric_pools_scored_trials_and_counts_missing_ones(tmp_path, monkeypatch):
+def test_harbor_metric_pools_scored_trials_and_counts_missing_ones(tmp_path, monkeypatch):
     # A different cwd exercises script imports, not an installed copy of this repo.
     monkeypatch.chdir(tmp_path)
     result = UvScript(SCRIPT).compute([

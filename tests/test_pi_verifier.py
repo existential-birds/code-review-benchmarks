@@ -40,7 +40,7 @@ class Environment:
 
 @pytest.fixture
 def judge(tmp_path, monkeypatch):
-    """A verifier over a real host login folder, with native verification recorded."""
+    """A verifier over a real host login folder, recording when Harbor's own verification runs."""
     home = tmp_path / 'pi-agent'
     home.mkdir()
     (home / 'auth.json').write_text(json.dumps(login(int(time.time() * 1000) - 1000,
@@ -50,13 +50,12 @@ def judge(tmp_path, monkeypatch):
     scratch.mkdir()
     monkeypatch.setattr(tempfile, 'tempdir', str(scratch))
     environment = Environment()
-    async def native_verify(self):
-        environment.calls.append(('native-verify',))
+    async def harbor_verify(self):
+        environment.calls.append(('harbor-verify',))
         return 'scored'
-    monkeypatch.setattr(Verifier, 'verify', native_verify)
+    monkeypatch.setattr(Verifier, 'verify', harbor_verify)
     refreshes = []
     async def refresh(auth_path, min_validity_ms):
-        # Stands in for Pi's lock-guarded refresh, which rewrites the host file in place.
         refreshes.append((auth_path, min_validity_ms))
         data = json.loads(auth_path.read_text())
         data['openai-codex'].update(access='new-access', refresh='new-refresh',
@@ -75,7 +74,7 @@ def test_uploads_only_the_refreshed_openai_codex_access_before_scoring(judge, kw
     assert asyncio.run(verifier.verify()) == 'scored'
     assert judge.refreshes == [(judge.home / 'auth.json', validity_ms)]
     assert judge.environment.calls == [('exec', 'mkdir -m 700 /run/judge-pi', 'root'),
-                                       ('upload', '/run/judge-pi/auth.json'), ('native-verify',)]
+                                       ('upload', '/run/judge-pi/auth.json'), ('harbor-verify',)]
     uploaded, mode, source = judge.environment.uploads['/run/judge-pi/auth.json']
     host = json.loads((judge.home / 'auth.json').read_text())['openai-codex']
     assert host['refresh'] == 'new-refresh'

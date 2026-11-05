@@ -1,4 +1,4 @@
-"""Behavioral proof through AACR's real builder, scorer and summary functions."""
+"""Scoring through AACR's real builder, scorer and summary functions."""
 import asyncio
 import hashlib
 import json
@@ -174,7 +174,7 @@ def test_transport_sticky_failure_is_checked_even_with_valid_verdict(tmp_path):
 
 
 def daydream_artifacts(tmp_path, findings):
-    """A native terminal contract alongside independent filesystem receipts."""
+    """Daydream's completion evidence for one review: terminal result, execution record and receipts."""
     paths = fixture(tmp_path, findings)
     proof = tmp_path / 'daydream'
     proof.mkdir()
@@ -211,13 +211,13 @@ def daydream_artifacts(tmp_path, findings):
         (proof / name).write_text(json.dumps(value))
     expected = tmp_path / 'comparison.json'
     expected.write_text(json.dumps(comparison))
-    host_receipt = tmp_path / 'native-host-receipt.json'
+    host_receipt = tmp_path / 'verifier-host-receipt.json'
     host_receipt.write_bytes((proof / 'host-receipt.json').read_bytes())
     return paths, proof, expected, host_receipt
 
 
 @pytest.mark.parametrize('findings,responses', [([], []), ([finding()], ['One agreement\n[1]'])])
-def test_daydream_completed_review_requires_native_terminal_and_process_proof(tmp_path, findings, responses):
+def test_daydream_completed_review_requires_terminal_result_and_process_proof(tmp_path, findings, responses):
     paths, proof, expected, host_receipt = daydream_artifacts(tmp_path, findings)
     client = JudgeTransport(*responses)
     result = asyncio.run(score.score_case(*paths, client=client,
@@ -318,7 +318,7 @@ def test_daydream_comparison_mismatch_fails_before_judging(tmp_path, location, k
     assert not (paths[2] / 'reward.json').exists()
 
 
-def test_daydream_contradictory_complete_terminal_is_rejected_by_native_validator(tmp_path):
+def test_daydream_contradictory_complete_terminal_is_rejected_by_daydream_validator(tmp_path):
     paths, proof, expected, host_receipt = daydream_artifacts(tmp_path, [])
     path = proof / 'execution.json'
     document = json.loads(path.read_text())
@@ -345,7 +345,7 @@ def test_daydream_valid_unfinished_terminal_cannot_publish_a_callback_output(tmp
     terminal['analysis_state'] = 'incomplete'
     terminal['phase_outcomes'][0].update(status='incomplete', reason_codes=['backend_failure'])
     terminal['reason_codes'] = ['backend_failure'] + (['interruption'] if pipeline == 'cancelled' else [])
-    # This is valid native partial coverage, not merely a malformed artifact.
+    # Valid partial coverage from Daydream, not a malformed artifact.
     validate_terminal_result(terminal)
     path.write_text(json.dumps(document))
     client = JudgeTransport()
@@ -377,7 +377,7 @@ def test_failed_reverification_removes_prior_rewards(tmp_path):
     assert not (paths[2] / 'reward.txt').exists()
 
 
-def test_daydream_requires_separate_native_host_receipt(tmp_path):
+def test_daydream_requires_separate_host_receipt(tmp_path):
     paths, proof, expected, host_receipt = daydream_artifacts(tmp_path, [])
     with pytest.raises(score.VerificationError):
         asyncio.run(score.score_case(*paths, client=JudgeTransport(),
@@ -391,7 +391,7 @@ def test_daydream_requires_separate_native_host_receipt(tmp_path):
     ('return_code', 1), ('return_code', False),
     ('invocation_id', str(uuid.UUID(int=1))),
 ])
-def test_daydream_native_host_receipt_overrides_sandbox_success(tmp_path, field, value):
+def test_daydream_host_receipt_overrides_sandbox_success(tmp_path, field, value):
     paths, proof, expected, host_receipt = daydream_artifacts(tmp_path, [])
     document = json.loads(host_receipt.read_text())
     document[field] = value
@@ -406,7 +406,7 @@ def test_daydream_native_host_receipt_overrides_sandbox_success(tmp_path, field,
     assert not (paths[2] / 'reward.json').exists()
 
 
-def test_daydream_missing_native_host_artifact_cannot_publish_reward(tmp_path):
+def test_daydream_missing_host_receipt_cannot_publish_reward(tmp_path):
     paths, proof, expected, host_receipt = daydream_artifacts(tmp_path, [])
     host_receipt.unlink()
     with pytest.raises(score.VerificationError):
@@ -419,8 +419,8 @@ def test_daydream_missing_native_host_artifact_cannot_publish_reward(tmp_path):
     'cancelled', 'timeout', 'failed', 'missing', 'shared_agent', 'shared_artifacts', 'wrong_image',
     'judge_failure', 'stale', 'missing_output', 'empty', 'findings',
 ])
-def test_native_verifier_keeps_host_completion_authoritative_after_sandbox_forgery(tmp_path, monkeypatch, outcome):
-    """Agent.run -> configured native verifier -> real scorer, with hostile logs."""
+def test_verifier_trusts_host_receipt_over_forged_sandbox_logs(tmp_path, monkeypatch, outcome):
+    """Agent.run, then the configured verifier, then the real scorer, with forged sandbox logs."""
     import shutil
     import yaml
     from benchmarks.aacr import convert
@@ -538,8 +538,8 @@ def test_native_verifier_keeps_host_completion_authoritative_after_sandbox_forge
                     await score.score_case(*paths, client=JudgeTransport(response),
                         daydream_proof=proof, comparison_path=expected, host_receipt_path=self.receipt)
                 except score.VerificationError as error:
-                    # Model the real test.sh process boundary, leaving the scorer's
-                    # diagnostics for the native verifier to retain and inspect.
+                    # Exit like the real test.sh, leaving the scorer's diagnostics
+                    # for Harbor's verifier to keep.
                     return SimpleNamespace(return_code=1, stdout='', stderr=str(error))
             return SimpleNamespace(return_code=0, stdout='', stderr='')
 

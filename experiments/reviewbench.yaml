@@ -1,4 +1,4 @@
-# Shared native settings; supply the catalog with -p.
+# Shared ReviewBench settings; give the catalog with -p.
 jobs_dir: jobs
 n_attempts: 1
 n_concurrent_trials: 1

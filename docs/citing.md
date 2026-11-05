@@ -127,14 +127,11 @@ Together they hold 87 reference findings:
 
 ## Score equivalence
 
-Neither benchmark's scores here are meant to be comparable with its published
-results. ReviewBench's leaderboard and public dataset use a Claude Opus 5 judge,
-and no run here has been checked against them.
+Scores here aren't comparable with either benchmark's published results, and no
+run has been checked against them. ReviewBench's leaderboard and public dataset use
+a Claude Opus 5 judge, AACR-Bench's results come from its own pipeline, and a
+different judge can change which findings match.
 
-No equivalence with AACR-Bench's published scores has been validated. These scores
-haven't been compared with AACR's results or with its own pipeline on the same
-findings, and the different judge can change which findings match.
-
-Compare scores only between runs of this suite that use the same review cases and
-scoring settings. The checked claim is narrower: the imported evaluator matches the
+Compare scores only between runs of this suite with the same review cases and
+scoring settings. The one checked claim is that the imported evaluator matches the
 pinned AACR source apart from the changes listed above.

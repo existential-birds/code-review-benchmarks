@@ -1,7 +1,8 @@
 # Agent guidance
 
 Read and follow [CONTRIBUTING.md](CONTRIBUTING.md) before making changes or
-creating or updating a PR.
+creating or updating a PR. Repository skills live in `.agents/skills/` and are
+linked into `.claude/skills/`.
 
 ## Never bypass Git hooks
 

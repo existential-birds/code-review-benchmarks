@@ -5,93 +5,60 @@ description: Use when preparing a GitHub issue or spec for implementation in a f
 
 # Prepare Implement
 
-Prepare the requested work for a fresh session. Finish with the prepared branch,
-source reference, and one self-contained, copyable implementation prompt.
-Preparation ends with the handoff; leave implementation to the next session.
-Create a separate handoff file only when requested.
+Prepare requested work for a fresh session. End with the prepared branch, the source
+reference and one self-contained, copyable implementation prompt. Don't implement;
+write a separate handoff file only if asked.
 
-## Establish scope and branch
+## Scope and branch
 
-- Read `AGENTS.md`, `CONTRIBUTING.md`, the root `GLOSSARY.md`, and
-  `README.md`. Read the full GitHub issue/spec, comments,
-  amendments, and linked prerequisites from
-  `existential-birds/code-review-benchmarks`. Resolve superseding decisions and
-  distinguish them from stale linked requirements.
-- Inspect the current branch, HEAD, worktree status, and remotes. Preserve and
-  record existing edits. Create and check out a descriptive branch, using the
-  issue number when available. Use the user's requested base, otherwise the
-  current checkout, and record its exact SHA. Fetch when establishing a remote
-  base. Inspect an existing branch before reusing it for resumed work; otherwise
-  choose a unique name. If preserving edits prevents a safe checkout, leave them
-  in place and report the branch blocker.
-- Confirm the actual branch before gathering context. Inspect the current
-  repository for build/test configuration, hooks, CI, and PR guidance. Record
-  unavailable checks rather than borrowing commands from other repositories.
+- Read `AGENTS.md`, `CONTRIBUTING.md`, `GLOSSARY.md` and `README.md`, then the full
+  issue or spec in `existential-birds/code-review-benchmarks` with its comments,
+  amendments and linked prerequisites. Note which later decisions replace earlier
+  requirements.
+- Check the branch, HEAD, worktree and remotes, and keep any existing edits. Create a
+  descriptive branch, with the issue number when there is one, from the requested
+  base or the current checkout, and record its SHA. Inspect an existing branch before
+  reusing it. If existing edits block a safe checkout, leave them and report it.
+- Find the build and test configuration, hooks, CI and PR guidance in this checkout.
+  Don't borrow commands from other repositories.
 
-## Gather implementation context
+## Gather context
 
-Use subagents for distinct, bounded, read-only investigations where useful, such
-as benchmark conversion, verifier/scoring behavior, reviewer or judge adapters,
-and tests/fixtures. Give each agent the source reference and repository guidance.
-Request concrete paths and symbols, contracts to preserve, existing public test
-seams, dependencies, and unresolved risks. Agents leave file edits and
-implementation to the new session. If delegation is unavailable, gather the same
-evidence directly and state that limitation.
+Use read-only subagents for separate areas where useful, such as conversion,
+scoring, reviewer and judge adapters, and tests. Ask each for concrete paths and
+symbols, contracts to keep, test seams, dependencies and risks. Without subagents,
+gather the same evidence yourself and say so.
 
-For work that could require custom code, inspect the Harbor checkout at its
-pinned revision (see `README.md`) before proposing an implementation. Check relevant
-source, documentation, and tests. Record inspected paths or symbols, what Harbor
-already provides, and the precise remaining gap. Harbor owns job configuration,
-task selection, attempt count (`k`), concurrency, timeouts, retries, scheduling,
-result storage, aggregation, and inspection wherever supported. Prefer native
-configuration and supported extension points; narrow any custom integration to
-the demonstrated gap. Explain any conflict with
-the Harbor-first rule in `CONTRIBUTING.md` rather than silently working around it.
+If the work might need custom code, check Harbor's source, docs and tests at its
+pinned revision first, and record what Harbor already provides and the exact gap, as
+[Harbor first](../../../CONTRIBUTING.md#harbor-first) requires.
 
-Collect every agent's findings and reconcile shared contracts before writing the
-prompt. Resolve conflicts with focused reads, and mark unanswered questions
-explicitly. Propose disjoint implementation ownership and one owner for shared
-schemas, fixtures, or integration files. Record only checks actually run;
-context gathering alone does not establish passing tests.
+Reconcile the findings, mark open questions, and propose disjoint file ownership with
+one owner for shared files. Record only checks you actually ran.
 
-## Write the new-session prompt
+## Write the prompt
 
 Include:
 
-- The user's desired outcome as an explicit `/goal ...` line, with the actual issue and
-  intended behavior. Preserve the requested scope. Include commit, push, or PR
-  publication steps only when requested or already authorized; preparation
-  itself does not perform them or launch another session.
-- Repository path, prepared branch, exact baseline SHA, existing edits, and any
-  branch blocker. Tell the next session to confirm state, preserve existing
-  changes, and exclude unrelated changes from its commits.
-- The complete authoritative source by reference, material amendments, scope
-  boundaries, and the non-obvious context gathered. Use glossary terms such as
-  review case, reviewer, judge, trial, and attempt count. Preserve benchmark
-  reference data, scoring settings, and reported metric meanings when relevant.
-- Harbor evidence and the smallest supported implementation seam. Carry forward
-  unresolved gaps for inspection before custom code is written. A missing
-  feature in a Daydream wrapper is not evidence that Harbor lacks it.
-- Instructions to use worker subagents with explicit, disjoint file/module
-  ownership where the work supports it, and an independent read-only review.
-  Tell workers they share the codebase and must accommodate others' changes
-  without reverting them. Assign shared contracts and integration to one owner.
-- Concrete validation seams and commands discovered in this checkout. Choose
-  checks appropriate to the change; for behavioral bugs identify a failing
-  reproduction through the existing public boundary. Separate deterministic
-  fixture proof from live reviewer/judge or full benchmark evidence. Keep costly
-  evaluation runs within the requested scope and use native Harbor controls.
-- Review and completion criteria: requested acceptance criteria met, applicable
-  checks run, actionable review findings addressed, and actual failures, skips,
-  or missing checks reported. Reference local `code-review` and `pr` skills when
-  applicable and available; keep the prompt executable without them. If using
-  `implement`, state these repository-specific criteria alongside it.
-- For authorized Git operations, stage related paths explicitly and keep normal
-  hooks enabled. Fix hook failures on the current branch and retry, or report
-  the blocker. For an authorized PR, use the current repository PR guidance,
-  link the issue, and inspect required CI on the latest PR HEAD. Never claim
-  missing or disabled checks passed. The handoff does not authorize merging.
+- A `/goal ...` line with the desired outcome, the issue and the intended behavior.
+  Add commit, push or PR steps only if requested or already authorized.
+- The repository path, branch, baseline SHA, existing edits and any blocker, with
+  instructions to keep existing changes and leave unrelated ones out of commits.
+- The source by reference, material amendments, scope limits and non-obvious
+  context, in glossary terms. Name benchmark data, scoring settings and metric
+  meanings that must not change.
+- The Harbor evidence and the smallest supported place to change. A gap in a Daydream
+  wrapper isn't evidence that Harbor lacks the feature.
+- Worker subagents with disjoint ownership where the work allows, told they share
+  the checkout and mustn't revert each other, plus an independent read-only review.
+- The validation commands found in this checkout, and for a bug a failing
+  reproduction through an existing public boundary. Keep fixture tests apart from
+  live reviewer, judge or full benchmark runs, and keep costly runs within scope.
+- Done criteria: acceptance criteria met, checks run, review findings addressed, and
+  failures, skips or missing checks reported. The prompt may mention locally
+  installed review or PR skills but must work without them.
+- For authorized Git work: stage explicit paths and keep hooks enabled. For a PR,
+  follow the template, link the issue and check CI on the latest head. The handoff
+  never authorizes merging.
 
-End with the prompt and any unresolved preparation blocker. Do not substitute a
-generic plan for the concrete branch state, Harbor evidence, and validation
-seams needed by the next session.
+End with the prompt and any unresolved blocker, not a generic plan.

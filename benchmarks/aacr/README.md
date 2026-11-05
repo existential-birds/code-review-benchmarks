@@ -33,8 +33,6 @@ these pins:
 | Harbor | `6099b8cf2bfbbb3e7ff1eb2163bfc4524dbd9ba5` (0.24.0) |
 | Daydream | see [`build.json`](../daydream/build.json), shared by every benchmark |
 
-Examples below run `harbor` from the suite's `.venv`.
-
 ### Logins
 
 Point both variables at your normal login folders. Don't copy `auth.json`: a copy
@@ -92,7 +90,7 @@ holds the shared settings: Daydream's default review configuration, the protecte
 verifier, the metric, data capture and zero retries.
 
 ```sh
-harbor run -c experiments/aacr-baseline.yaml -p artifacts/aacr/<fresh-catalog> \
+.venv/bin/harbor run -c experiments/aacr-baseline.yaml -p artifacts/aacr/<fresh-catalog> \
   -k 1 -n 2 -r 0 --job-name <fresh-name>
 ```
 
@@ -119,7 +117,7 @@ oracle case, which submits a fixed finding, and run it:
 
 ```sh
 .venv/bin/python -m benchmarks.aacr.convert --upstream /path/to/clean/pinned/aacr-bench --oracle
-harbor run -c experiments/aacr-oracle.yaml
+.venv/bin/harbor run -c experiments/aacr-oracle.yaml
 ```
 
 ## Rerun failed cases
@@ -127,7 +125,7 @@ harbor run -c experiments/aacr-oracle.yaml
 Rerun in a **fresh named job**, selecting the cases you want:
 
 ```sh
-harbor run -c experiments/aacr-baseline.yaml -p artifacts/aacr/<fresh-catalog> \
+.venv/bin/harbor run -c experiments/aacr-baseline.yaml -p artifacts/aacr/<fresh-catalog> \
   -i <case> -i <other-case> -k 1 -n 2 -r 0 --job-name <fresh-rerun-name>
 ```
 
@@ -145,7 +143,7 @@ selection in a fresh job to keep one pooled score.
 ## Inspect results
 
 ```sh
-harbor view jobs
+.venv/bin/harbor view jobs
 ```
 
 The viewer shows jobs, trials, scores, trajectories and artifacts. On disk, under

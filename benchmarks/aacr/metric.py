@@ -2,12 +2,11 @@
 # requires-python = ">=3.11"
 # dependencies = ["typing-extensions==4.16.0"]
 # ///
-"""Pool scored AACR rewards through Harbor's native uv-script interface.
+"""Pool scored AACR rewards into one metric; Harbor runs this as a uv script.
 
-Non-null rewards are scoring-eligible, including completed empty reviews. Harbor
-does not pass exception_info here: a later lifecycle error can coexist with a
-reward. These instance counters describe scoring inputs; inspect native job and
-trial results separately for completion and errors.
+A null reward is a trial that produced no score; a complete review with no
+findings still has one. Harbor passes no trial errors here, so read completion
+and errors from the job's own results.
 """
 from __future__ import annotations
 
@@ -16,7 +15,7 @@ import json
 from pathlib import Path
 import sys
 
-# uv executes this file in an isolated dependency environment from any cwd.
+# uv runs this file in its own environment, from any working directory.
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from benchmarks.aacr.upstream import evaluate
 

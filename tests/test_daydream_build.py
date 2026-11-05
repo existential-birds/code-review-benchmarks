@@ -16,7 +16,6 @@ def test_converters_get_only_the_wheel_their_build_names(pinned_wheel, candidate
     assert identity['reviewer_runtime_lock_sha256'] == hashlib.sha256(lock.read_bytes()).hexdigest()
     assert assets[wheel.name] == wheel.read_bytes() and 'candidate' not in identity
 
-    # A candidate's own wheel and lock, never the pin's, under its own identity.
     candidate = candidate_build.parent / json.loads(candidate_build.read_text())['wheel_name']
     lines, assets, identity = build.reviewer_image(candidate_build)
     assert identity['candidate'] is True and identity['source_commit'] == 'c' * 40

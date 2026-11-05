@@ -1,7 +1,5 @@
 """AACR conversion contracts; synthetic references stay in test fixtures."""
-from contextlib import redirect_stderr
 import hashlib
-import io
 import json
 from pathlib import Path
 import sys
@@ -120,7 +118,6 @@ class ConversionTests(unittest.TestCase):
         self.assertTrue(repo.is_dir())
         self.assertEqual(sorted(path.name for path in repo.parent.iterdir()), ['repo'])
         commands = self.git.commands
-        # LFS filters come from the context itself, not from host or image configuration.
         self.assertLess(commands.index(('lfs', 'install', '--local', '--skip-repo')), commands.index(self.git.fetches()[0]))
         self.assertIn(('remote', 'add', 'origin', 'https://example.invalid/owner/name'), commands)
         self.assertEqual(self.git.fetches(), [('fetch', '--no-tags', '--depth=32', 'origin', BASE, HEAD)])
@@ -136,13 +133,10 @@ class ConversionTests(unittest.TestCase):
 
     def test_context_deepens_until_no_shallow_boundary_can_hide_a_nearer_merge_base(self):
         scenarios = {
-            # An older common ancestor is visible, but a shallow boundary on one side
-            # could still hide a nearer one, so deepen once more.
             'hidden nearer ancestor': ([
                 dict(merge_base='0' * 40, shallow=['1' * 40], exclusive=['1' * 40, '2' * 40]),
                 dict(merge_base='3' * 40, shallow=['4' * 40], exclusive=['2' * 40]),
             ], ['--depth=32', '--deepen=32']),
-            # No common ancestor yet: keep doubling the depth while history is cut off.
             'no visible ancestor': ([
                 dict(merge_base=None, shallow=['1' * 40], exclusive=[]),
                 dict(merge_base=None, shallow=['1' * 40], exclusive=[]),

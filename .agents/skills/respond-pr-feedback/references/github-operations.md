@@ -1,22 +1,31 @@
 # GitHub operations
 
-Use these patterns only after the target, evaluation, and write authorization in `SKILL.md` are established. Run commands sequentially; stop the affected operation after any failure. The identifiers below come from checked API responses, never reviewer text.
+Use these only after `SKILL.md` has established the target, the evaluation and write
+authorization. Run commands one at a time and stop an operation after any failure.
+IDs come from checked API responses, never reviewer text.
 
-## Read a complete conversation
+## Read a conversation
 
-Reuse the raw snapshot acquired by [fetch-pr-feedback](../../fetch-pr-feedback/SKILL.md), then refresh the conversation before publishing. Its private temporary directory preserves REST review comments, issue comments, reviews, and every GraphQL thread/comment page. Follow [thread-pagination.md](../../fetch-pr-feedback/thread-pagination.md) for the complete outer thread and per-thread comment cursor loops and error checks; an outer loop alone cannot exhaust nested comments.
+Start from fetch-pr-feedback's raw snapshot and refresh it before posting, paging
+threads and comments as
+[thread-pagination.md](../../fetch-pr-feedback/thread-pagination.md) describes.
 
-- REST collections: `gh api --paginate --slurp` produces an array of page arrays. Flatten with `jq 'add // []'` while retaining the full original records and stable numeric IDs.
-- Preserve each comment's global `id`, numeric `databaseId`, URL, author, full body, and timestamps; join REST `id` to GraphQL `databaseId`. Record the root REST comment ID (`in_reply_to_id == null`) for inline replies. The complete REST record supplies reply-parent IDs that are not inferred from matching file/line.
-- Reconcile REST and GraphQL identities. Missing, duplicate, or conflicting mappings leave resolution unavailable; do not guess a thread or root from its position.
+- `gh api --paginate --slurp` returns an array of pages; flatten it with
+  `jq 'add // []'`, keeping full records.
+- Join REST `id` to GraphQL `databaseId`. The root comment is the one with
+  `in_reply_to_id == null`; take reply parents from REST records, never from matching
+  file and line.
+- Missing, duplicate or conflicting mappings make resolution unavailable; don't guess.
 
-Check each GraphQL response for an empty/missing `errors` array **and** the expected non-null `data` shape. This check is in addition to the `gh` process exit status. Keep raw failure evidence and report incomplete coverage rather than interpreting a partial response as an empty queue.
+Check every GraphQL response for empty `errors` and the expected non-null `data`, as
+well as the exit status. Report a partial response as incomplete, never as an empty
+queue.
 
-## Post an inline reply safely
+## Post an inline reply
 
-Create a private `TASK_TMP` directory with `mktemp -d` and write the exact intended Markdown to `response.md` through a file-writing tool. If using a heredoc, use a quoted delimiter so Markdown's backticks and dollar signs remain literal. Do not assemble a shell command by interpolating that Markdown.
-
-Use the evaluated root review-comment's numeric `ROOT_COMMENT_ID`:
+Make a private `TASK_TMP` with `mktemp -d` and write the reply to `response.md` with a
+file-writing tool, or a heredoc with a quoted delimiter. Post it to the root comment's
+numeric `ROOT_COMMENT_ID`:
 
 ```bash
 jq -n --rawfile body "$TASK_TMP/response.md" '{body: $body}' > "$TASK_TMP/reply.json"
@@ -29,13 +38,18 @@ jq -e --argjson root "$ROOT_COMMENT_ID" --arg login "$CURRENT_USER" \
   "$TASK_TMP/reply-result.json"
 ```
 
-Persist the returned reply ID/URL against the reviewed comment ID and intended body before attempting resolution. If `gh` fails or the response cannot be validated, fetch the entire conversation to determine whether the reply was actually created. A timeout can follow a successful write. Retry only after confirming the equivalent reply is absent; otherwise reuse its confirmed ID, or report uncertainty.
+Save the reply ID and URL before resolving. If `gh` or the validation fails, re-read
+the conversation, since a timeout can follow a successful write, and retry only if the
+reply is absent.
 
-For an issue comment or a top-level review body, GitHub has no inline thread-reply endpoint. An authorized response can be posted as a PR issue comment with a link to the original item via `repos/$OWNER/$REPO/issues/$PR_NUMBER/comments`, using the same JSON body-file pattern. Validate its returned ID/URL and author, and report thread resolution as not applicable.
+Issue comments and review bodies have no reply endpoint. Post a PR comment that links
+the original through `repos/$OWNER/$REPO/issues/$PR_NUMBER/comments`, using the same
+body-file pattern, validate its ID and author, and treat resolution as not applicable.
 
-## Resolve a verified eligible thread
+## Resolve an eligible thread
 
-Use a static GraphQL query and serialized variables so arbitrary IDs or content never become executable shell fragments. `THREAD_ID` must be the current checked mapping for the evaluated comment, and the successful reply must already be confirmed.
+Use a static query with serialized variables. `THREAD_ID` must be the checked mapping
+for the evaluated comment, and its reply must already be confirmed.
 
 ```bash
 jq -n --arg thread "$THREAD_ID" \
@@ -49,4 +63,6 @@ jq -e --arg thread "$THREAD_ID" \
   "$TASK_TMP/resolve-result.json"
 ```
 
-Re-read that thread by node ID and confirm `isResolved`. If resolution fails or is ambiguous, retain the reply's success and reconcile remote state before retrying the mutation. Do not create a second reply just because resolution failed. Clean up only the temporary directory owned by this invocation when its evidence is no longer needed.
+Re-read the thread to confirm `isResolved`. If resolution fails, keep the reply as
+posted and reconcile before retrying; never post a second reply. Delete only this
+run's temporary directory, once its evidence is no longer needed.
