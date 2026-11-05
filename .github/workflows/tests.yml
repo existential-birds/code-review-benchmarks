@@ -44,8 +44,9 @@ jobs:
           uv pip install --python .venv/bin/python pytest==8.4.2
           npm ci --omit=dev --prefix benchmarks/pi
 
-      - name: Test
+      - name: Lint and test
         working-directory: code-review-benchmarks
         run: |
+          uvx ruff@0.14.0 check
           .venv/bin/python -m pytest tests -q
           node --test tests/pi_judge.test.mjs

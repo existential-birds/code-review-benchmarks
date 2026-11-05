@@ -1,4 +1,4 @@
-"""Exercise the sandbox reviewer boundary with a faked Git checkout and native terminal evidence."""
+"""The sandbox reviewer, with a faked Git checkout and Daydream's terminal results."""
 import asyncio
 import base64
 import hashlib
@@ -81,7 +81,7 @@ def test_completed_review_exports_only_finalized_items_and_isolated_defaults(rev
     case = review_case
     monkeypatch.setenv('DAYDREAM_REVIEW_PROFILE', '/missing/operator-profile')
     monkeypatch.setenv('DAYDREAM_FANOUT_CONCURRENCY', '1')
-    monkeypatch.setenv('OPENAI_API_KEY', 'must-not-reach-native-transport')
+    monkeypatch.setenv('OPENAI_API_KEY', 'must-not-reach-codex')
     monkeypatch.setenv('DAYDREAM_TRAJECTORY_HUB_REPO', 'must-not-publish/benchmark-data')
     calls = []
     async def inference(config, *, review_result_handler, execution):
@@ -130,7 +130,7 @@ def test_completed_review_exports_only_finalized_items_and_isolated_defaults(rev
     assert (case.logs / 'trajectory.json').exists()
 
 
-def test_configuration_reads_native_routing_after_runner_copies_config(review_case, monkeypatch):
+def test_configuration_reads_routing_from_run_record_after_runner_copies_config(review_case, monkeypatch):
     from dataclasses import replace
     from daydream import runner
     from daydream.deep.latency import RiskSummary, route_for
@@ -140,7 +140,7 @@ def test_configuration_reads_native_routing_after_runner_copies_config(review_ca
     routing = {
         'profile': {'selected': 'balanced', 'source': 'default'},
         'risk': {'floors': ['migration_surface']},
-        'wonder': {'outcome': 'run', 'effort': 'high', 'reason': 'native risk floor'},
+        'wonder': {'outcome': 'run', 'effort': 'high', 'reason': 'risk floor'},
         'arbiter': {'sharded': True, 'groups': [
             {'group_id': 'group-0', 'effort': 'high', 'target_uids': ['a'], 'reused': False},
             {'group_id': 'group-1', 'effort': 'xhigh', 'target_uids': ['b'], 'reused': False}]},
@@ -167,7 +167,7 @@ def test_configuration_reads_native_routing_after_runner_copies_config(review_ca
 
 
 @pytest.mark.parametrize('invalid', ['api_key', 'missing_refresh', 'invalid_jwt'])
-def test_native_credential_admission_blocks_inference(review_case, monkeypatch, invalid):
+def test_invalid_codex_login_stops_review_before_inference(review_case, monkeypatch, invalid):
     from daydream import runner
     case = review_case
     auth_path = case.inputs / 'credential-store/auth.json'
@@ -180,7 +180,7 @@ def test_native_credential_admission_blocks_inference(review_case, monkeypatch, 
         auth['tokens']['access_token'] = 'malformed'
     auth_path.write_text(json.dumps(auth))
     async def unexpected(*args, **kwargs):
-        pytest.fail('native auth admission must reject before inference')
+        pytest.fail('an invalid login must stop the review before inference')
     monkeypatch.setattr(runner, 'run', unexpected)
     assert run_case(case) != 0
     proof = json.loads((case.artifacts / 'daydream/execution.json').read_text())
@@ -293,7 +293,7 @@ def test_copied_agent_logs_are_rejected_before_any_runtime_execution(tmp_path, p
             assert environment_path == '/logs/agent' and host_path == logs
             return False
         async def exec(self, *args, **kwargs):
-            pytest.fail('copied logs must fail admission before any reviewer setup or invocation')
+            pytest.fail('copied logs must fail before any reviewer setup or invocation')
     agent = DaydreamAgent(logs_dir=logs)
     async def run():
         if phase == 'install':
@@ -306,7 +306,7 @@ def test_copied_agent_logs_are_rejected_before_any_runtime_execution(tmp_path, p
 
 
 @pytest.mark.parametrize('failure', ['namespace', 'whole-login-folder', 'older-build', None, 'candidate'])
-def test_admission_failure_blocks_runtime_admission(tmp_path, failure):
+def test_install_checks_namespaces_login_mount_and_build(tmp_path, failure):
     from benchmarks.daydream.agent import DaydreamAgent
     commands = []
     logs = tmp_path / 'agent'
@@ -364,7 +364,7 @@ def test_stale_or_mismatched_inputs_never_invoke_reviewer(review_case, monkeypat
     assert run_case(case) != 0
 
 
-def test_sigterm_joins_native_finalization_and_flushes_partial_recorders(monkeypatch):
+def test_sigterm_waits_for_finalization_and_flushes_partial_recorders(monkeypatch):
     import anyio
     from daydream import trajectory
     observed = []

@@ -22,7 +22,8 @@ import shutil
 import subprocess
 import tempfile
 
-from benchmarks.daydream.entrypoint import CASE_DIR, CODEX_LOGIN_DIR
+# Re-exported so converters and the agent read the image layout from one place.
+from benchmarks.daydream.entrypoint import CASE_DIR as CASE_DIR, CODEX_LOGIN_DIR as CODEX_LOGIN_DIR
 
 PACKAGE = Path(__file__).resolve().parent
 BUILD = json.loads((PACKAGE / 'build.json').read_text())

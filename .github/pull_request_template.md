@@ -1,38 +1,26 @@
-<!-- Replace placeholders and remove guidance comments before submitting.
-Keep the description as concise as possible and quickly readable by humans.
-Agents use it to inform code review: retain all context they cannot get from the
-diff, linked issue, or repository, plus anything that materially helps review.
-Link existing details instead of repeating them.
-Bugfix: at most 3 sentences covering the trigger, incorrect behavior, and fixed behavior.
-Other change: at most 5 sentences explaining its purpose and resulting behavior.
-Describe the final change; omit work chronology and abandoned approaches.
+<!-- Replace placeholders and remove these comments. Keep it short, but include any
+context a reviewer can't get from the diff, issue or repository; link details instead
+of repeating them. A bugfix gets at most 3 sentences (trigger, wrong behavior, fixed
+behavior); other changes at most 5 (purpose and result). Describe the final change,
+not how you got there.
 -->
 ## Summary
 
-<!-- Pick the smallest view that makes the key point clear:
-- Logic or algorithm: pseudocode.
-- Runtime control flow: call tree.
-- UI structure: component tree with relevant state and module boundaries.
-- File responsibility or broad refactor: shallow file tree.
-- Component interaction, control flow, or data flow: Mermaid.
-- Changes to an existing shape: diff sketch matching the topic (components,
-  file layout, call tree/stack, or state/control flow).
-- Mostly new code, essential ownership/order context, or a copyable target:
-  the whole block.
-Place each visual next to the short text it supports. Include only the calls,
-files, props, states, and boundaries needed to explain the change. Use one or
-several views as useful; keep the summary easy to scan.
+<!-- Add the smallest visual that makes the point, next to the text it supports:
+pseudocode for logic, a call tree for control flow, a shallow file tree for file
+responsibilities, Mermaid for interactions or data flow, or a diff sketch for a
+changed shape.
 -->
 [Summary]
 
-<!-- Link the GitHub issue using its full URL. Use Closes only when this PR fully resolves it;
-otherwise use Related to. If there is no issue, give a brief reason.
+<!-- Full issue URL. Use Closes only if this PR fully resolves it; otherwise Related to.
+With no issue, say why briefly.
 -->
 Issue: [Closes / Related to + full GitHub issue URL, or no linked issue — brief reason]
 
 ## Added
 
-<!-- Keep all three change sections. Use concise bullets, or None. -->
+<!-- Keep all three change sections. Use short bullets, or None. -->
 - [New behavior or capability, or None.]
 
 ## Changed
@@ -48,16 +36,12 @@ Issue: [Closes / Related to + full GitHub issue URL, or no linked issue — brie
 - [ ] Ran the relevant documented repository checks and recorded the outcome below, or explained why they are not applicable.
 - [ ] For custom code, recorded the Harbor-first evidence required by `CONTRIBUTING.md`, or explained why it is not applicable.
 
-<!-- Record verification actually performed on the final change. Give exact commands
-or reproducible manual steps, observed results, and the correctness each check establishes.
-Include relevant environment/backend details and brief evidence, not full logs.
-Separate deterministic fixture evidence from live reviewer/judge runs and broader
-benchmark evaluations. For benchmark results, record the selected review cases,
-attempt count (k), reviewer/judge settings, and retained result location.
-Follow CONTRIBUTING.md and repository verification requirements; disclose failed or skipped
-required checks, their reasons, and the remaining uncertainty.
-Do not present planned checks as passed. Identify earlier evidence by its revision
-when later changes have not been rechecked.
+<!-- Record only checks run on the final change: exact commands or steps, what you
+observed, and what each check shows. Keep fixture tests separate from live reviewer or
+judge runs and benchmark evaluations; for benchmark results, give the review cases,
+attempt count (k), reviewer and judge settings, and where results are kept. Disclose
+failed or skipped checks and why. If later commits weren't rechecked, name the
+revision each result applies to.
 -->
 Verified revision: [commit SHA]
 
@@ -67,10 +51,8 @@ Verified revision: [commit SHA]
 
 ## Review context
 
-<!-- Optional: remove this section if the summary and bullets are sufficient.
-Capture only context useful for review or future history: a non-obvious decision and
-its reason, a relevant code path/invariant, compatibility or migration requirements,
-or a concrete risk and rollback limitation. Link supporting evidence where useful;
-do not repeat the diff or linked documents.
+<!-- Optional; remove if the summary is enough. Include only context useful for
+review or history: a non-obvious decision and why, an invariant, compatibility needs,
+or a risk and its rollback limits.
 -->
 - [Relevant context]

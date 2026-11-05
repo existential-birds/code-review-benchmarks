@@ -23,3 +23,6 @@ include = ["benchmarks*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff]
+extend-exclude = ["benchmarks/aacr/upstream", "benchmarks/reviewbench/upstream"]

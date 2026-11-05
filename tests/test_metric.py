@@ -20,7 +20,7 @@ def reward(expected, generated, matched_generated, matched_references):
     }
 
 
-def test_native_harbor_metric_pools_unequal_denominators(tmp_path, monkeypatch):
+def test_harbor_metric_pools_unequal_denominators(tmp_path, monkeypatch):
     # A different cwd exercises script imports, not an installed copy of this repo.
     monkeypatch.chdir(tmp_path)
     result = UvScript(SCRIPT).compute([
@@ -111,6 +111,6 @@ def test_impossible_match_counts_are_rejected(counts):
         compute([reward(*counts)])
 
 
-def test_native_harbor_metric_rejects_invalid_payload():
+def test_harbor_metric_rejects_invalid_payload():
     with pytest.raises(RuntimeError, match='expected_notes'):
         UvScript(SCRIPT).compute([dict(reward(2, 1, 1, 2), expected_notes=-1)])

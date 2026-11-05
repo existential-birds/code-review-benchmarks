@@ -259,7 +259,7 @@ async def review_once(*, case_dir: Path, artifacts: Path, agent_logs: Path,
         finalized = []
         with tempfile.TemporaryDirectory(prefix='daydream-review-') as temporary:
             private = Path(temporary)
-            staged = private / 'native-evidence'
+            staged = private / 'run-artifacts'
             staged.mkdir()
             with (_isolated_environment(private) as controls,
                   _codex_home(credential_home, private) as role_home):
