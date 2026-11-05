@@ -14,8 +14,8 @@ uvx ruff@0.14.0 check
 node --test tests/pi_judge.test.mjs
 ```
 
-CI runs the same install and checks on every pull request. Use the terms in the
-[glossary](GLOSSARY.md).
+[`tests.yml`](.github/workflows/tests.yml) runs the same install and checks, but is
+skipped for now. Use the terms in the [glossary](GLOSSARY.md).
 
 ## Harbor first
 
