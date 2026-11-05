@@ -311,15 +311,13 @@ def test_install_checks_namespaces_login_mount_and_build(tmp_path, failure):
     commands = []
     logs = tmp_path / 'agent'
     logs.mkdir()
-    # What the reviewer container mounts at /run/reviewer-codex.
     login = tmp_path / 'reviewer-codex'
     login.mkdir()
     (login / 'auth.json').write_text('{}')
     if failure == 'whole-login-folder':
         (login / 'config.toml').write_text('')
         (login / 'sessions').mkdir()
-    # The Daydream build a task was generated with, as its image holds it. A candidate
-    # differs from the pin like an older build, but names itself as a candidate.
+    # A candidate differs from the pin like an older build, but says it's a candidate.
     older = dict(BUILD, version='0.0.1', source_commit='0' * 40)
     baked = {'older-build': older, 'candidate': dict(older, candidate=True)}.get(failure, BUILD)
     class Environment:

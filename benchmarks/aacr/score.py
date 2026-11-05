@@ -110,11 +110,12 @@ class _VerdictGuard:
             evidence['response'] = content
             if not isinstance(content, str) or not content.strip():
                 raise VerificationError('Judge returned no text')
-            # AACR reads the last bracketed array; require one that parses.
+            # AACR's last-bracketed-array rule, but a malformed array such as [1,]
+            # fails instead of silently matching nothing.
             matches = re.findall(r'\[[\d,\s]*\]', content.strip())
             if not matches:
                 raise VerificationError('Judge returned no verdict array')
-            json.loads(matches[-1])  # catches arrays such as [1,] AACR swallows
+            json.loads(matches[-1])
             return response
         except Exception as error:
             failure = {'category': 'verdict' if isinstance(error, (VerificationError, json.JSONDecodeError))
@@ -154,7 +155,6 @@ async def score_case(instance_path: Path, findings_path: Path, output_dir: Path,
             diagnostic['reviewer'] = _validate_daydream_completion(
                 instance, Path(findings_path), findings, Path(daydream_proof), Path(comparison_path),
                 Path(host_receipt_path))
-        # AACR's evaluator loads findings from its own file layout.
         results_dir = output_dir / 'findings'
         results_dir.mkdir(exist_ok=True)
         _write_json(config.result_path(results_dir, instance.instance_id), findings)

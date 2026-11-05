@@ -56,7 +56,6 @@ def judge(tmp_path, monkeypatch):
     monkeypatch.setattr(Verifier, 'verify', harbor_verify)
     refreshes = []
     async def refresh(auth_path, min_validity_ms):
-        # Stands in for Pi's lock-guarded refresh, which rewrites the host file in place.
         refreshes.append((auth_path, min_validity_ms))
         data = json.loads(auth_path.read_text())
         data['openai-codex'].update(access='new-access', refresh='new-refresh',

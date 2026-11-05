@@ -63,7 +63,6 @@ def _build_commit(source: Path, commit: str, staged: Path) -> Path:
     archive = subprocess.run(['git', '-C', str(source), 'archive', commit], capture_output=True, check=True).stdout
     subprocess.run(['tar', '-x', '-C', str(tree)], input=archive, check=True)
     subprocess.run(['uv', 'build', '--quiet', '--wheel', '--out-dir', str(output)], cwd=tree, check=True)
-    # The same hash-locked graph Daydream's own lockfile resolves.
     (output / LOCK_NAME).write_bytes(subprocess.run(
         ['uv', 'export', '--quiet', '--frozen', '--no-dev', '--no-emit-project',
          '--format', 'requirements-txt'], cwd=tree, capture_output=True, check=True).stdout)

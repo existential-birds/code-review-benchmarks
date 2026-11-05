@@ -1,4 +1,4 @@
-// Apache-2.0. Host-side refresh of the judge's Pi login, run before scoring starts.
+// Host-side refresh of the judge's Pi login, run before scoring starts.
 // The judge's container gets only a copy of the credential, so it must never need
 // to refresh: a refresh there would rotate the token without saving it here.
 import { pathToFileURL } from 'node:url';

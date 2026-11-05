@@ -1,4 +1,4 @@
-// Apache-2.0. Public Pi SDK bridge for a judge that sends one user message, such as AACR's scorer.
+// Pi SDK bridge for a judge that sends one user message, such as AACR's scorer.
 import { readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';

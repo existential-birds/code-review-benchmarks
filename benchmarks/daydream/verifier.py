@@ -5,7 +5,6 @@ import json
 
 from benchmarks.pi.verifier import PiJudgeVerifier
 
-# Where a benchmark's verifier finds the host's record of the review process.
 HOST_RECEIPT = '/tmp/daydream-host-receipt.json'
 
 
@@ -28,6 +27,4 @@ class DaydreamVerifier(PiJudgeVerifier):
                 or type(receipt.get('return_code')) is not int or receipt['return_code'] != 0):
             raise RuntimeError('Daydream host invocation did not finish successfully')
         await self.environment.upload_file(receipt_path, HOST_RECEIPT)
-        # PiJudgeVerifier uploads the judge login, then Harbor uploads the tests,
-        # runs them and reads the reward.
         return await super().verify()

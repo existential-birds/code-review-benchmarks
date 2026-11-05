@@ -22,7 +22,6 @@ import tempfile
 import time
 import uuid
 
-# Where the reviewer image puts the task's case files and the mounted Codex login.
 CASE_DIR = Path('/opt/daydream-case')
 CODEX_LOGIN_DIR = Path('/run/reviewer-codex')
 

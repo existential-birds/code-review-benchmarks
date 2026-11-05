@@ -24,7 +24,6 @@ PR_URL = 'https://github.com/laravel/framework/pull/56591'
 BASE = '6d94b16fd5f4f72bb741f9b900b83179c8ab46c9'
 HEAD = '0a5238acfc4ca99c363283bf3bb16e20905f2a39'
 PACKAGE = Path(__file__).resolve().parent
-# Held-out cases; the dev split is every other case.
 HOLDOUT = PACKAGE / 'holdout.txt'
 
 
@@ -177,7 +176,6 @@ def configure_daydream_task(task: Path, build_file: Path | None = None) -> None:
         f'COPY repo/ /workspace/repo/\nCOPY daydream-case/ {build.CASE_DIR}/\n'
         'WORKDIR /workspace/repo\n')
     (environment / 'docker-compose.yaml').write_text(build.codex_login_compose())
-    # The verifier installs the same locked Pi SDK as the oracle task.
     (task / 'tests/Dockerfile').write_text(
         f'FROM {build.NODE_IMAGE}\nRUN apt-get update && apt-get install -y --no-install-recommends '
         'git ca-certificates && rm -rf /var/lib/apt/lists/*\n' + verifier_suffix +

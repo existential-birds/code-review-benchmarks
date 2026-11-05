@@ -40,7 +40,6 @@ def test_daydream_task_freezes_runtime_comparison_and_keeps_oracle_separate(tmp_
     assert config['environment']['network_mode'] == 'public'
     compose = yaml.safe_load((task / 'environment/docker-compose.yaml').read_text())
     assert compose['services']['main']['security_opt'] == ['seccomp=unconfined']
-    # Only the Codex login file, writable, so an in-container refresh reaches the host.
     assert compose['services']['main']['volumes'] == [{'type': 'bind',
         'source': '${REVIEWER_CODEX_AUTH_DIR:?set to your Codex login folder, usually ~/.codex}/auth.json',
         'target': '/run/reviewer-codex/auth.json', 'bind': {'create_host_path': False}}]
