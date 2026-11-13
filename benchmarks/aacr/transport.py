@@ -78,8 +78,8 @@ class PiJudgeClient:
                 or metadata.get("provider") != "openai-codex"
                 or metadata.get("model") != "gpt-6.1-sol"
                 or metadata.get("subscription") is not True
-                or metadata.get("sdk_version") != "1.4.0"
-                or metadata.get("pi_ai_version") != "1.4.0"
+                or metadata.get("sdk_version") != "1.5.0"
+                or metadata.get("pi_ai_version") != "1.5.0"
                 or metadata.get("stop_reason") not in {"stop", "length"}
             ):
                 raise JudgeTransportError("Pi helper did not return a subscription text completion")

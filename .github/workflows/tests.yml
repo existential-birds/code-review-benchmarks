@@ -43,7 +43,7 @@ jobs:
           uv pip install --python .venv/bin/python -e ../harbor
           uv pip install --python .venv/bin/python --no-deps --reinstall .cache/daydream/daydream-*.whl
           uv pip install --python .venv/bin/python --no-deps -e .
-          uv pip install --python .venv/bin/python pytest==8.4.2
+          uv pip install --python .venv/bin/python pytest==9.0.3
           npm ci --omit=dev --prefix benchmarks/pi
 
       - name: Lint and test

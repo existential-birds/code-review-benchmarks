@@ -97,7 +97,7 @@ Together they hold 87 reference findings:
 |---|---|---|
 | Execution | AACR's own pipeline | One [Harbor](https://github.com/harbor-framework/harbor) task per pull request, named from its URL |
 | Reviewer | OpenCodeReview, Claude Code or Codex | Daydream's complete review pipeline. Findings use AACR's Codex result shape, and file-level findings without a line are kept |
-| Judge | Any model behind an OpenAI-compatible API, set by `JUDGE_MODEL` | `gpt-6.1-sol` on an OpenAI Codex subscription, called through the Pi SDK 1.4.0 |
+| Judge | Any model behind an OpenAI-compatible API, set by `JUDGE_MODEL` | `gpt-6.1-sol` on an OpenAI Codex subscription, called through the Pi SDK 1.5.0 |
 | Judge request | `temperature=0`, `top_p=0.95`, `max_tokens=3000`, thinking off | None of those are sent; the provider's defaults apply |
 | Judge failure | Logged and counted as no match | The trial fails with no score |
 | Missing API key | Falls back to local mock matching | Mock matching is disabled |

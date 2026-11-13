@@ -8,7 +8,7 @@ Follow the [quick start](README.md#quick-start) to install the suite, then add t
 test dependency and run the lint and tests:
 
 ```sh
-uv pip install --python .venv/bin/python pytest==8.4.2
+uv pip install --python .venv/bin/python pytest==9.0.3
 uvx ruff@0.14.0 check
 .venv/bin/python -m pytest tests -q
 node --test tests/pi_judge.test.mjs
