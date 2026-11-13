@@ -206,6 +206,10 @@ def _committed_review(sealed, public: Path):
     from daydream.review_result import FinalizedReview
     from daydream.trajectory import RUN_DOCUMENT_NAME, run_directory
     result = sealed.to_dict()
+    # The run's folder is found by this name, so admit only a UUID, as for the default review's trajectory.
+    run_id = result['terminal_result']['run_id']
+    if str(uuid.UUID(run_id)) != run_id:
+        raise ValueError('Invalid trajectory session ID')
     # The text of a confirmed finding, labelled as Daydream's own report labels it.
     items = [dict(file=finding['payload']['file'], line=_head_line(finding, result['assignments']),
                   title=finding['title'],
@@ -214,7 +218,7 @@ def _committed_review(sealed, public: Path):
                           ('trigger', 'Trigger'), ('consequence', 'Consequence'), ('grounds', 'Supporting grounds')))]))
              for finding in result['findings']]
     # Usage is the sealed run's trajectory totals, which the default review reports from the same source.
-    trajectory = run_directory(public, result['terminal_result']['run_id']) / RUN_DOCUMENT_NAME
+    trajectory = run_directory(public, run_id) / RUN_DOCUMENT_NAME
     totals = (json.loads(trajectory.read_bytes()).get('final_metrics') or {}) if trajectory.is_file() else {}
     usage = {key: totals[total] for key, total in (('prompt_tokens', 'total_prompt_tokens'),
         ('completion_tokens', 'total_completion_tokens'), ('cached_tokens', 'total_cached_tokens'),

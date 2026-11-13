@@ -195,7 +195,8 @@ def test_invalid_codex_login_stops_review_before_inference(review_case, monkeypa
                                      'no-policy-in-build', 'committed-capture', 'committed-refused',
                                      'committed-other-policy', 'committed-other-profile', 'committed-uninstalled',
                                      'committed-incomplete', 'committed-other-revision', 'committed-created',
-                                     'committed-moved', 'committed-no-trajectory', 'committed-raised'])
+                                     'committed-moved', 'committed-no-trajectory', 'committed-raised',
+                                     'committed-run-path'])
 def test_unsuccessful_invocation_retains_evidence_without_findings(review_case, monkeypatch, failure):
     from dataclasses import dataclass
     from daydream import committed_review, review_profile, runner
@@ -238,6 +239,9 @@ def test_unsuccessful_invocation_retains_evidence_without_findings(review_case, 
         terminal = finalized(case, [], complete=failure != 'committed-incomplete').terminal_result
         if failure == 'committed-other-revision':
             terminal['analyzed_revision']['diff_key'] = 'f' * 64
+        if failure == 'committed-run-path':
+            # A run named by a path instead of a UUID could point the evidence copy anywhere.
+            terminal['run_id'] = '../elsewhere'
         run = case.repo / '.daydream/runs' / terminal['run_id']
         run.mkdir(parents=True)
         if failure != 'committed-no-trajectory':
@@ -267,7 +271,8 @@ def test_unsuccessful_invocation_retains_evidence_without_findings(review_case, 
     assert proof['usage'].get('prompt_tokens') == (None if failure == 'missing' or committed else 120)
     # The run's trajectory is kept whenever the review left one, also when it raised afterwards.
     assert (case.logs / 'trajectory.json').is_file() is (failure not in (
-        'no-policy-in-build', 'committed-capture', 'committed-refused', 'committed-no-trajectory'))
+        'no-policy-in-build', 'committed-capture', 'committed-refused', 'committed-no-trajectory',
+        'committed-run-path'))
     if committed:
         # Neither a build without the policy nor a capture request reaches a model. A review
         # that ran passes the same checks as the default review before its findings count.
@@ -283,7 +288,8 @@ def test_unsuccessful_invocation_retains_evidence_without_findings(review_case, 
             'committed-created': (1, 0, 'Reviewer changed files outside its review artifacts'),
             'committed-moved': (1, 0, 'Reviewer changed the pinned comparison'),
             'committed-no-trajectory': (1, 0, 'Trajectory unavailable'),
-            'committed-raised': (1, None, 'Daydream raised RuntimeError')}[failure]
+            'committed-raised': (1, None, 'Daydream raised RuntimeError'),
+            'committed-run-path': (1, None, 'Daydream raised ValueError')}[failure]
         assert (len(reviews), proof['runner_exit_code'], proof['assignment_policy']) == (reviewed, exit_code, 'adaptive')
         assert diagnostic in ' '.join(proof['diagnostics'])
         if failure == 'committed-uninstalled':
