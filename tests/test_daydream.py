@@ -5,8 +5,10 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import runpy
 import signal
 import subprocess
+import sys
 from types import SimpleNamespace
 import uuid
 
@@ -191,7 +193,9 @@ def test_invalid_codex_login_stops_review_before_inference(review_case, monkeypa
 
 @pytest.mark.parametrize('failure', ['missing', 'nonzero', 'incomplete', 'exception', 'cancelled', 'changed', 'created',
                                      'no-policy-in-build', 'committed-capture', 'committed-refused',
-                                     'committed-other-policy', 'committed-other-profile', 'committed-uninstalled'])
+                                     'committed-other-policy', 'committed-other-profile', 'committed-uninstalled',
+                                     'committed-incomplete', 'committed-other-revision', 'committed-created',
+                                     'committed-moved', 'committed-no-trajectory', 'committed-raised'])
 def test_unsuccessful_invocation_retains_evidence_without_findings(review_case, monkeypatch, failure):
     from dataclasses import dataclass
     from daydream import committed_review, review_profile, runner
@@ -231,16 +235,26 @@ def test_unsuccessful_invocation_retains_evidence_without_findings(review_case, 
         reviews.append(request)
         if failure == 'committed-refused':
             raise ValueError('committed review discovery requires a backend with native host tools')
-        terminal = finalized(case, []).terminal_result
+        terminal = finalized(case, [], complete=failure != 'committed-incomplete').terminal_result
+        if failure == 'committed-other-revision':
+            terminal['analyzed_revision']['diff_key'] = 'f' * 64
         run = case.repo / '.daydream/runs' / terminal['run_id']
         run.mkdir(parents=True)
-        (run / 'trajectory.json').write_text(json.dumps({'session_id': terminal['run_id']}))
-        # A complete review, but sealed under another policy or profile, or never installed.
+        if failure != 'committed-no-trajectory':
+            (run / 'trajectory.json').write_text(json.dumps({'session_id': terminal['run_id']}))
+        if failure == 'committed-created':
+            (case.repo / 'added.php').write_text('created during review\n')
+        if failure == 'committed-moved':
+            case.checkout.head = BASE
+        if failure == 'committed-raised':
+            raise RuntimeError('provider failed after the run was published')
+        # Otherwise a complete review, but sealed under another policy or profile, or never installed.
+        installed = failure != 'committed-uninstalled'
         return CommittedReviewResult(json.dumps({'run_id': terminal['run_id'], 'terminal_result': terminal,
-            'findings': [], 'settings': {
+            'assignments': [], 'findings': [], 'settings': {
                 'assignment_policy': {'name': 'broad' if failure == 'committed-other-policy' else 'adaptive'},
                 'profile_digest': 'another digest' if failure == 'committed-other-profile' else 'requested digest'}}),
-            failure != 'committed-uninstalled', 'complete')
+            installed, 'complete' if installed else 'partial', output_error=None if installed else 'TimeoutError')
     if committed:
         monkeypatch.setattr(review_profile, 'build_default_profile', Profile)
         monkeypatch.setattr(committed_review, 'run_committed_review', review)
@@ -251,17 +265,31 @@ def test_unsuccessful_invocation_retains_evidence_without_findings(review_case, 
     assert proof['status'] not in {'complete', 'completed_empty'}
     assert proof['diagnostics']
     assert proof['usage'].get('prompt_tokens') == (None if failure == 'missing' or committed else 120)
+    # The run's trajectory is kept whenever the review left one, also when it raised afterwards.
+    assert (case.logs / 'trajectory.json').is_file() is (failure not in (
+        'no-policy-in-build', 'committed-capture', 'committed-refused', 'committed-no-trajectory'))
     if committed:
-        # Neither a build without the policy nor a capture request reaches a model.
+        # Neither a build without the policy nor a capture request reaches a model. A review
+        # that ran passes the same checks as the default review before its findings count.
         reviewed, exit_code, diagnostic = {
             'no-policy-in-build': (0, None, "got an unexpected keyword argument 'assignment_policy'"),
             'committed-capture': (0, None, 'capture_data=false'),
             'committed-refused': (1, None, 'Daydream raised ValueError'),
             'committed-other-policy': (1, 0, 'another policy or profile'),
             'committed-other-profile': (1, 0, 'another policy or profile'),
-            'committed-uninstalled': (1, 1, 'Daydream did not exit successfully')}[failure]
+            'committed-uninstalled': (1, 1, 'Daydream did not exit successfully'),
+            'committed-incomplete': (1, 0, 'Review did not complete analysis'),
+            'committed-other-revision': (1, 0, 'Analyzed revision differs from the pinned comparison'),
+            'committed-created': (1, 0, 'Reviewer changed files outside its review artifacts'),
+            'committed-moved': (1, 0, 'Reviewer changed the pinned comparison'),
+            'committed-no-trajectory': (1, 0, 'Trajectory unavailable'),
+            'committed-raised': (1, None, 'Daydream raised RuntimeError')}[failure]
         assert (len(reviews), proof['runner_exit_code'], proof['assignment_policy']) == (reviewed, exit_code, 'adaptive')
         assert diagnostic in ' '.join(proof['diagnostics'])
+        if failure == 'committed-uninstalled':
+            # The record says what the sealed result reported, not what a success would have.
+            assert [proof['committed_review'][key] for key in ('output_installed', 'capture_state', 'output_error')] == [
+                False, 'partial', 'TimeoutError']
 
 
 @pytest.mark.parametrize('outcome,capture_data,assignment_policy', [(0, False, None), (0, True, None),
@@ -417,8 +445,9 @@ def test_stale_or_mismatched_inputs_never_invoke_reviewer(review_case, monkeypat
 def test_sigterm_waits_for_finalization_and_flushes_partial_recorders(monkeypatch):
     import anyio
     from daydream import trajectory
-    observed = []
+    observed, options = [], {}
     async def review(**kwargs):
+        options.update(kwargs)
         try:
             await anyio.sleep_forever()
         finally:
@@ -427,9 +456,16 @@ def test_sigterm_waits_for_finalization_and_flushes_partial_recorders(monkeypatc
     monkeypatch.setattr(trajectory, 'flush_active_signal_recorders', lambda: observed.append('flushed'))
     async def run():
         asyncio.get_running_loop().call_soon(os.kill, os.getpid(), signal.SIGTERM)
-        return await entrypoint._main(str(uuid.uuid4()))
+        return await entrypoint._main(str(uuid.uuid4()), True, 'adaptive')
     assert asyncio.run(run()) == 130
     assert observed == ['flushed', 'finalized']
+    # The reviewer's options reach that review, and reach it from the module's command line.
+    assert (options['capture_data'], options['assignment_policy']) == (True, 'adaptive')
+    monkeypatch.setattr(sys, 'argv', ['entrypoint', '--invocation', 'issued', '--capture-data', '--assignment-policy', 'adaptive'])
+    monkeypatch.setattr(asyncio, 'run', lambda main: (dict(main.cr_frame.f_locals), main.close())[0])
+    with pytest.raises(SystemExit) as exited:
+        runpy.run_path(entrypoint.__file__, run_name='__main__')
+    assert exited.value.code == {'invocation': 'issued', 'capture_data': True, 'assignment_policy': 'adaptive'}
 
 
 @pytest.mark.parametrize('assignment_policy', [None, 'broad', 'adaptive'])
@@ -461,6 +497,15 @@ def test_reviewbench_format_sends_line_findings_and_counts_file_level_ones(revie
         pipeline: Pipeline = field(default_factory=Pipeline)
         digest = property(lambda self: 'digest of ' + self.pipeline.assignment_policy)
     sealed_policy = {'name': assignment_policy, 'decomposed': assignment_policy == 'adaptive', 'planned_assignments': 2}
+    cost, other_run = .25 if assignment_policy == 'broad' else None, '00000000-0000-4000-8000-000000000000'
+    def reference(side, lines, path='file.php'):
+        """A source reference as Daydream seals it; a continuation's has a fragment in place of a line range."""
+        return {'path': path, 'side': side, 'role': 'assigned', 'basis': 'source_inspection',
+                'source_range': lines and {'start': lines[0], 'end': lines[1]}, 'fragment': None if lines else {'offset': 40}}
+    def claim(title, text, line, *references):
+        return {'title': title, 'payload': {'file': 'file.php', 'line': line, 'claim': text, 'trigger': 'Trigger',
+                                            'consequence': 'Consequence', 'grounds': 'Grounds',
+                                            'evidence_refs': list(references)}}
     async def committed(request):
         config = request.config
         assert (request.source, request.base, request.local) == (case.repo, BASE, False)
@@ -477,13 +522,28 @@ def test_reviewbench_format_sends_line_findings_and_counts_file_level_ones(revie
         run.mkdir(parents=True)
         (run / 'trajectory.json').write_text(json.dumps({'session_id': terminal['run_id'], 'final_metrics': {
             'total_prompt_tokens': 120, 'total_cached_tokens': 70, 'total_completion_tokens': 11,
-            'total_cost_usd': None}}))
+            'total_cost_usd': cost}}))
+        # Another run's folder in the checkout is neither this review's usage nor its trajectory.
+        (run.parent / other_run).mkdir()
+        (run.parent / other_run / 'trajectory.json').write_text(json.dumps({'session_id': other_run, 'final_metrics': {
+            'total_prompt_tokens': 999}}))
         (case.repo / '.review-output.md').write_text('# Review\n')
+        # Daydream admits a line that a reference to the finding's file covers on either side of
+        # the change. ReviewBench reads lines in the head, so only a new-side one is sent.
+        continuation = reference('new', None)
         sealed = {'run_id': terminal['run_id'], 'terminal_result': terminal, 'findings': [
-            {'title': item.get('summary', 'Whole file'), 'payload': {'file': item['file'], 'line': item['line'],
-                'claim': item['description'], 'trigger': 'Trigger', 'consequence': 'Consequence', 'grounds': 'Grounds'}}
-            for item in items], 'settings': {'assignment_policy': sealed_policy,
-                                             'profile_digest': config.review_profile.digest}}
+            claim('Off by one', 'Skips the last row', 3, reference('old', (1, 9)), reference('new', (3, 3))),
+            claim('Whole file', 'A whole-file concern', None, reference('new', (1, 9))),
+            claim('Removed guard', 'Only the old side has line 55', 55, reference('old', (50, 60)),
+                  reference('new', (1, 9)), reference('new', (50, 60), 'other.php'), continuation),
+            claim('Split hunk', 'In a continued hunk', 7, continuation)],
+            # A continuation's reference has no range; its own assignment summarizes the head lines it holds.
+            'assignments': [{'kind': 'file', 'source_refs': [reference('new', (1, 9))], 'source_summary': []},
+                            {'kind': 'continuation', 'source_refs': [dict(continuation, fragment={'offset': 90})],
+                             'source_summary': [{'old': None, 'new': {'start': 50, 'end': 60}}]},
+                            {'kind': 'continuation', 'source_refs': [dict(continuation, basis='supplied_diff')],
+                             'source_summary': [{'old': None, 'new': {'start': 5, 'end': 9}}]}],
+            'settings': {'assignment_policy': sealed_policy, 'profile_digest': config.review_profile.digest}}
         (case.repo / '.daydream/committed-review.json').write_text(json.dumps(sealed))
         return CommittedReviewResult(json.dumps(sealed), True, 'complete')
     monkeypatch.setenv('OPENAI_API_KEY', 'must-not-reach-codex')
@@ -493,14 +553,18 @@ def test_reviewbench_format_sends_line_findings_and_counts_file_level_ones(revie
     monkeypatch.setattr(committed_review, 'run_committed_review', committed)
     monkeypatch.setattr(runner, 'run', inference)
     assert run_case(case, assignment_policy=assignment_policy) == 0
+    # A committed finding is sent labelled as Daydream's own report labels it.
+    labelled = '\n\n**Trigger:** Trigger\n\n**Consequence:** Consequence\n\n**Supporting grounds:** Grounds'
     assert json.loads(output.read_text()) == {'pr': pr, 'agent': 'daydream', 'findings': [
         {'producer': 'daydream', 'file': 'file.php', 'start_line': 3, 'end_line': 3,
-         'message': 'Off by one\n\nSkips the last row' + (
-             '\n\nTrigger\n\nConsequence\n\nGrounds' if assignment_policy else '')}]}
+         'message': 'Off by one\n\nSkips the last row' + (labelled if assignment_policy else '')},
+        *([{'producer': 'daydream', 'file': 'file.php', 'start_line': 7, 'end_line': 7,
+            'message': 'Split hunk\n\nIn a continued hunk' + labelled}] if assignment_policy else [])]}
     proof = json.loads((case.artifacts / 'daydream/execution.json').read_text())
-    # A finding without a line is left out and counted the same way by either review.
-    assert proof['status'] == 'complete' and proof['omitted_findings'] == 1
-    assert len(proof['retained_findings']) == 2 and proof['assignment_policy'] == assignment_policy
+    # A finding without a line in the head is left out and counted, by either review: the
+    # whole-file one, and a committed one whose only location is on the old side.
+    assert proof['status'] == 'complete' and proof['assignment_policy'] == assignment_policy
+    assert (proof['omitted_findings'], len(proof['retained_findings'])) == ((2, 4) if assignment_policy else (1, 2))
     assert 'CODEX_HOME' not in os.environ
     profile = proof['resolved_configuration']['review_profile']
     if assignment_policy:
@@ -509,12 +573,14 @@ def test_reviewbench_format_sends_line_findings_and_counts_file_level_ones(revie
             'assignment_policy': sealed_policy, 'profile_digest': 'digest of ' + assignment_policy}
         assert profile['digest'] == 'digest of ' + assignment_policy
         assert profile['profile'] == {'pipeline': {'assignment_policy': assignment_policy}}
-        # Usage comes from the run's trajectory totals; an unknown cost stays absent.
-        assert proof['usage'] == {'prompt_tokens': 120, 'cached_tokens': 70, 'completion_tokens': 11}
+        # Usage comes from the sealed run's trajectory totals; an unknown cost stays absent.
+        assert proof['usage'] == {'prompt_tokens': 120, 'cached_tokens': 70, 'completion_tokens': 11} | (
+            {'cost_usd': cost} if cost else {})
         run_id = proof['terminal_result']['run_id']
         assert json.loads((case.logs / 'trajectory.json').read_text())['session_id'] == run_id
         assert sorted(str(path.relative_to(case.logs / 'daydream')) for path in (case.logs / 'daydream').rglob('*')
-                      if path.is_file()) == ['committed-review.json', f'runs/{run_id}/trajectory.json', 'trajectory.json']
+                      if path.is_file()) == ['committed-review.json', f'runs/{other_run}/trajectory.json',
+                                             f'runs/{run_id}/trajectory.json', 'trajectory.json']
     else:
         assert proof['committed_review'] is None and len(profile['digest']) == 64
 

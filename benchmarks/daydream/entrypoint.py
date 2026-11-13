@@ -147,7 +147,7 @@ def _configuration(config, backend, staged: Path) -> dict:
     }
 
 
-def _publish_evidence(staged: Path, logs: Path) -> None:
+def _publish_evidence(staged: Path, logs: Path, run_id: str | None = None) -> None:
     """Copy Daydream's run artifacts, keeping their layout so cross-references resolve."""
     from daydream.trajectory import RUN_DOCUMENT_NAME, run_directory
     evidence = logs / 'daydream'
@@ -161,8 +161,11 @@ def _publish_evidence(staged: Path, logs: Path) -> None:
             raise ValueError('Invalid trajectory session ID')
         bundle = run_directory(evidence, session_id)
     else:
-        # A committed review publishes its trajectory inside its own run layout, which the copy keeps.
-        trajectory = next(iter(sorted(staged.glob(f'runs/*/{RUN_DOCUMENT_NAME}'))), trajectory)
+        # A committed review keeps a run's trajectory in the run's own folder, which the copy below
+        # keeps: the sealed run's, or the only run a review that raised left behind.
+        runs = [run_directory(staged, run_id)] if run_id else list(staged.glob('runs/*'))
+        if len(runs) == 1:
+            trajectory = runs[0] / RUN_DOCUMENT_NAME
     for source in sorted(staged.rglob('*')):
         if source.is_symlink():
             raise ValueError('Unexpected symlink in run artifacts')
@@ -175,18 +178,43 @@ def _publish_evidence(staged: Path, logs: Path) -> None:
         shutil.copyfile(trajectory, logs / RUN_DOCUMENT_NAME)
 
 
+def _head_line(finding: dict, assignments: list[dict]) -> int | None:
+    """A committed finding's line if a source reference places it in the head, where ReviewBench reads lines.
+
+    Daydream admits a line that any reference to the finding's file covers, on either side of
+    the change, so a finding can sit on a line that only the old side has.
+    """
+    def identity(reference: dict) -> dict:
+        # What Daydream's ``source_id`` identifies a reference by.
+        return {key: value for key, value in reference.items() if key not in ('basis', 'role')}
+    payload = finding['payload']
+    for reference in payload['evidence_refs']:
+        if payload['line'] is None or reference['path'] != payload['file'] or reference['side'] != 'new':
+            continue
+        # A continuation's reference has a fragment in place of a line range; its assignment
+        # summarizes the head lines that fragment holds.
+        lines = reference['source_range'] or next((
+            part['source_summary'][0]['new'] for part in assignments if part['kind'] == 'continuation'
+            and identity(reference) in map(identity, part['source_refs'])), None)
+        if lines and lines['start'] <= payload['line'] <= lines['end']:
+            return payload['line']
+    return None
+
+
 def _committed_review(sealed, public: Path):
     """A committed review's sealed result as ``runner.run`` hands one over, and what it ran under."""
     from daydream.review_result import FinalizedReview
     from daydream.trajectory import RUN_DOCUMENT_NAME, run_directory
     result = sealed.to_dict()
-    # The text Daydream itself publishes for a confirmed finding.
-    items = [dict(file=finding['payload']['file'], line=finding['payload']['line'], title=finding['title'],
-                  description='\n\n'.join(finding['payload'][key]
-                                          for key in ('claim', 'trigger', 'consequence', 'grounds')))
+    # The text of a confirmed finding, labelled as Daydream's own report labels it.
+    items = [dict(file=finding['payload']['file'], line=_head_line(finding, result['assignments']),
+                  title=finding['title'],
+                  description='\n\n'.join([finding['payload']['claim'], *(
+                      f'**{label}:** {finding["payload"][key]}' for key, label in (
+                          ('trigger', 'Trigger'), ('consequence', 'Consequence'), ('grounds', 'Supporting grounds')))]))
              for finding in result['findings']]
-    # Usage is the run trajectory's totals, which the default review reports from the same source.
-    trajectory = run_directory(public, result['run_id']) / RUN_DOCUMENT_NAME
+    # Usage is the sealed run's trajectory totals, which the default review reports from the same source.
+    trajectory = run_directory(public, result['terminal_result']['run_id']) / RUN_DOCUMENT_NAME
     totals = (json.loads(trajectory.read_bytes()).get('final_metrics') or {}) if trajectory.is_file() else {}
     usage = {key: totals[total] for key, total in (('prompt_tokens', 'total_prompt_tokens'),
         ('completion_tokens', 'total_completion_tokens'), ('cached_tokens', 'total_cached_tokens'),
@@ -342,7 +370,8 @@ async def review_once(*, case_dir: Path, artifacts: Path, agent_logs: Path,
                         record.update(terminal_result=result.terminal_result, usage=result.usage,
                                       retained_findings=result.items)
                     record['post_comparison'], _ = _comparison(repository, expected['base_sha'])
-                    _publish_evidence(staged, agent_logs)
+                    _publish_evidence(staged, agent_logs,
+                                      record['terminal_result']['run_id'] if committed and finalized else None)
                 if len(finalized) != 1:
                     raise ValueError('Expected exactly one finalized review')
                 terminal = record['terminal_result']
