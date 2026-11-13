@@ -5,7 +5,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 export const PROVIDER = 'openai-codex';
 export const MODEL = 'gpt-6.1-sol';
-const SDK_VERSION = '1.4.0';
+const SDK_VERSION = '1.5.0';
 
 export function failure(category, message, details = {}) {
   return Object.assign(new Error(message), { category, ...details });
