@@ -58,3 +58,7 @@ One reviewer attempt on a review case, together with its scoring outcome.
 The number of independent trials requested for each selected review case and
 reviewer in an evaluation run.
 _Avoid_: Rounds
+
+**Round**:
+One job's complete pass over a catalog, with one trial for each review case.
+_Avoid_: Attempt count, whose trials pool into one job
