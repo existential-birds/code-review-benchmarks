@@ -13,7 +13,7 @@ from harbor.models.agent.context import AgentContext
 from harbor.models.job.result import JobResult, JobStats
 from harbor.models.task.id import LocalTaskId
 from harbor.models.trial.config import TaskConfig, TrialConfig
-from harbor.models.trial.result import AgentInfo, ExceptionInfo, TrialResult
+from harbor.models.trial.result import AgentInfo, ExceptionInfo, StepResult, TrialResult
 from harbor.models.verifier.result import VerifierResult
 
 from benchmarks.reviewbench.metric import compute
@@ -61,24 +61,30 @@ def test_harbor_metric_pools_scored_trials_and_counts_missing_ones(tmp_path, mon
         (catalog / name / 'tests/task.json').write_text(json.dumps({'task_id': number, 'evaluation_id': 2}))
     (catalog / 'catalog.json').write_text(json.dumps({'reviewbench_revision': 'r', 'split': 'test', 'judge': 'j',
                                                       'tasks': ['pr-a', 'pr-b']}))
-    first, second = counts(4, 2, 2, 1, 4, 2), counts(6, 4, 1, 0, 6, 1)
-    def job(name, build, policy, rewards, raised=()):
-        """A job as Harbor's own models write it, with the review's record in each trial's agent logs."""
+    first, second, empty = counts(4, 2, 2, 1, 4, 2), counts(6, 4, 1, 0, 6, 1), counts(0, 0, 0, 0, 4, 0)
+    raised = ExceptionInfo.from_exception(TimeoutError())
+    def job(name, build, policy, rewards, **failure):
+        """A job as Harbor's own models write it, with the review's record in each trial's agent logs.
+
+        ``failure`` replaces fields of the trial for pr-b.
+        """
         trials = []
         for task, overall in rewards.items():
-            trial = TrialResult(
+            trial = TrialResult(**dict(
                 task_name=task, trial_name=f'{task}__{name}', trial_uri='', task_checksum='',
                 task_id=LocalTaskId(path=catalog / task), config=TrialConfig(task=TaskConfig(path=catalog / task)),
                 agent_info=AgentInfo(name='daydream', version='0.34.0'), agent_result=AgentContext(n_input_tokens=120),
                 verifier_result=overall and VerifierResult(rewards=dict(reward(overall), rb_task=int(task == 'pr-b') + 1)),
-                exception_info=ExceptionInfo.from_exception(TimeoutError()) if task in raised else None)
+                finished_at=datetime.now(timezone.utc), verifier_environment_mode='separate')
+                | (failure if task == 'pr-b' else {}))
             trials.append(trial)
             folder = tmp_path / name / trial.trial_name
             (folder / 'agent').mkdir(parents=True)
             (folder / 'result.json').write_text(trial.model_dump_json())
             (folder / 'agent/execution.json').write_text(json.dumps({
-                'status': 'complete' if overall else 'incomplete', 'omitted_findings': 2 if task == 'pr-a' else 0,
-                'elapsed_seconds': 10, 'usage': {'cost_usd': .5} if policy else {}, 'build': {'source_commit': build},
+                'status': 'incomplete' if not overall else 'completed_empty' if overall is empty else 'complete',
+                'omitted_findings': 2 if task == 'pr-a' else 0, 'elapsed_seconds': 10 if task == 'pr-a' else 5,
+                'usage': {'cost_usd': .5} if policy and overall else {}, 'build': {'source_commit': build},
                 'assignment_policy': policy, 'committed_review': policy and {'assignment_policy': {
                     'name': policy, 'decomposed': policy == 'adaptive'}}}))
         stats = JobStats.from_trial_results(trials)
@@ -92,8 +98,7 @@ def test_harbor_metric_pools_scored_trials_and_counts_missing_ones(tmp_path, mon
               job('pinned-2', 'p' * 40, None, {'pr-a': second, 'pr-b': first})]
     adaptive = [job('adaptive-1', 'c' * 40, 'adaptive', {'pr-a': first, 'pr-b': second}),
                 job('adaptive-2', 'c' * 40, 'adaptive', {'pr-a': first, 'pr-b': None})]
-    # As in ReviewBench's own rounds, a trial that raised is not scored, whatever reward it left.
-    broad = [job('broad-1', 'c' * 40, 'broad', {'pr-a': second, 'pr-b': first}, raised={'pr-b'})]
+    broad = [job('broad-1', 'c' * 40, 'broad', {'pr-a': empty, 'pr-b': first}, exception_info=raised)]
     compared = report(catalog, [pinned, adaptive, broad])
     assert compared['catalog'] == {'reviewbench_revision': 'r', 'split': 'test', 'judge': 'j'}
     # A side is the build and review its trials recorded, and each block names its review cases.
@@ -112,7 +117,7 @@ def test_harbor_metric_pools_scored_trials_and_counts_missing_ones(tmp_path, mon
     assert whole['rounds'][0] | {'trials': None} == {
         'job': 'pinned-1', 'expected': 2, 'missing': 0, 'produced': 2, 'completed_empty': 0, 'incomplete': 0,
         'failed': 0, 'evaluated': 2, 'conversion_limited': 1, 'omitted_findings': 2, 'decomposed': 0,
-        'elapsed_seconds': 20, 'cost_usd': None, 'trials': None,
+        'elapsed_seconds': 15, 'cost_usd': None, 'cost_trials': 0, 'trials': None,
         # Harbor's own totals and pooled metric for the job, as it wrote them.
         'harbor': {'n_completed_trials': 2, 'n_errored_trials': 0, 'n_cancelled_trials': 0, 'n_input_tokens': 240,
                    'n_cache_tokens': None, 'n_output_tokens': None, 'metrics': [result]}}
@@ -123,20 +128,28 @@ def test_harbor_metric_pools_scored_trials_and_counts_missing_ones(tmp_path, mon
             'augmented_recall': 3 / 5, 'novel_tp_yield': 1 / 4},
         'omitted_findings': 2, 'elapsed_seconds': 10, 'usage': {}, 'side': 'p' * 40 + '/review',
         'assignment_policy': None}
-    # One trial without a score withholds that round's ratios and every average.
+    # One trial without a score withholds that round's ratios and every average. The cost
+    # sum says how many trials reported one, so a partial sum can't read as the round's total.
     assert broken['all']['complete'] == 0 and broken['all']['failed_trials'] == 1
     assert 'round.1.micro.overall.grounded_precision' in broken['all']
     assert not [key for key in broken['all'] if key.startswith(('summary.', 'round.2.micro', 'round.2.macro'))]
     assert broken['rounds'][1] | {'trials': None, 'harbor': None} == {
         'job': 'adaptive-2', 'expected': 2, 'missing': 0, 'produced': 1, 'completed_empty': 0, 'incomplete': 1,
         'failed': 0, 'evaluated': 1, 'conversion_limited': 1, 'omitted_findings': 2, 'decomposed': 2,
-        'elapsed_seconds': 20, 'cost_usd': 1.0, 'trials': None, 'harbor': None}
+        'elapsed_seconds': 15, 'cost_usd': .5, 'cost_trials': 1, 'trials': None, 'harbor': None}
     assert broken['rounds'][1]['trials'][1] == {
         'task': 'pr-b', 'trial': 'pr-b__adaptive-2', 'status': 'incomplete', 'exception': None,
-        'reward': None, 'ratios': None, 'omitted_findings': 0, 'elapsed_seconds': 10, 'usage': {'cost_usd': .5},
+        'reward': None, 'ratios': None, 'omitted_findings': 0, 'elapsed_seconds': 5, 'usage': {},
         'side': 'c' * 40 + '/adaptive', 'assignment_policy': {'name': 'adaptive', 'decomposed': True}}
-    assert (single['rounds'][0]['evaluated'], single['all']['complete'], single['all']['failed_trials']) == (1, 0, 1)
+    # A complete review with no findings is scored, and its undefined ratios stay null. A
+    # trial that raised is not scored, whatever reward it left; a broad review never decomposes.
+    assert {key: single['rounds'][0][key] for key in ('produced', 'completed_empty', 'evaluated', 'decomposed')} == {
+        'produced': 1, 'completed_empty': 1, 'evaluated': 1, 'decomposed': 0}
+    assert single['rounds'][0]['trials'][0]['ratios'] == {
+        'grounded_precision': None, 'grounded_recall': 0, 'augmented_precision': None, 'augmented_recall': 0,
+        'novel_tp_yield': None}
     assert single['rounds'][0]['trials'][1]['exception'] == 'TimeoutError'
+    assert (single['all']['complete'], single['all']['failed_trials']) == (0, 1)
     assert single['rounds'][0]['harbor']['n_errored_trials'] == 1
     # Over the review cases every job scored, every side is complete and comparable.
     for side in compared['sides'].values():
@@ -147,10 +160,11 @@ def test_harbor_metric_pools_scored_trials_and_counts_missing_ones(tmp_path, mon
     assert whole['matched']['summary.micro.overall.grounded_precision.mean'] == pytest.approx((1 + 1 / 4) / 2)
     assert broken['matched']['summary.micro.overall.grounded_precision.mean'] == 1
     # A trial that left no record never reached the review, and its job keeps its side; a
-    # review case a job never ran is missing; an adaptive review that stayed whole isn't adaptive.
+    # review case a job never ran is missing; one adaptive review that stayed whole takes
+    # its case out of the decomposed block.
     (tmp_path / 'adaptive-2/pr-b__adaptive-2/agent/execution.json').unlink()
     shutil.rmtree(tmp_path / 'broad-1/pr-b__broad-1')
-    whole_review = tmp_path / 'adaptive-1/pr-a__adaptive-1/agent/execution.json'
+    whole_review = tmp_path / 'adaptive-2/pr-a__adaptive-2/agent/execution.json'
     whole_review.write_text(whole_review.read_text().replace('"decomposed": true', '"decomposed": false'))
     again = report(catalog, [pinned, adaptive, broad])
     unreached = again['sides']['c' * 40 + '/adaptive']['rounds'][1]
@@ -159,10 +173,25 @@ def test_harbor_metric_pools_scored_trials_and_counts_missing_ones(tmp_path, mon
     assert again['sides']['c' * 40 + '/broad']['rounds'][0]['missing'] == 1
     assert again['blocks']['matched']['tasks'] == ['pr-a'] and again['blocks']['decomposed']['tasks'] == []
     assert again['sides']['p' * 40 + '/review']['decomposed'] == {}
-    # Every side needs one build and review of its own, and every job one attempt per review case.
-    for sides in ([pinned, pinned], [[pinned[0], adaptive[0]]], [[]]):
+    # ReviewBench's own rule for a failed trial also covers one that never finished, was
+    # verified outside a separate environment, or had a failed step.
+    for number, failure in enumerate((dict(finished_at=None), dict(verifier_environment_mode='shared'),
+                                      dict(step_results=[StepResult(step_name='review', exception_info=raised)]))):
+        unscored = report(catalog, [[job(f'failed-{number}', 'p' * 40, None, {'pr-a': first, 'pr-b': second}, **failure)]])
+        assert unscored['sides']['p' * 40 + '/review']['rounds'][0]['evaluated'] == 1
+    # Every side needs one build and review of its own. A scored trial that left no review
+    # record names none, so its job can't join a side.
+    unrecorded = job('unrecorded', 'p' * 40, None, {'pr-a': first, 'pr-b': second})
+    for record in unrecorded.glob('*/agent/execution.json'):
+        record.unlink()
+    for sides in ([[pinned[0]], [pinned[1]]], [[pinned[0], adaptive[0]]], [[]], [[unrecorded]], [[pinned[0], unrecorded]]):
         with pytest.raises(ValueError, match='one Daydream build and review of its own'):
             report(catalog, sides)
+    # A job is one round of one side, however its path is spelled.
+    for sides in ([[pinned[0], tmp_path / 'adaptive-1/../pinned-1']], [pinned, [adaptive[0], pinned[1]]]):
+        with pytest.raises(ValueError, match='listed more than once'):
+            report(catalog, sides)
+    # A job holds at most one trial for each review case of the catalog.
     shutil.copytree(tmp_path / 'pinned-1/pr-a__pinned-1', tmp_path / 'pinned-1/pr-a__again')
     for jobs in (pinned, [job('another-catalog', 'p' * 40, None, {'pr-c': first})]):
         with pytest.raises(ValueError, match='not one pass'):

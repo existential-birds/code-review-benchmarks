@@ -9,7 +9,8 @@ order::
       --side jobs/<b-round-1> jobs/<b-round-2> jobs/<b-round-3>
 
 A side is named from what its trials recorded, never from a label: the Daydream
-commit and the review it ran. ReviewBench's unchanged ``compute_rounds`` scores each
+commit and the review it ran. A job is one round of one side, so none is listed
+twice. ReviewBench's unchanged ``compute_rounds`` scores each
 round and averages the rounds, once for each set of review cases in ``BLOCKS``.
 Nothing here ranks the sides or adds a score.
 """
@@ -40,8 +41,12 @@ def read_trial(trial: Path) -> dict:
         # A trial that left no record never reached the review.
         execution = {}
     exception = (result.get('exception_info') or {}).get('exception_type')
-    # As in ReviewBench's own rounds, a trial that raised is not scored, whatever reward it left.
-    reward = None if exception else (result.get('verifier_result') or {}).get('rewards')
+    # ReviewBench's own rule for a failed trial (``rb_failed`` in its reviewbench_plugin.py), which
+    # is not scored whatever reward it left: it raised, never finished, was verified outside a
+    # separate environment, or a step failed.
+    failed = (exception or not result.get('finished_at') or result.get('verifier_environment_mode') != 'separate'
+              or any(step.get('exception_info') for step in result.get('step_results') or []))
+    reward = None if failed else (result.get('verifier_result') or {}).get('rewards')
     return dict(
         task=Path(result['task_id']['path']).name, trial=result['trial_name'],
         status=execution.get('status', 'failed'), exception=exception, reward=reward,
@@ -71,8 +76,8 @@ def read_round(job: Path, expected: dict[str, dict]) -> dict:
         omitted_findings=sum(trial['omitted_findings'] for trial in trials),
         decomposed=sum(bool((trial['assignment_policy'] or {}).get('decomposed')) for trial in trials),
         elapsed_seconds=sum(trial['elapsed_seconds'] or 0 for trial in trials),
-        # An API-equivalent estimate, not a charge; null when no trial reported one.
-        cost_usd=sum(costs) if costs else None,
+        # An API-equivalent estimate, not a charge, summed over the trials that reported one.
+        cost_usd=sum(costs) if costs else None, cost_trials=len(costs),
         harbor={**{key: stats[key] for key in ('n_completed_trials', 'n_errored_trials', 'n_cancelled_trials',
                                                'n_input_tokens', 'n_cache_tokens', 'n_output_tokens')},
                 'metrics': [metric for group in stats['evals'].values() for metric in group['metrics']]},
@@ -93,12 +98,17 @@ def report(catalog: Path, sides: list[list[Path]]) -> dict:
     """Every side's rounds, and ReviewBench's round metric for each block of review cases."""
     listing = json.loads((catalog / 'catalog.json').read_text())
     expected = {name: json.loads((catalog / name / 'tests/task.json').read_text()) for name in listing['tasks']}
+    paths = [job.resolve() for jobs in sides for job in jobs]
+    if len(set(paths)) != len(paths):
+        raise ValueError('A job is one round of one side, but one is listed more than once')
     rounds = {}
     for jobs in sides:
         entries = [read_round(job, expected) for job in jobs]
-        identity = {trial['side'] for entry in entries for trial in entry['trials']} - {None}
-        if len(identity) != 1 or identity & rounds.keys():
-            raise ValueError(f'Each side needs one Daydream build and review of its own, not {sorted(identity)}')
+        # A trial without a review record names no side: it may fail in any side, but not be scored in one.
+        identity = {trial['side'] for entry in entries for trial in entry['trials']
+                    if trial['side'] is not None or trial['reward'] is not None}
+        if len(identity) != 1 or None in identity or identity & rounds.keys():
+            raise ValueError(f'Each side needs one Daydream build and review of its own, not {sorted(map(str, identity))}')
         rounds[identity.pop()] = entries
     jobs = [entry['trials'] for entries in rounds.values() for entry in entries]
     matched = set(expected).intersection(*({trial['task'] for trial in job if trial['reward'] is not None}
