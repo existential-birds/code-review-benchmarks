@@ -123,7 +123,7 @@ Together they hold 87 reference findings:
 | Judge | Claude Opus 5 through `api.anthropic.com`, for the leaderboard and the public Harbor dataset | `gpt-6.1-sol` on an OpenAI Codex subscription, through ReviewBench's own Pi SDK 0.75.5 |
 | Matching, classification and prompts | — | Unchanged |
 | Incomplete runs | Every score is withheld unless all planned trials scored | Scored trials are pooled and missing ones counted, by [`metric.py`](../benchmarks/reviewbench/metric.py) |
-| Repeated attempts | Independent rounds, reported as means and standard deviations | Pooled with the other trials |
+| Repeated attempts | Independent rounds, reported as means and standard deviations | Pooled with the job's other trials. Rounds are separate jobs, scored by ReviewBench's round metric in [`report.py`](../benchmarks/reviewbench/report.py) |
 
 ## Score equivalence
 

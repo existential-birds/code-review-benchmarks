@@ -5,7 +5,7 @@ import asyncio
 from contextlib import suppress
 import json
 import shlex
-from typing import Annotated
+from typing import Annotated, Literal
 import uuid
 
 from harbor.agents.capabilities import AgentCapabilities
@@ -16,9 +16,11 @@ from benchmarks.daydream.build import BUILD, CASE_DIR, CODEX_LOGIN_DIR
 
 
 class DaydreamOptions(InstalledAgentOptions):
-    """Keep Daydream's data-capture records in the trial's agent logs."""
+    """Keep Daydream's data-capture records in the trial's agent logs, or review
+    through its committed review under an assignment policy instead of the default review."""
 
     capture_data: Annotated[bool, Cli('--capture-data')] = False
+    assignment_policy: Annotated[Literal['broad', 'adaptive'] | None, Cli('--assignment-policy')] = None
 
 
 class DaydreamAgent(BaseInstalledAgent):
