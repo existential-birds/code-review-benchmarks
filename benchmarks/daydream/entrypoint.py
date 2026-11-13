@@ -223,7 +223,7 @@ async def review_once(*, case_dir: Path, artifacts: Path, agent_logs: Path,
     from daydream.config_file import DaydreamFileConfig
     from daydream.git_ops import StaticGitHubAuth
     from daydream.github_app import GitHubExecutionInput
-    from daydream.review_profile import resolve_harbor_profile
+    from daydream.review_profile import ResolvedProfile, build_default_profile
     from daydream.review_result import validate_terminal_result
     from daydream.run_config import FrozenAuthorDescription, RunConfig
     from daydream.runner import RunnerExecutionInput
@@ -271,7 +271,8 @@ async def review_once(*, case_dir: Path, artifacts: Path, agent_logs: Path,
                     archive=False, run_eval=False,
                     discover_github_provenance=False, base=expected['base_sha'],
                     approved_head_sha=expected['head_sha'], file_config=DaydreamFileConfig(),
-                    review_profile=resolve_harbor_profile(env={}), dump_artifacts=str(staged),
+                    review_profile=ResolvedProfile(profile=build_default_profile(), source_kind='default'),
+                    dump_artifacts=str(staged),
                     frozen_author_description=FrozenAuthorDescription(expected['head_sha'], description)
                         if description else None)
                 execution = RunnerExecutionInput(backend, GitHubExecutionInput(auth=StaticGitHubAuth(controls)),
