@@ -97,13 +97,12 @@ for one task:
 ## Compare committed review over rounds
 
 A candidate build can review through Daydream's committed review instead of its
-default review, under an assignment policy: `broad` or `adaptive`. The steps below
-compare the pinned build's default review with a candidate's committed review under
-each policy, over several rounds of ReviewBench's test set. A round is its own job,
-because Harbor pools the trials of one job.
+default review, under the `broad` assignment policy. The steps below compare the
+pinned build's default review with a candidate's committed review, over several
+rounds of ReviewBench's test set. A round is its own job, because Harbor pools the
+trials of one job.
 
-**1. Build the candidate and generate one catalog per build.** Both policies run
-from the candidate catalog.
+**1. Build the candidate and generate one catalog per build.**
 
 ```sh
 .venv/bin/python -m benchmarks.daydream.build ../daydream --candidate <commit>
@@ -124,7 +123,7 @@ without running a trial:
 
 ```sh
 .venv/bin/harbor run -c experiments/reviewbench.yaml -p artifacts/reviewbench/<candidate-catalog> \
-  -k 1 -r 0 --ak capture_data=false --ak assignment_policy=adaptive --dry-run
+  -k 1 -r 0 --ak capture_data=false --ak assignment_policy=broad --dry-run
 ```
 
 **3. Run a pilot: one review case, one trial per side.** The pinned side takes no
@@ -135,16 +134,14 @@ option and keeps the experiment file's `capture_data: true`, as in every other r
   -i <case> -k 1 -n 1 -r 0 --job-name <pilot-pinned>
 .venv/bin/harbor run -c experiments/reviewbench.yaml -p artifacts/reviewbench/<candidate-catalog> \
   -i <case> -k 1 -n 1 -r 0 --ak capture_data=false --ak assignment_policy=broad --job-name <pilot-broad>
-.venv/bin/harbor run -c experiments/reviewbench.yaml -p artifacts/reviewbench/<candidate-catalog> \
-  -i <case> -k 1 -n 1 -r 0 --ak capture_data=false --ak assignment_policy=adaptive --job-name <pilot-adaptive>
 ```
 
-Report the three jobs as in step 5, one `--side` each, and read each trial's
+Report the two jobs as in step 5, one `--side` each, and read each trial's
 status, elapsed time, usage and cost estimate before the full run. The pilot's `all`
 block is withheld, since the other review cases are missing; its one case is in
 `matched`.
 
-**4. Run every round of every side as a fresh job.** Drop `-i <case>` from the three
+**4. Run every round of every side as a fresh job.** Drop `-i <case>` from the two
 commands above, choose the concurrency with `-n`, and give every job its own name.
 Keep `-k 1` and `-r 0`: a failed trial stays failed in its round.
 
@@ -153,23 +150,22 @@ Keep `-k 1` and `-r 0`: a failed trial stays failed in its round.
 ```sh
 .venv/bin/python -m benchmarks.reviewbench.report --catalog artifacts/reviewbench/<pinned-catalog> \
   --side jobs/<pinned-1> jobs/<pinned-2> jobs/<pinned-3> \
-  --side jobs/<broad-1> jobs/<broad-2> jobs/<broad-3> \
-  --side jobs/<adaptive-1> jobs/<adaptive-2> jobs/<adaptive-3> > <report>.json
+  --side jobs/<broad-1> jobs/<broad-2> jobs/<broad-3> > <report>.json
 ```
 
 ### What a committed-review trial does
 
-The review runs under Daydream's default profile with the requested policy. It
-writes the findings file and `execution.json` in the default review's format.
-Without the option nothing changes.
+The review runs under Daydream's default profile, unchanged. It writes the findings
+file and `execution.json` in the default review's format. Without the option nothing
+changes.
 
 A trial fails, and never falls back to the default review, when:
 
 - Harbor is given any other policy name.
-- The build can't run the requested review. The pinned 0.34.0 has no assignment
-  policy.
+- The build can't run committed review.
 - Committed review refuses, or doesn't install its output.
-- The sealed result names another policy or profile digest than the one requested.
+- The sealed result names another policy than `broad`, or another profile digest
+  than the default profile's.
 - Data capture is requested with it.
 
 Each finding is sent as its title and claim, then its trigger, consequence and
@@ -233,16 +229,13 @@ Harbor token counts and no cost, because the figure is an estimate and not a cha
 so the report sums the estimate from each trial's `execution.json`.
 
 Scores are ReviewBench's unchanged round metric: every round, then the mean and
-standard deviation over the rounds. They come in three blocks, each naming its
+standard deviation over the rounds. They come in two blocks, each naming its
 review cases under `blocks`:
 
 - **`all`**: every review case in the catalog. As in ReviewBench, one unscored
   trial withholds its round's ratios and every average.
 - **`matched`**: a reduced set, only the review cases that every job of every side
   scored.
-- **`decomposed`**: a reduced set, only the matched review cases that every adaptive
-  review split into assignments. An adaptive review that ran as one assignment isn't
-  an adaptive data point.
 
 The report adds no score, weight or threshold, and doesn't rank the sides.
 

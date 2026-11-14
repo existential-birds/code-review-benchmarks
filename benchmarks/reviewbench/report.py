@@ -28,7 +28,6 @@ BLOCKS = {
     'all': "Every review case in the catalog, as ReviewBench scores rounds: one unscored trial "
            "withholds its round's ratios and every average.",
     'matched': 'A reduced set: only the review cases that every job of every side scored.',
-    'decomposed': 'A reduced set: only the matched review cases that every adaptive review split into assignments.',
 }
 
 
@@ -113,10 +112,7 @@ def report(catalog: Path, sides: list[list[Path]]) -> dict:
     jobs = [entry['trials'] for entries in rounds.values() for entry in entries]
     matched = set(expected).intersection(*({trial['task'] for trial in job if trial['reward'] is not None}
                                            for job in jobs))
-    adaptive = [trial for job in jobs for trial in job if (trial['assignment_policy'] or {}).get('name') == 'adaptive']
-    # An adaptive review that ran as one assignment is no adaptive data point.
-    tasks = {'all': set(expected), 'matched': matched, 'decomposed': matched & {trial['task'] for trial in adaptive} - {
-        trial['task'] for trial in adaptive if not trial['assignment_policy']['decomposed']}}
+    tasks = {'all': set(expected), 'matched': matched}
     return dict(
         catalog={key: listing[key] for key in ('reviewbench_revision', 'split', 'judge')},
         blocks={name: dict(meaning=meaning, tasks=sorted(tasks[name])) for name, meaning in BLOCKS.items()},

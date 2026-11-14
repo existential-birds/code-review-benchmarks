@@ -20,7 +20,7 @@ class DaydreamOptions(InstalledAgentOptions):
     through its committed review under an assignment policy instead of the default review."""
 
     capture_data: Annotated[bool, Cli('--capture-data')] = False
-    assignment_policy: Annotated[Literal['broad', 'adaptive'] | None, Cli('--assignment-policy')] = None
+    assignment_policy: Annotated[Literal['broad'] | None, Cli('--assignment-policy')] = None
 
 
 class DaydreamAgent(BaseInstalledAgent):
