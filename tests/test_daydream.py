@@ -192,7 +192,7 @@ def test_invalid_codex_login_stops_review_before_inference(review_case, monkeypa
 
 
 @pytest.mark.parametrize('failure', ['missing', 'nonzero', 'incomplete', 'exception', 'cancelled', 'changed', 'created',
-                                     'no-policy-in-build', 'committed-capture', 'committed-refused',
+                                     'committed-capture', 'committed-refused',
                                      'committed-other-policy', 'committed-other-profile', 'committed-uninstalled',
                                      'committed-incomplete', 'committed-other-revision', 'committed-created',
                                      'committed-moved', 'committed-no-trajectory', 'committed-raised',
@@ -220,16 +220,9 @@ def test_unsuccessful_invocation_retains_evidence_without_findings(review_case, 
     monkeypatch.setattr(runner, 'run', inference)
     # A requested committed review that cannot run as asked fails the trial; the
     # default review above stays installed and must never stand in for it.
-    committed = failure.startswith(('no-policy', 'committed'))
-    @dataclass(frozen=True)
-    class Pipeline:
-        assignment_policy: str = 'broad'
-    @dataclass(frozen=True)
-    class PinnedPipeline:
-        """The pinned 0.34.0 build's pipeline has no assignment policy."""
+    committed = failure.startswith('committed')
     @dataclass(frozen=True)
     class Profile:
-        pipeline: object = PinnedPipeline() if failure == 'no-policy-in-build' else Pipeline()
         digest = 'requested digest'
     reviews = []
     async def review(request):
@@ -256,13 +249,13 @@ def test_unsuccessful_invocation_retains_evidence_without_findings(review_case, 
         installed = failure != 'committed-uninstalled'
         return CommittedReviewResult(json.dumps({'run_id': terminal['run_id'], 'terminal_result': terminal,
             'assignments': [], 'findings': [], 'settings': {
-                'assignment_policy': {'name': 'broad' if failure == 'committed-other-policy' else 'adaptive'},
+                'assignment_policy': {'name': 'another' if failure == 'committed-other-policy' else 'broad'},
                 'profile_digest': 'another digest' if failure == 'committed-other-profile' else 'requested digest'}}),
             installed, 'complete' if installed else 'partial', output_error=None if installed else 'TimeoutError')
     if committed:
         monkeypatch.setattr(review_profile, 'build_default_profile', Profile)
         monkeypatch.setattr(committed_review, 'run_committed_review', review)
-    assert run_case(case, **({'assignment_policy': 'adaptive', 'capture_data': failure == 'committed-capture'}
+    assert run_case(case, **({'assignment_policy': 'broad', 'capture_data': failure == 'committed-capture'}
                              if committed else {})) != 0
     assert not (case.artifacts / 'findings.json').exists()
     proof = json.loads((case.artifacts / 'daydream/execution.json').read_text())
@@ -271,13 +264,11 @@ def test_unsuccessful_invocation_retains_evidence_without_findings(review_case, 
     assert proof['usage'].get('prompt_tokens') == (None if failure == 'missing' or committed else 120)
     # The run's trajectory is kept whenever the review left one, also when it raised afterwards.
     assert (case.logs / 'trajectory.json').is_file() is (failure not in (
-        'no-policy-in-build', 'committed-capture', 'committed-refused', 'committed-no-trajectory',
-        'committed-run-path'))
+        'committed-capture', 'committed-refused', 'committed-no-trajectory', 'committed-run-path'))
     if committed:
-        # Neither a build without the policy nor a capture request reaches a model. A review
-        # that ran passes the same checks as the default review before its findings count.
+        # A capture request reaches no model. A review that ran passes the same checks as the
+        # default review before its findings count.
         reviewed, exit_code, diagnostic = {
-            'no-policy-in-build': (0, None, "got an unexpected keyword argument 'assignment_policy'"),
             'committed-capture': (0, None, 'capture_data=false'),
             'committed-refused': (1, None, 'Daydream raised ValueError'),
             'committed-other-policy': (1, 0, 'another policy or profile'),
@@ -290,7 +281,7 @@ def test_unsuccessful_invocation_retains_evidence_without_findings(review_case, 
             'committed-no-trajectory': (1, 0, 'Trajectory unavailable'),
             'committed-raised': (1, None, 'Daydream raised RuntimeError'),
             'committed-run-path': (1, None, 'Daydream raised ValueError')}[failure]
-        assert (len(reviews), proof['runner_exit_code'], proof['assignment_policy']) == (reviewed, exit_code, 'adaptive')
+        assert (len(reviews), proof['runner_exit_code'], proof['assignment_policy']) == (reviewed, exit_code, 'broad')
         assert diagnostic in ' '.join(proof['diagnostics'])
         if failure == 'committed-uninstalled':
             # The record says what the sealed result reported, not what a success would have.
@@ -299,7 +290,7 @@ def test_unsuccessful_invocation_retains_evidence_without_findings(review_case, 
 
 
 @pytest.mark.parametrize('outcome,capture_data,assignment_policy', [(0, False, None), (0, True, None),
-    (0, False, 'adaptive'), (7, False, None), ('cancelled', False, None), ('cancelled_download', False, None),
+    (0, False, 'broad'), (7, False, None), ('cancelled', False, None), ('cancelled_download', False, None),
     ('cancelled_receipt', False, None)])
 def test_installed_agent_requires_process_success_and_populates_usage(tmp_path, outcome, capture_data, assignment_policy):
     from benchmarks.daydream.agent import DaydreamAgent
@@ -337,8 +328,8 @@ def test_installed_agent_requires_process_success_and_populates_usage(tmp_path, 
     logs.mkdir()
     agent = DaydreamAgent(logs_dir=logs, capture_data=capture_data, assignment_policy=assignment_policy)
     # Harbor refuses a policy the option does not name, before any trial starts.
-    with pytest.raises(ValueError, match="assignment_policy.*'broad' or 'adaptive'"):
-        DaydreamAgent(logs_dir=logs, assignment_policy='adaptve')
+    with pytest.raises(ValueError, match="assignment_policy.*should be 'broad'"):
+        DaydreamAgent(logs_dir=logs, assignment_policy='adaptive')
     context = AgentContext()
     async def run():
         await agent.run('review the pinned comparison', environment, context)
@@ -352,7 +343,7 @@ def test_installed_agent_requires_process_success_and_populates_usage(tmp_path, 
         asyncio.run(run())
     assert len(environment.invocations) == 1
     assert ('--capture-data' in environment.invocations[0]) is capture_data
-    assert ('--assignment-policy adaptive' in environment.invocations[0]) is (assignment_policy == 'adaptive')
+    assert ('--assignment-policy broad' in environment.invocations[0]) is (assignment_policy == 'broad')
     request = environment.uploads['/logs/artifacts/daydream/request.json']
     receipt = environment.uploads['/logs/artifacts/daydream/host-receipt.json']
     assert receipt['invocation_id'] == request['invocation_id']
@@ -462,24 +453,25 @@ def test_sigterm_waits_for_finalization_and_flushes_partial_recorders(monkeypatc
     monkeypatch.setattr(trajectory, 'flush_active_signal_recorders', lambda: observed.append('flushed'))
     async def run():
         asyncio.get_running_loop().call_soon(os.kill, os.getpid(), signal.SIGTERM)
-        return await entrypoint._main(str(uuid.uuid4()), True, 'adaptive')
+        return await entrypoint._main(str(uuid.uuid4()), True, 'broad')
     assert asyncio.run(run()) == 130
     assert observed == ['flushed', 'finalized']
     # The reviewer's options reach that review, and reach it from the module's command line.
-    assert (options['capture_data'], options['assignment_policy']) == (True, 'adaptive')
-    monkeypatch.setattr(sys, 'argv', ['entrypoint', '--invocation', 'issued', '--capture-data', '--assignment-policy', 'adaptive'])
+    assert (options['capture_data'], options['assignment_policy']) == (True, 'broad')
+    monkeypatch.setattr(sys, 'argv', ['entrypoint', '--invocation', 'issued', '--capture-data', '--assignment-policy', 'broad'])
     monkeypatch.setattr(asyncio, 'run', lambda main: (dict(main.cr_frame.f_locals), main.close())[0])
     with pytest.raises(SystemExit) as exited:
         runpy.run_path(entrypoint.__file__, run_name='__main__')
-    assert exited.value.code == {'invocation': 'issued', 'capture_data': True, 'assignment_policy': 'adaptive'}
+    assert exited.value.code == {'invocation': 'issued', 'capture_data': True, 'assignment_policy': 'broad'}
 
 
-@pytest.mark.parametrize('assignment_policy', [None, 'broad', 'adaptive'])
-def test_reviewbench_format_sends_line_findings_and_counts_file_level_ones(review_case, monkeypatch, assignment_policy):
+@pytest.mark.parametrize('review', [None, 'broad', 'no-policy-in-build'])
+def test_reviewbench_format_sends_line_findings_and_counts_file_level_ones(review_case, monkeypatch, review):
     from dataclasses import dataclass, field
     from daydream import committed_review, review_profile, runner
     from daydream.committed_review_model import CommittedReviewResult
     case = review_case
+    assignment_policy = review and 'broad'
     pr = {'repo': 'https://github.com/owner/project', 'pr_number': 17, 'base': BASE, 'head': HEAD}
     output = case.artifacts / 'out/findings.json'
     (case.inputs / 'case.json').write_text(json.dumps({'format': 'reviewbench', 'repository': str(case.repo),
@@ -494,16 +486,19 @@ def test_reviewbench_format_sends_line_findings_and_counts_file_level_ones(revie
         (stage / 'trajectory.json').write_text(json.dumps({'session_id': str(uuid.uuid4())}))
         review_result_handler(finalized(case, items))
         return 0
-    # The pinned build has no assignment policy, so a stand-in default profile carries one.
+    # Stand-in default profiles, with an assignment policy field and from a build without one.
     @dataclass(frozen=True)
     class Pipeline:
         assignment_policy: str = 'broad'
     @dataclass(frozen=True)
+    class PolicylessPipeline:
+        pass
+    @dataclass(frozen=True)
     class Profile:
-        pipeline: Pipeline = field(default_factory=Pipeline)
-        digest = property(lambda self: 'digest of ' + self.pipeline.assignment_policy)
-    sealed_policy = {'name': assignment_policy, 'decomposed': assignment_policy == 'adaptive', 'planned_assignments': 2}
-    cost, other_run = .25 if assignment_policy == 'broad' else None, '00000000-0000-4000-8000-000000000000'
+        pipeline: object = field(default_factory=PolicylessPipeline if review == 'no-policy-in-build' else Pipeline)
+        digest = 'default digest'
+    sealed_policy = {'name': assignment_policy, 'decomposed': review == 'no-policy-in-build', 'planned_assignments': 2}
+    cost, other_run = .25 if review == 'broad' else None, '00000000-0000-4000-8000-000000000000'
     def reference(side, lines, path='file.php'):
         """A source reference as Daydream seals it; a continuation's has a fragment in place of a line range."""
         return {'path': path, 'side': side, 'role': 'assigned', 'basis': 'source_inspection',
@@ -517,8 +512,7 @@ def test_reviewbench_format_sends_line_findings_and_counts_file_level_ones(revie
         assert (request.source, request.base, request.local) == (case.repo, BASE, False)
         assert config.backend == 'codex' and config.output_mode == 'review' and config.flow_name is None
         assert not config.dataset_capture and config.dump_artifacts is None and config.file_config.phases == {}
-        assert config.review_profile.profile.pipeline.assignment_policy == assignment_policy
-        assert config.review_profile.source_kind == {'broad': 'default', 'adaptive': 'explicit'}[assignment_policy]
+        assert (config.review_profile.profile, config.review_profile.source_kind) == (Profile(), 'default')
         # Committed review builds its Codex input from the process environment.
         assert (Path(os.environ['CODEX_HOME']) / 'auth.json').resolve() == case.inputs / 'credential-store/auth.json'
         assert 'OPENAI_API_KEY' not in os.environ
@@ -576,9 +570,10 @@ def test_reviewbench_format_sends_line_findings_and_counts_file_level_ones(revie
     if assignment_policy:
         assert proof['runner_exit_code'] == 0 and proof['committed_review'] == {
             'output_installed': True, 'capture_state': 'complete', 'output_error': None,
-            'assignment_policy': sealed_policy, 'profile_digest': 'digest of ' + assignment_policy}
-        assert profile['digest'] == 'digest of ' + assignment_policy
-        assert profile['profile'] == {'pipeline': {'assignment_policy': assignment_policy}}
+            'assignment_policy': sealed_policy, 'profile_digest': 'default digest'}
+        assert profile['digest'] == 'default digest'
+        assert profile['profile'] == {'pipeline': {} if review == 'no-policy-in-build' else {
+            'assignment_policy': 'broad'}}
         # Usage comes from the sealed run's trajectory totals; an unknown cost stays absent.
         assert proof['usage'] == {'prompt_tokens': 120, 'cached_tokens': 70, 'completion_tokens': 11} | (
             {'cost_usd': cost} if cost else {})

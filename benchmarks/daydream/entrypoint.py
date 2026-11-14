@@ -9,7 +9,7 @@ import argparse
 import asyncio
 import base64
 from contextlib import contextmanager
-from dataclasses import asdict, replace
+from dataclasses import asdict
 import hashlib
 import importlib.metadata
 import json
@@ -279,7 +279,7 @@ async def review_once(*, case_dir: Path, artifacts: Path, agent_logs: Path,
     """Run the complete pipeline once; write findings only if it finishes cleanly.
 
     With an assignment policy the review is Daydream's committed review under its
-    default profile with that policy. A build that can't run it fails the trial.
+    default profile, which must run that policy. A build that can't run it fails the trial.
     """
     from daydream import git_ops, runner
     from daydream.backends import BackendExecutionInput
@@ -331,10 +331,7 @@ async def review_once(*, case_dir: Path, artifacts: Path, agent_logs: Path,
                   _codex_home(credential_home, private) as role_home):
                 controls['CODEX_HOME'] = str(role_home)
                 backend = BackendExecutionInput.from_environment(controls, backend='codex')
-                default = profile = build_default_profile()
                 if committed:
-                    # A build whose profile has no assignment policy, such as 0.34.0, fails here.
-                    profile = replace(default, pipeline=replace(default.pipeline, assignment_policy=assignment_policy))
                     # Committed review publishes into the reviewed checkout and takes no other destination.
                     staged = repository / '.daydream'
                 config = RunConfig(target=str(repository), backend='codex', output_mode='review',
@@ -344,8 +341,7 @@ async def review_once(*, case_dir: Path, artifacts: Path, agent_logs: Path,
                     archive=False, run_eval=False,
                     discover_github_provenance=False, base=expected['base_sha'],
                     approved_head_sha=expected['head_sha'], file_config=DaydreamFileConfig(),
-                    review_profile=ResolvedProfile(profile=profile,
-                        source_kind='default' if profile == default else 'explicit'),
+                    review_profile=ResolvedProfile(profile=build_default_profile(), source_kind='default'),
                     dump_artifacts=None if committed else str(staged),
                     frozen_author_description=FrozenAuthorDescription(expected['head_sha'], description)
                         if description else None)
@@ -449,7 +445,7 @@ if __name__ == '__main__':
                       help="Record the task image's comparison in its case directory")
     parser.add_argument('--capture-data', action='store_true',
                         help="Keep Daydream's JSONL data capture in the trial's agent logs")
-    parser.add_argument('--assignment-policy', choices=('broad', 'adaptive'),
+    parser.add_argument('--assignment-policy', choices=('broad',),
                         help="Review through Daydream's committed review under this assignment policy")
     args = parser.parse_args()
     if args.freeze_comparison:
