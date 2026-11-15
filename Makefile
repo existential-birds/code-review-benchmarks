@@ -16,12 +16,16 @@ export REVIEWER_CODEX_AUTH_DIR JUDGE_PI_AUTH_DIR
 CASE ?= bluewave-labs-checkmate-1897
 QUICKSTART := artifacts/aacr/quickstart/$(CASE)
 SRC := .cache/src
+# What a generated task holds besides the pinned sources.
+SUITE := $(shell git ls-files benchmarks)
 PY := .venv/bin/python
 SETUP := .venv/.setup
 
-# $(call fetch,<repository>,<commit>,<folder>): a clean checkout of one commit.
+# $(call fetch,<repository>,<commit>,<name>): a clean checkout of one commit in $(SRC)/<name>.
+# It drops the stamps of earlier commits, which the checkout no longer holds.
 define fetch
-rm -rf $(3) && git init -q $(3) && git -C $(3) fetch -q --depth 1 $(1) $(2) && git -C $(3) checkout -q FETCH_HEAD
+rm -rf $(SRC)/$(3) $(SRC)/.$(3)-* && git init -q $(SRC)/$(3) && git -C $(SRC)/$(3) fetch -q --depth 1 $(1) $(2) \
+	&& git -C $(SRC)/$(3) checkout -q FETCH_HEAD
 endef
 
 help:
@@ -54,7 +58,7 @@ prereqs:
 	@test -f "$(REVIEWER_CODEX_AUTH_DIR)/auth.json" || { echo 'No Codex login in $(REVIEWER_CODEX_AUTH_DIR): run codex login, or set REVIEWER_CODEX_AUTH_DIR.'; exit 1; }
 	@test -f "$(JUDGE_PI_AUTH_DIR)/auth.json" || { echo 'No Pi login in $(JUDGE_PI_AUTH_DIR): run /login in Pi, or set JUDGE_PI_AUTH_DIR.'; exit 1; }
 
-$(QUICKSTART)/catalog.json: $(SETUP) $(SRC)/.aacr-bench-$(AACR_COMMIT)
+$(QUICKSTART)/catalog.json: $(SETUP) $(SRC)/.aacr-bench-$(AACR_COMMIT) $(SUITE)
 	rm -rf $(QUICKSTART)
 	$(PY) -m benchmarks.aacr.convert --upstream $(SRC)/aacr-bench --output $(QUICKSTART) --task $(CASE)
 
@@ -69,14 +73,14 @@ $(SETUP): benchmarks/daydream/build.json pyproject.toml benchmarks/pi/package-lo
 	touch $@
 
 $(SRC)/.daydream-$(DAYDREAM_COMMIT):
-	$(call fetch,https://github.com/existential-birds/daydream,$(DAYDREAM_COMMIT),$(SRC)/daydream)
+	$(call fetch,https://github.com/existential-birds/daydream,$(DAYDREAM_COMMIT),daydream)
 	touch $@
 
 $(SRC)/.aacr-bench-$(AACR_COMMIT):
-	$(call fetch,https://github.com/alibaba/aacr-bench,$(AACR_COMMIT),$(SRC)/aacr-bench)
+	$(call fetch,https://github.com/alibaba/aacr-bench,$(AACR_COMMIT),aacr-bench)
 	touch $@
 
 $(SRC)/.ReviewBench-$(REVIEWBENCH_COMMIT):
-	$(call fetch,https://github.com/review-bench/ReviewBench,$(REVIEWBENCH_COMMIT),$(SRC)/ReviewBench)
+	$(call fetch,https://github.com/review-bench/ReviewBench,$(REVIEWBENCH_COMMIT),ReviewBench)
 	npm ci --prefix $(SRC)/ReviewBench
 	touch $@
