@@ -152,7 +152,11 @@ The viewer shows jobs, trials, scores, trajectories and artifacts. On disk, unde
 - `result.json` holds completion counts, errors and the pooled metric.
 - `<trial>/result.json` and `<trial>/exception.txt` hold the trial's outcome.
 - `<trial>/agent/execution.json` holds Daydream's terminal state, usage and retained
-  findings. `daydream.stdout.log` shows why a review ended incomplete.
+  findings, each with its severity. `daydream.stdout.log` shows why a review ended
+  incomplete.
+- `<trial>/agent/daydream/runs/<run>/deep/committed-review.json` is the committed
+  review's sealed result: every claim, its source references and the settings the
+  review ran under.
 - `<trial>/agent/dataset/runs/*.jsonl` holds Daydream's captured run record.
 - `<trial>/verifier/` holds rewards, verdicts and full judge responses.
 

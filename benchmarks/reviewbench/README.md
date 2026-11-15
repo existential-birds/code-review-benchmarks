@@ -29,7 +29,7 @@ leaves the pooled counts, so read scores alongside it. A complete review with no
 findings is scored. ReviewBench's own metric withholds every score unless all
 planned trials scored; this one reports the scored trials instead. Repeated attempts
 (`-k`) pool together instead of forming ReviewBench's separate rounds; to score
-rounds, [run each as its own job](#compare-committed-review-over-rounds).
+rounds, [run each as its own job](#compare-builds-over-rounds).
 
 **These scores aren't comparable with ReviewBench's leaderboard or its public Harbor
 dataset**, both of which use a Claude Opus 5 judge. Here the judge is `gpt-6.1-sol`
@@ -39,8 +39,13 @@ on an OpenAI Codex subscription, so compare only runs of this suite. See
 ReviewBench wants a line in the pull request's head for every finding. Daydream
 findings about a whole file have none, so they're left out and counted as
 `omitted_findings` in each trial's `agent/execution.json` and metadata. So is a
-[committed review](#compare-committed-review-over-rounds) finding whose only location
-is on the old side of the change: a line the pull request removed isn't in the head.
+finding whose only location is on the old side of the change: Daydream places it on
+the file, since a line the pull request removed isn't in the head.
+
+The pinned reviewer is Daydream's committed review. Each finding is sent as its title,
+then its claim, trigger, consequence and supporting grounds, labelled as in Daydream's
+own report. ReviewBench's findings have no severity field, so the severity Daydream
+rates each finding with stays in `execution.json`'s `retained_findings`.
 
 ## Setup
 
@@ -94,13 +99,11 @@ for one task:
   -p artifacts/reviewbench/<fresh-catalog> -l 1
 ```
 
-## Compare committed review over rounds
+## Compare builds over rounds
 
-A candidate build can review through Daydream's committed review instead of its
-default review, under the `broad` assignment policy. The steps below compare the
-pinned build's default review with a candidate's committed review, over several
-rounds of ReviewBench's test set. A round is its own job, because Harbor pools the
-trials of one job.
+The steps below compare the pinned build with a candidate build over several rounds
+of ReviewBench's test set. A round is its own job, because Harbor pools the trials of
+one job.
 
 **1. Build the candidate and generate one catalog per build.**
 
@@ -112,94 +115,58 @@ trials of one job.
   --build .cache/daydream-candidates/<commit>/build.json --output artifacts/reviewbench/<candidate-catalog>
 ```
 
-Generate both catalogs from this revision of the suite. Every task image holds a copy
-of the reviewer entrypoint, and one generated before the policy option existed fails
-every committed-review trial.
+Generate both catalogs from this revision of the suite, since every task image holds a
+copy of the reviewer entrypoint.
 
-**2. Check the options before spending anything.** A committed-review job passes the
-policy and turns off data capture, which committed review doesn't keep. Harbor's
-`--dry-run` validates the composed agent options, including the policy's name,
-without running a trial:
-
-```sh
-.venv/bin/harbor run -c experiments/reviewbench.yaml -p artifacts/reviewbench/<candidate-catalog> \
-  -k 1 -r 0 --ak capture_data=false --ak assignment_policy=broad --dry-run
-```
-
-**3. Run a pilot: one review case, one trial per side.** The pinned side takes no
-option and keeps the experiment file's `capture_data: true`, as in every other run.
+**2. Run a pilot: one review case, one trial per side.**
 
 ```sh
 .venv/bin/harbor run -c experiments/reviewbench.yaml -p artifacts/reviewbench/<pinned-catalog> \
   -i <case> -k 1 -n 1 -r 0 --job-name <pilot-pinned>
 .venv/bin/harbor run -c experiments/reviewbench.yaml -p artifacts/reviewbench/<candidate-catalog> \
-  -i <case> -k 1 -n 1 -r 0 --ak capture_data=false --ak assignment_policy=broad --job-name <pilot-broad>
+  -i <case> -k 1 -n 1 -r 0 --job-name <pilot-candidate>
 ```
 
-Report the two jobs as in step 5, one `--side` each, and read each trial's
+Report the two jobs as in step 4, one `--side` each, and read each trial's
 status, elapsed time, usage and cost estimate before the full run. The pilot's `all`
 block is withheld, since the other review cases are missing; its one case is in
 `matched`.
 
-**4. Run every round of every side as a fresh job.** Drop `-i <case>` from the two
+**3. Run every round of every side as a fresh job.** Drop `-i <case>` from the two
 commands above, choose the concurrency with `-n`, and give every job its own name.
 Keep `-k 1` and `-r 0`: a failed trial stays failed in its round.
 
-**5. Report every side's jobs, in round order:**
+**4. Report every side's jobs, in round order:**
 
 ```sh
 .venv/bin/python -m benchmarks.reviewbench.report --catalog artifacts/reviewbench/<pinned-catalog> \
   --side jobs/<pinned-1> jobs/<pinned-2> jobs/<pinned-3> \
-  --side jobs/<broad-1> jobs/<broad-2> jobs/<broad-3> > <report>.json
+  --side jobs/<candidate-1> jobs/<candidate-2> jobs/<candidate-3> > <report>.json
 ```
 
-### What a committed-review trial does
+### What a trial keeps
 
-The review runs under Daydream's default profile, unchanged. It writes the findings
-file and `execution.json` in the default review's format. Without the option nothing
-changes.
+The review runs under Daydream's default profile, unchanged, and is given the pull
+request's title and body as untrusted context, which the sealed result records in
+`settings.historical_context`. Daydream refuses a title and body over 65,536 bytes,
+measured as it encodes them for the reviewer, and that fails the trial.
 
-A trial fails, and never falls back to the default review, when:
+`execution.json` records the profile's digest in
+`resolved_configuration.review_profile`, and in `committed_review.assignment_policy`
+how the sealed result assigned the review, including whether it `decomposed` into
+assignments.
 
-- Harbor is given any other policy name.
-- The build can't run committed review.
-- Committed review refuses, or doesn't install its output.
-- The sealed result names another policy than `broad`, or another profile digest
-  than the default profile's.
-- Data capture is requested with it.
-
-Each finding is sent as its title and claim, then its trigger, consequence and
-supporting grounds, labelled as in Daydream's own report. A finding without a line
-in the head is left out and counted in `omitted_findings`: one about a whole file,
-and one whose source references place its line only on the old side of the change.
-
-Committed review is given the pull request's title and body as untrusted context,
-as the default review is, from the Daydream build that passes it on; older candidate
-builds ignore it. The sealed result shows what a review was given in
-`settings.historical_context`. Unlike the default review, committed review refuses a
-title and body over a bound of 65,536 bytes, measured as Daydream encodes them for
-the reviewer, and that fails the trial.
-
-`execution.json` records the requested `assignment_policy`, the profile's digest in
-`resolved_configuration.review_profile`, and in `committed_review` what the sealed
-result ran under: its profile digest and its policy, including whether the review
-`decomposed` into assignments. There `runner_exit_code` is 0 when committed review
-installed its output, and `usage` has no `total_tokens`.
-
-The evidence under `agent/daydream/` differs from the default review's:
-
-- `committed-review.json` is the sealed result: every claim, its source references
-  and the settings the review ran under.
-- `deep/stage-inputs/committed/` holds the reviewed diff and its hunk index.
-- `runs/<run>/trajectory.json` is the run's trajectory, also copied to
-  `agent/trajectory.json`. A decomposed review adds one trajectory per assignment
-  under `runs/<run>/trajectories/`.
+The evidence under `agent/daydream/runs/<run>/` is Daydream's artifact dump. Its
+`deep/committed-review.json` is the sealed result: every claim, its source references
+and the settings the review ran under. The run's trajectory is also copied to
+`agent/trajectory.json`.
 
 ### What the report holds
 
 [`report.py`](report.py) prints one JSON object. A side is named from what its
-trials recorded, never from a label: `<Daydream commit>/<policy>`, or
-`<Daydream commit>/review` for the default review. The report refuses:
+trials recorded, never from a label: `<Daydream commit>/review`, or
+`<Daydream commit>/<policy>` for a job from a suite revision that had the
+`assignment_policy` option. The report refuses:
 
 - A side whose jobs mix builds or reviews, or hold a scored trial that left no review
   record, such as an oracle job's.
@@ -219,7 +186,7 @@ Each round lists its trials and counts them:
 | `incomplete`, `failed` | Reviews that didn't finish their analysis, and every other trial |
 | `evaluated` | Scored trials. By ReviewBench's own rule, a trial isn't scored if it raised, never finished, was verified outside a separate environment or had a failed step |
 | `conversion_limited`, `omitted_findings` | Trials with a finding left out for want of a head line, and those findings |
-| `decomposed` | Committed reviews that split into assignments |
+| `decomposed` | Reviews whose sealed result split into assignments |
 
 `elapsed_seconds` sums the review time the trials recorded. `cost_usd` sums the
 API-equivalent estimates of the `cost_trials` trials that reported one, and is null

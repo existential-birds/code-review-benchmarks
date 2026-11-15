@@ -12,7 +12,8 @@ comparable with either benchmark's published results, because the judge differs;
 see [score equivalence](docs/citing.md#score-equivalence).
 
 Every benchmark runs the one Daydream build pinned in
-[`benchmarks/daydream/build.json`](benchmarks/daydream/build.json). To measure another
+[`benchmarks/daydream/build.json`](benchmarks/daydream/build.json). The pinned reviewer
+is Daydream's committed review, its only reviewer since 0.35.0. To measure another
 version, change that file, rebuild and regenerate the catalogs; Harbor refuses to run
 a task generated for a different pin. To score an unreleased commit without changing
 the pin, build it with `--candidate <commit>` and pass the `build.json` it prints to a
