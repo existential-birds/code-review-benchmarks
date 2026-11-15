@@ -96,7 +96,7 @@ Together they hold 87 reference findings:
 | Area | AACR-Bench | This suite |
 |---|---|---|
 | Execution | AACR's own pipeline | One [Harbor](https://github.com/harbor-framework/harbor) task per pull request, named from its URL |
-| Reviewer | OpenCodeReview, Claude Code or Codex | Daydream's complete review pipeline. Findings use AACR's Codex result shape, and file-level findings without a line are kept |
+| Reviewer | OpenCodeReview, Claude Code or Codex | Daydream's committed review under its default profile. Findings use AACR's Codex result shape, and file-level findings without a line are kept |
 | Judge | Any model behind an OpenAI-compatible API, set by `JUDGE_MODEL` | `gpt-6.1-sol` on an OpenAI Codex subscription, called through the Pi SDK 1.5.0 |
 | Judge request | `temperature=0`, `top_p=0.95`, `max_tokens=3000`, thinking off | None of those are sent; the provider's defaults apply |
 | Judge failure | Logged and counted as no match | The trial fails with no score |
@@ -117,7 +117,7 @@ Together they hold 87 reference findings:
 | Area | ReviewBench | This suite |
 |---|---|---|
 | Tasks | Written by its `scripts/harbor/export.ts` | The same exporter's tasks, with Daydream in the review image and the judge pointed at a Pi login |
-| Reviewer | Any agent that writes its findings file | Daydream's complete review pipeline. Findings without a line in the head are left out and counted |
+| Reviewer | Any agent that writes its findings file | Daydream's committed review under its default profile. Findings without a line in the head are left out and counted |
 | Review network | Public model API hosts | `chatgpt.com` and `auth.openai.com`, for Codex's subscription login |
 | Review timeout | 900 seconds | 5,400 seconds |
 | Judge | Claude Opus 5 through `api.anthropic.com`, for the leaderboard and the public Harbor dataset | `gpt-6.1-sol` on an OpenAI Codex subscription, through ReviewBench's own Pi SDK 0.75.5 |

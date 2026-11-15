@@ -3,8 +3,9 @@
 Measures how well [Daydream](https://github.com/existential-birds/daydream) reviews
 code, so we can tell whether a new version or configuration is actually better.
 Each pull request in a benchmark becomes a [Harbor](https://github.com/harbor-framework/harbor)
-task: Daydream reviews it in a sandbox, then a separate judge matches the findings
-against human-reviewed reference findings. The benchmarks are
+task: Daydream's committed review, its only reviewer since 0.35.0, reviews it in a
+sandbox, then a separate judge matches the findings against human-reviewed reference
+findings. The benchmarks are
 [AACR-Bench](benchmarks/aacr/README.md) and [ReviewBench](benchmarks/reviewbench/README.md).
 
 Scores are precision, recall and their F1, pooled across review cases. They aren't

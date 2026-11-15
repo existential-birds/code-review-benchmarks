@@ -1,6 +1,6 @@
 # AACR
 
-Measures Daydream's complete review pipeline against
+Measures Daydream's committed review, its only reviewer since 0.35.0, against
 [Alibaba AACR-Bench](https://github.com/alibaba/aacr-bench), a catalog of 196
 pull requests with 1,506 human-annotated review comments. Each pull request
 becomes a [Harbor](https://github.com/harbor-framework/harbor) task: Daydream
@@ -88,7 +88,7 @@ and `holdout` 54 of 59, and both also exit 1.
 ## Run
 
 Run from the repository root. [`experiments/aacr-baseline.yaml`](../../experiments/aacr-baseline.yaml)
-holds the shared settings: Daydream's default review configuration, the protected
+holds the shared settings: Daydream's default review profile, the protected
 verifier, the metric, data capture and zero retries.
 
 ```sh
@@ -155,6 +155,8 @@ The viewer shows jobs, trials, scores, trajectories and artifacts. On disk, unde
 - `<trial>/result.json` and `<trial>/exception.txt` hold the trial's outcome.
 - `<trial>/agent/execution.json` holds Daydream's terminal state, usage and retained
   findings. `daydream.stdout.log` shows why a review ended incomplete.
+- `<trial>/agent/daydream/runs/<run>/deep/committed-review.json` is the sealed review:
+  every claim, its source references and the settings it ran under.
 - `<trial>/agent/dataset/runs/*.jsonl` holds Daydream's captured run record.
 - `<trial>/verifier/` holds rewards, verdicts and full judge responses.
 
