@@ -4,18 +4,9 @@ Open an issue before starting a change, so we can agree on the approach first.
 
 ## Setup
 
-Follow the [quick start](README.md#quick-start) to install the suite, then add the
-test dependency and run the lint and tests:
-
-```sh
-uv pip install --python .venv/bin/python pytest==9.0.3
-uvx ruff@0.14.0 check
-.venv/bin/python -m pytest tests -q
-node --test tests/pi_judge.test.mjs
-```
-
-[`tests.yml`](.github/workflows/tests.yml) runs the same install and checks, but is
-skipped for now. Use the terms in the [glossary](GLOSSARY.md).
+Run the lint and tests with `make test`, which installs the suite first if needed.
+[`tests.yml`](.github/workflows/tests.yml) runs the same command, but is skipped for
+now. Use the terms in the [glossary](GLOSSARY.md).
 
 ## Harbor first
 

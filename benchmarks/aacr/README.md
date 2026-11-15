@@ -1,6 +1,6 @@
 # AACR
 
-Measures Daydream's complete review pipeline against
+Measures Daydream's committed review, its only reviewer since 0.35.0, against
 [Alibaba AACR-Bench](https://github.com/alibaba/aacr-bench), a catalog of 196
 pull requests with 1,506 human-annotated review comments. Each pull request
 becomes a [Harbor](https://github.com/harbor-framework/harbor) task: Daydream
@@ -24,20 +24,21 @@ scores alongside the failure count. Complete reviews with no findings are valid.
 
 ## Setup
 
-Install the suite with the [quick start](../../README.md#quick-start). It uses
-these pins:
+Install the suite with the [quick start](../../README.md#quick-start), or just
+`make setup`. It uses these pins:
 
 | Input | Pin |
 |---|---|
 | AACR source | `ee9d7fef70ef31acea2ff7ae316ce0a9575fe4df` |
-| Harbor | `6099b8cf2bfbbb3e7ff1eb2163bfc4524dbd9ba5` (0.24.0) |
+| Harbor | `6099b8cf2bfbbb3e7ff1eb2163bfc4524dbd9ba5` (0.24.0), set in the [Makefile](../../Makefile) |
 | Daydream | see [`build.json`](../daydream/build.json), shared by every benchmark |
 
 ### Logins
 
-Point both variables at your normal login folders. Don't copy `auth.json`: a copy
-clones its refresh token, so the copy and the original would rotate it out from
-under each other.
+`make quickstart` sets them to where Codex and Pi keep their logins unless you do.
+When you run Harbor yourself, as below, export them, pointing at your normal login
+folders. Don't copy `auth.json`: a copy clones its refresh token, so the copy and the
+original would rotate it out from under each other.
 
 ```sh
 export REVIEWER_CODEX_AUTH_DIR=~/.codex   # Daydream reviewer
@@ -63,8 +64,9 @@ assets and results:
 ## Generate a catalog
 
 ```sh
+make aacr-source   # the pinned AACR-Bench, in .cache/src/aacr-bench
 .venv/bin/python -m benchmarks.aacr.convert \
-  --upstream /path/to/clean/pinned/aacr-bench \
+  --upstream .cache/src/aacr-bench \
   --output artifacts/aacr/<fresh-catalog>
 ```
 
@@ -86,7 +88,7 @@ and `holdout` 54 of 59, and both also exit 1.
 ## Run
 
 Run from the repository root. [`experiments/aacr-baseline.yaml`](../../experiments/aacr-baseline.yaml)
-holds the shared settings: Daydream's default review configuration, the protected
+holds the shared settings: Daydream's default review profile, the protected
 verifier, the metric, data capture and zero retries.
 
 ```sh
@@ -116,7 +118,7 @@ To check the judge and scoring without running Daydream, generate the Laravel
 oracle case, which submits a fixed finding, and run it:
 
 ```sh
-.venv/bin/python -m benchmarks.aacr.convert --upstream /path/to/clean/pinned/aacr-bench --oracle
+.venv/bin/python -m benchmarks.aacr.convert --upstream .cache/src/aacr-bench --oracle
 .venv/bin/harbor run -c experiments/aacr-oracle.yaml
 ```
 
@@ -153,6 +155,8 @@ The viewer shows jobs, trials, scores, trajectories and artifacts. On disk, unde
 - `<trial>/result.json` and `<trial>/exception.txt` hold the trial's outcome.
 - `<trial>/agent/execution.json` holds Daydream's terminal state, usage and retained
   findings. `daydream.stdout.log` shows why a review ended incomplete.
+- `<trial>/agent/daydream/runs/<run>/deep/committed-review.json` is the sealed review:
+  every claim, its source references and the settings it ran under.
 - `<trial>/agent/dataset/runs/*.jsonl` holds Daydream's captured run record.
 - `<trial>/verifier/` holds rewards, verdicts and full judge responses.
 

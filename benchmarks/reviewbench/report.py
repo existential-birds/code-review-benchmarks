@@ -1,4 +1,4 @@
-"""Compare reviewer configurations over rounds of one ReviewBench catalog.
+"""Compare Daydream builds over rounds of one ReviewBench catalog.
 
 Harbor pools repeated attempts (``-k``), so a round is its own job: one complete
 pass (``-k 1``) over the catalog. Give each side's jobs after ``--side``, in round
@@ -9,8 +9,7 @@ order::
       --side jobs/<b-round-1> jobs/<b-round-2> jobs/<b-round-3>
 
 A side is named from what its trials recorded, never from a label: the Daydream
-commit and the review it ran. A job is one round of one side, so none is listed
-twice. ReviewBench's unchanged ``compute_rounds`` scores each
+commit they ran. A job is one round of one side, so none is listed twice. ReviewBench's unchanged ``compute_rounds`` scores each
 round and averages the rounds, once for each set of review cases in ``BLOCKS``.
 Nothing here ranks the sides or adds a score.
 """
@@ -52,9 +51,7 @@ def read_trial(trial: Path) -> dict:
         ratios=None if reward is None else ratios(read_counts(reward)['overall']),
         omitted_findings=execution.get('omitted_findings', 0), elapsed_seconds=execution.get('elapsed_seconds'),
         usage=execution.get('usage') or {},
-        side='{}/{}'.format(execution['build'].get('source_commit'), execution.get('assignment_policy') or 'review')
-        if execution.get('build') else None,
-        assignment_policy=(execution.get('committed_review') or {}).get('assignment_policy'))
+        side=execution['build'].get('source_commit') if execution.get('build') else None)
 
 
 def read_round(job: Path, expected: dict[str, dict]) -> dict:
@@ -73,7 +70,6 @@ def read_round(job: Path, expected: dict[str, dict]) -> dict:
         evaluated=sum(trial['reward'] is not None for trial in trials),
         conversion_limited=sum(trial['omitted_findings'] > 0 for trial in trials),
         omitted_findings=sum(trial['omitted_findings'] for trial in trials),
-        decomposed=sum(bool((trial['assignment_policy'] or {}).get('decomposed')) for trial in trials),
         elapsed_seconds=sum(trial['elapsed_seconds'] or 0 for trial in trials),
         # An API-equivalent estimate, not a charge, summed over the trials that reported one.
         cost_usd=sum(costs) if costs else None, cost_trials=len(costs),
@@ -107,7 +103,7 @@ def report(catalog: Path, sides: list[list[Path]]) -> dict:
         identity = {trial['side'] for entry in entries for trial in entry['trials']
                     if trial['side'] is not None or trial['reward'] is not None}
         if len(identity) != 1 or None in identity or identity & rounds.keys():
-            raise ValueError(f'Each side needs one Daydream build and review of its own, not {sorted(map(str, identity))}')
+            raise ValueError(f'Each side needs one Daydream build of its own, not {sorted(map(str, identity))}')
         rounds[identity.pop()] = entries
     jobs = [entry['trials'] for entries in rounds.values() for entry in entries]
     matched = set(expected).intersection(*({trial['task'] for trial in job if trial['reward'] is not None}
