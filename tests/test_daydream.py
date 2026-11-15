@@ -471,6 +471,7 @@ def test_reviewbench_format_sends_line_findings_and_counts_file_level_ones(revie
     from daydream import committed_review, review_profile, runner
     from daydream.committed_review_model import CommittedReviewResult
     case = review_case
+    codex_home = os.environ.get('CODEX_HOME')
     assignment_policy = review and 'broad'
     pr = {'repo': 'https://github.com/owner/project', 'pr_number': 17, 'base': BASE, 'head': HEAD}
     output = case.artifacts / 'out/findings.json'
@@ -565,7 +566,8 @@ def test_reviewbench_format_sends_line_findings_and_counts_file_level_ones(revie
     # whole-file one, and a committed one whose only location is on the old side.
     assert proof['status'] == 'complete' and proof['assignment_policy'] == assignment_policy
     assert (proof['omitted_findings'], len(proof['retained_findings'])) == ((2, 4) if assignment_policy else (1, 2))
-    assert 'CODEX_HOME' not in os.environ
+    # The review's own CODEX_HOME doesn't outlive it.
+    assert os.environ.get('CODEX_HOME') == codex_home
     profile = proof['resolved_configuration']['review_profile']
     if assignment_policy:
         assert proof['runner_exit_code'] == 0 and proof['committed_review'] == {

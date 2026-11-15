@@ -44,13 +44,12 @@ is on the old side of the change: a line the pull request removed isn't in the h
 
 ## Setup
 
-Install the suite with the [quick start](../../README.md#quick-start), then clone
-ReviewBench at its pin and install its exporter's dependencies:
+Install the suite with the [quick start](../../README.md#quick-start), or just
+`make setup`. Then fetch ReviewBench at its pin, with its exporter's dependencies,
+into `.cache/src/ReviewBench`:
 
 ```sh
-git clone https://github.com/review-bench/ReviewBench ../ReviewBench
-git -C ../ReviewBench checkout 4f04392d6bf4941ab6f8a3ea0c15b449f4458864
-npm ci --prefix ../ReviewBench
+make reviewbench-source
 ```
 
 Set the two login variables from [the AACR guide](../aacr/README.md#logins); both
@@ -63,7 +62,7 @@ Desktop works).
 
 ```sh
 .venv/bin/python -m benchmarks.reviewbench.convert \
-  --upstream ../ReviewBench --output artifacts/reviewbench/<fresh-catalog>
+  --upstream .cache/src/ReviewBench --output artifacts/reviewbench/<fresh-catalog>
 ```
 
 This writes all 219 tasks. To tune Daydream, use `--split dev` for the 194 PRs
@@ -105,10 +104,10 @@ trials of one job.
 **1. Build the candidate and generate one catalog per build.**
 
 ```sh
-.venv/bin/python -m benchmarks.daydream.build ../daydream --candidate <commit>
-.venv/bin/python -m benchmarks.reviewbench.convert --upstream ../ReviewBench --split test \
+.venv/bin/python -m benchmarks.daydream.build <daydream-clone> --candidate <commit>
+.venv/bin/python -m benchmarks.reviewbench.convert --upstream .cache/src/ReviewBench --split test \
   --output artifacts/reviewbench/<pinned-catalog>
-.venv/bin/python -m benchmarks.reviewbench.convert --upstream ../ReviewBench --split test \
+.venv/bin/python -m benchmarks.reviewbench.convert --upstream .cache/src/ReviewBench --split test \
   --build .cache/daydream-candidates/<commit>/build.json --output artifacts/reviewbench/<candidate-catalog>
 ```
 

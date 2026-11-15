@@ -1,16 +1,14 @@
 """Build the pinned Daydream reviewer that every benchmark runs, or a candidate.
 
-``build.json`` is the only place the Daydream version is set. Run this module to
-build that commit's wheel and dependency lock into ``.cache/daydream``; converters
-bake those exact bytes into each generated task::
+``build.json`` is the only place the Daydream version is set. ``make setup`` runs
+this module to build that commit's wheel and dependency lock into ``.cache/daydream``;
+converters bake those exact bytes into each generated task.
 
-    .venv/bin/python -m benchmarks.daydream.build ../daydream
+To score an unreleased commit without touching the pin, build it as a candidate from
+a Daydream clone. It goes to ``.cache/daydream-candidates/<commit>/`` beside its own
+``build.json``, which the converters' ``--build`` takes::
 
-To score an unreleased commit without touching the pin, build it as a candidate.
-It goes to ``.cache/daydream-candidates/<commit>/`` beside its own ``build.json``,
-which the converters' ``--build`` takes::
-
-    .venv/bin/python -m benchmarks.daydream.build ../daydream --candidate <commit>
+    .venv/bin/python -m benchmarks.daydream.build <daydream-clone> --candidate <commit>
 """
 from __future__ import annotations
 
@@ -50,7 +48,8 @@ def built_wheel(build_file: Path | None = None) -> tuple[dict, Path, Path]:
     folder = CACHE if build_file is None else Path(build_file).parent
     wheel, lock = folder / identity['wheel_name'], folder / LOCK_NAME
     if not wheel.is_file() or not lock.is_file():
-        raise FileNotFoundError('Build Daydream first: python -m benchmarks.daydream.build ../daydream [--candidate <commit>]')
+        raise FileNotFoundError('Build Daydream first: make setup, or for a candidate '
+                                'python -m benchmarks.daydream.build <daydream-clone> --candidate <commit>')
     if _sha256(wheel) != identity['wheel_sha256']:
         raise ValueError(f'Daydream wheel SHA-256 differs from {build_file or "benchmarks/daydream/build.json"}')
     return identity, wheel, lock
