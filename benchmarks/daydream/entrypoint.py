@@ -173,6 +173,13 @@ def _publish_evidence(staged: Path, logs: Path) -> None:
         shutil.copyfile(trajectory, logs / RUN_DOCUMENT_NAME)
 
 
+def _changed_outside_review(status: str) -> bool:
+    """Whether ``git status --porcelain`` names a path outside Daydream's own review output."""
+    from daydream.config import REVIEW_OUTPUT_FILE
+    return any(path != REVIEW_OUTPUT_FILE and path != '.daydream' and not path.startswith('.daydream/')
+               for line in status.splitlines() for path in line[3:].split(' -> '))
+
+
 @contextmanager
 def _isolated_environment(private: Path):
     previous = dict(os.environ)
@@ -261,9 +268,6 @@ async def review_once(*, case_dir: Path, artifacts: Path, agent_logs: Path,
         with tempfile.TemporaryDirectory(prefix='daydream-review-') as temporary:
             private = Path(temporary)
             staged = private / 'run-artifacts'
-            # Daydream's data store fails on a Docker Desktop bind mount such as /logs, so it
-            # writes to the container's own disk and is copied into the agent logs afterwards.
-            store = private / 'dataset'
             staged.mkdir()
             with (_isolated_environment(private) as controls,
                   _codex_home(credential_home, private) as role_home):
@@ -271,7 +275,7 @@ async def review_once(*, case_dir: Path, artifacts: Path, agent_logs: Path,
                 backend = BackendExecutionInput.from_environment(controls, backend='codex')
                 config = RunConfig(target=str(repository), backend='codex', output_mode='review',
                     non_interactive=True, dataset_capture=capture_data, dataset_capture_disabled=not capture_data,
-                    dataset_store_path=store if capture_data else None,
+                    dataset_store_path=agent_logs / 'dataset' if capture_data else None,
                     archive=False, run_eval=False,
                     discover_github_provenance=False, base=expected['base_sha'],
                     approved_head_sha=expected['head_sha'], file_config=DaydreamFileConfig(),
@@ -295,8 +299,6 @@ async def review_once(*, case_dir: Path, artifacts: Path, agent_logs: Path,
                                       retained_findings=result.items)
                     record['post_comparison'], _ = _comparison(repository, expected['base_sha'])
                     _publish_evidence(staged, agent_logs)
-                    if store.is_dir():
-                        shutil.copytree(store, agent_logs / 'dataset')
                 if len(finalized) != 1:
                     raise ValueError('Expected exactly one finalized review')
                 terminal = record['terminal_result']
@@ -306,8 +308,7 @@ async def review_once(*, case_dir: Path, artifacts: Path, agent_logs: Path,
                     raise ValueError('Analyzed revision differs from the pinned comparison')
                 if record['post_comparison'] != expected:
                     raise ValueError('Reviewer changed the pinned comparison')
-                from daydream.deep.orchestrator import _has_non_daydream_worktree_changes
-                if _has_non_daydream_worktree_changes(git_ops.status_porcelain(repository)):
+                if _changed_outside_review(git_ops.status_porcelain(repository)):
                     raise ValueError('Reviewer changed files outside its review artifacts')
                 if terminal['analysis_state'] != 'complete' or terminal['pipeline_state'] != 'completed':
                     record['status'] = 'incomplete'
