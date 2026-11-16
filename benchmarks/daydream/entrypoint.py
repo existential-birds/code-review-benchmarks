@@ -144,23 +144,17 @@ def _configuration(config, backend) -> dict:
 
 
 def _publish_evidence(staged: Path, logs: Path) -> None:
-    """Copy Daydream's run artifacts, keeping their layout so cross-references resolve."""
-    from daydream.trajectory import RUN_DOCUMENT_NAME, run_directory
+    """Copy Daydream's run artifacts, keeping their layout so cross-references resolve, and hand
+    Harbor its ATIF trajectory.
+
+    Daydream records local OpenTelemetry evidence (``evidence.otlp.jsonl`` and ``forks/``);
+    ``daydream.benchmarks.harbor`` exports it as ``trajectory.json`` with embedded subagent
+    trajectories plus flat ``trajectory.subagent-*.json`` files. A build from before that
+    evidence (the 0.36.0 pin) wrote ``trajectory.json`` itself, which is copied as before."""
     evidence = logs / 'daydream'
     evidence.mkdir(parents=True, exist_ok=False)
-    trajectory = staged / RUN_DOCUMENT_NAME
-    bundle = evidence
-    if trajectory.is_file():
-        document = json.loads(trajectory.read_bytes())
-        session_id = document['session_id']
-        if str(uuid.UUID(session_id)) != session_id:
-            raise ValueError('Invalid trajectory session ID')
-        bundle = run_directory(evidence, session_id)
-    else:
-        # Otherwise the trajectory is in its run's own folder, which the copy below keeps.
-        runs = list(staged.glob('runs/*'))
-        if len(runs) == 1:
-            trajectory = runs[0] / RUN_DOCUMENT_NAME
+    run, session_id, kind = _run_evidence(staged)
+    bundle = evidence if session_id is None else evidence / 'runs' / session_id
     for source in sorted(staged.rglob('*')):
         if source.is_symlink():
             raise ValueError('Unexpected symlink in run artifacts')
@@ -168,9 +162,37 @@ def _publish_evidence(staged: Path, logs: Path) -> None:
             target = bundle / source.relative_to(staged)
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(source, target)
-    if trajectory.is_file():
-        shutil.copyfile(trajectory, evidence / RUN_DOCUMENT_NAME)
-        shutil.copyfile(trajectory, logs / RUN_DOCUMENT_NAME)
+    if kind == 'evidence':
+        from daydream.benchmarks.harbor import export_run_directory, write_export
+        exported = export_run_directory(run)
+        write_export(exported, evidence)
+        write_export(exported, logs)
+    elif kind == 'trajectory':
+        trajectory = run / 'trajectory.json'
+        shutil.copyfile(trajectory, evidence / 'trajectory.json')
+        shutil.copyfile(trajectory, logs / 'trajectory.json')
+
+
+def _run_evidence(staged: Path) -> tuple[Path, str | None, str | None]:
+    """The run directory, its session id when the dump holds a bundle, and its evidence kind."""
+    for name, kind in (('evidence.otlp.jsonl', 'evidence'), ('trajectory.json', 'trajectory')):
+        if (staged / name).is_file():
+            raw = (staged / name).read_bytes()
+            if kind == 'evidence':
+                from daydream.trajectory import read_document_view
+                session_id = read_document_view(raw)['session_id']
+            else:
+                session_id = json.loads(raw)['session_id']
+            if str(uuid.UUID(session_id)) != session_id:
+                raise ValueError('Invalid run session ID')
+            return staged, session_id, kind
+    # Otherwise the evidence is in its run's own folder, which the copy keeps.
+    runs = list(staged.glob('runs/*'))
+    if len(runs) == 1:
+        for name, kind in (('evidence.otlp.jsonl', 'evidence'), ('trajectory.json', 'trajectory')):
+            if (runs[0] / name).is_file():
+                return runs[0], None, kind
+    return staged, None, None
 
 
 def _changed_outside_review(status: str) -> bool:

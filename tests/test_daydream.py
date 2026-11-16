@@ -70,6 +70,37 @@ def finalized(case, items, *, complete=True):
         {'prompt_tokens': 120, 'cached_tokens': 70, 'completion_tokens': 11})
 
 
+def records_evidence():
+    """Whether the installed Daydream records local evidence and exports ATIF (after the 0.36.0 pin)."""
+    import importlib.util
+    return importlib.util.find_spec('daydream.benchmarks') is not None
+
+
+async def record_evidence(stage, *, forks=('reviewer-a', 'reviewer-b')):
+    """Record a real run's local evidence into a dump stage, one forked reviewer per descriptor.
+
+    A build from before local evidence (the 0.36.0 pin) wrote its own ``trajectory.json`` instead."""
+    session = str(uuid.uuid4())
+    stage.mkdir(exist_ok=True)
+    if not records_evidence():
+        (stage / 'trajectory.json').write_text(json.dumps({'session_id': session}))
+        return session
+    from daydream.backends import MetricsEvent, ResultEvent, TextEvent
+    from daydream.trajectory import RUN_DOCUMENT_NAME, DaydreamPhase, DaydreamRunFlow, EvidenceRecorder
+    recorder = EvidenceRecorder(path=stage / RUN_DOCUMENT_NAME, run_flow=DaydreamRunFlow.DEEP, target_dir=stage,
+                                agent_model_name='codex', session_id=session, artifact_run_dir=stage)
+    async with recorder:
+        for index, descriptor in enumerate(forks):
+            async with recorder.fork(descriptor) as child:
+                async with child.invocation(phase=DaydreamPhase.REVIEW) as invocation:
+                    invocation.observe_user_step(f'Review assignment {index}')
+                    invocation.observe(TextEvent(f'reviewed {descriptor}'))
+                    invocation.observe(MetricsEvent(prompt_tokens=100, completion_tokens=10, cached_tokens=40,
+                                                    cost_usd=None, message_id=f'm{index}', model_name='gpt-test'))
+                    invocation.observe(ResultEvent(structured_output=None, continuation=None))
+    return session
+
+
 def run_case(case, **kwargs):
     return asyncio.run(entrypoint.review_once(case_dir=case.inputs, artifacts=case.artifacts, agent_logs=case.logs, invocation_id=case.invocation,
         credential_home=case.inputs / 'credential-store', **kwargs))
@@ -109,7 +140,7 @@ def test_completed_review_exports_only_finalized_items_and_isolated_defaults(rev
         stage = Path(config.dump_artifacts)
         (stage / 'deep').mkdir(parents=True)
         (stage / 'deep/committed-review.json').write_text('{"findings": []}')
-        (stage / 'trajectory.json').write_text(json.dumps({'session_id': str(uuid.uuid4())}))
+        await record_evidence(stage)
         review_result_handler(finalized(case, items))
         return 0
     monkeypatch.setattr(runner, 'run', inference)
@@ -133,7 +164,21 @@ def test_completed_review_exports_only_finalized_items_and_isolated_defaults(rev
     assert proof['resolved_configuration']['dataset_capture'] is capture_data
     assert proof['resolved_configuration']['dataset_store_path'] == (str(case.logs / 'dataset') if capture_data else None)
     assert proof['findings_sha256'] == hashlib.sha256((case.artifacts / 'findings.json').read_bytes()).hexdigest()
-    assert (case.logs / 'trajectory.json').exists()
+    assert (case.logs / 'trajectory.json').is_file()
+    if not records_evidence():
+        return  # The pinned build's own trajectory.json is copied; nothing is exported.
+    # Harbor's own readers accept the ATIF exported from local evidence: every file validates, the
+    # trace extraction finds one flat file per reviewer, and usage counts each reviewer once.
+    from harbor.utils.trajectory_utils import load_model_usage_from_trajectory
+    from harbor.utils.trajectory_validator import TrajectoryValidator
+    exported = sorted(case.logs.glob('trajectory*.json'))
+    assert [path.name for path in exported] == [
+        'trajectory.json', 'trajectory.subagent-reviewer-a.json', 'trajectory.subagent-reviewer-b.json']
+    assert all(TrajectoryValidator().validate(json.loads(path.read_text())) for path in exported)
+    usage = load_model_usage_from_trajectory(case.logs / 'trajectory.json')
+    assert {model: (value.n_input_tokens, value.n_cache_tokens, value.n_output_tokens)
+            for model, value in usage.items()} == {'gpt-test': (200, 80, 20)}
+    assert sorted(path.name for path in (case.logs / 'daydream').glob('runs/*/*')) == ['deep', 'evidence.otlp.jsonl', 'forks']
 
 
 @pytest.mark.parametrize('invalid', ['api_key', 'missing_refresh', 'invalid_jwt'])
@@ -168,7 +213,7 @@ def test_unsuccessful_invocation_retains_evidence_without_findings(review_case, 
         stage = Path(config.dump_artifacts)
         stage.mkdir(exist_ok=True)
         if failure != 'no-trajectory':
-            (stage / 'trajectory.json').write_text(json.dumps({'session_id': str(uuid.uuid4())}))
+            await record_evidence(stage, forks=('reviewer-a',))
         review = finalized(case, [], complete=failure != 'incomplete')
         if failure == 'other-revision':
             review.terminal_result['analyzed_revision']['diff_key'] = 'f' * 64
@@ -389,6 +434,7 @@ def test_reviewbench_format_sends_line_findings_and_counts_file_level_ones(revie
         assert config.frozen_author_description.description == 'Title\n\nBody'
         stage = Path(config.dump_artifacts)
         stage.mkdir(exist_ok=True)
+        # A build from before local evidence (the 0.36.0 pin) wrote its own trajectory.json.
         (stage / 'trajectory.json').write_text(json.dumps({'session_id': str(uuid.uuid4())}))
         review_result_handler(finalized(case, items))
         return 0
