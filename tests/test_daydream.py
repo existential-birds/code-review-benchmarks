@@ -416,3 +416,17 @@ def test_freeze_comparison_records_what_the_image_holds(review_case):
     assert entrypoint.freeze_comparison(case.inputs) == case.comparison
     assert json.loads((case.inputs / 'comparison.json').read_text()) == case.comparison
     assert (case.inputs / 'diff.patch').read_text() == case.checkout.patch
+
+
+@pytest.mark.parametrize('status,outside', [
+    ('', False),
+    ('?? .daydream/\n', False),
+    (' M .daydream/runs/x/trajectory.json\n?? .review-output.md\n', False),
+    ('R  .daydream/a -> .daydream/b\n', False),
+    (' M file.php\n', True),
+    ('?? .review-output.md.bak\n', True),
+    ('?? .daydreamy\n', True),
+    ('R  .daydream/a -> file.php\n', True),
+])
+def test_only_daydreams_own_output_may_change(status, outside):
+    assert entrypoint._changed_outside_review(status) is outside
