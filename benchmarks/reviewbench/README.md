@@ -147,9 +147,12 @@ reviewer, and that fails the trial.
 
 Under `agent/daydream/runs/<run>/`, `deep/committed-review.json` is the sealed review:
 every claim, its source references and the settings it ran under.
-`deep/merged-items.json` holds the findings it delivered. The run's trajectory is also
-copied to `agent/trajectory.json`, and a review that splits into assignments adds one
-trajectory each under `trajectories/`.
+`deep/merged-items.json` holds the findings it delivered. The run's local OpenTelemetry
+evidence is `evidence.otlp.jsonl`, with one `forks/<assignment>.otlp.jsonl` per assignment.
+Harbor reads the ATIF exported from it: `agent/trajectory.json` embeds every assignment as a
+subagent trajectory, and each assignment is also `agent/trajectory.subagent-<assignment>.json`.
+A Daydream build from before that evidence (the 0.36.0 pin) copies its own
+`trajectory.json` instead.
 
 ### What the report holds
 
