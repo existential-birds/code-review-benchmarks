@@ -70,12 +70,23 @@ def finalized(case, items, *, complete=True):
         {'prompt_tokens': 120, 'cached_tokens': 70, 'completion_tokens': 11})
 
 
+def records_evidence():
+    """Whether the installed Daydream records local evidence and exports ATIF (after the 0.36.0 pin)."""
+    import importlib.util
+    return importlib.util.find_spec('daydream.benchmarks') is not None
+
+
 async def record_evidence(stage, *, forks=('reviewer-a', 'reviewer-b')):
-    """Record a real run's local evidence into a dump stage, one forked reviewer per descriptor."""
-    from daydream.backends import MetricsEvent, ResultEvent, TextEvent
-    from daydream.trajectory import RUN_DOCUMENT_NAME, DaydreamPhase, DaydreamRunFlow, EvidenceRecorder
+    """Record a real run's local evidence into a dump stage, one forked reviewer per descriptor.
+
+    A build from before local evidence (the 0.36.0 pin) wrote its own ``trajectory.json`` instead."""
     session = str(uuid.uuid4())
     stage.mkdir(exist_ok=True)
+    if not records_evidence():
+        (stage / 'trajectory.json').write_text(json.dumps({'session_id': session}))
+        return session
+    from daydream.backends import MetricsEvent, ResultEvent, TextEvent
+    from daydream.trajectory import RUN_DOCUMENT_NAME, DaydreamPhase, DaydreamRunFlow, EvidenceRecorder
     recorder = EvidenceRecorder(path=stage / RUN_DOCUMENT_NAME, run_flow=DaydreamRunFlow.DEEP, target_dir=stage,
                                 agent_model_name='codex', session_id=session, artifact_run_dir=stage)
     async with recorder:
@@ -153,6 +164,9 @@ def test_completed_review_exports_only_finalized_items_and_isolated_defaults(rev
     assert proof['resolved_configuration']['dataset_capture'] is capture_data
     assert proof['resolved_configuration']['dataset_store_path'] == (str(case.logs / 'dataset') if capture_data else None)
     assert proof['findings_sha256'] == hashlib.sha256((case.artifacts / 'findings.json').read_bytes()).hexdigest()
+    assert (case.logs / 'trajectory.json').is_file()
+    if not records_evidence():
+        return  # The pinned build's own trajectory.json is copied; nothing is exported.
     # Harbor's own readers accept the ATIF exported from local evidence: every file validates, the
     # trace extraction finds one flat file per reviewer, and usage counts each reviewer once.
     from harbor.utils.trajectory_utils import load_model_usage_from_trajectory
