@@ -95,11 +95,7 @@ def test_completed_review_exports_only_finalized_items_and_isolated_defaults(rev
         assert config.review_profile.source_kind == 'default'
         assert config.dataset_capture is capture_data
         assert config.dataset_capture_disabled is not capture_data
-        assert (config.dataset_store_path is not None) is capture_data
-        if capture_data:
-            assert not config.dataset_store_path.is_relative_to(case.logs)
-            (config.dataset_store_path / 'runs').mkdir(parents=True)
-            (config.dataset_store_path / 'runs/record.jsonl').write_text('{}\n')
+        assert config.dataset_store_path == (case.logs / 'dataset' if capture_data else None)
         assert config.trajectory_hub_repo is None
         assert 'DAYDREAM_TRAJECTORY_HUB_REPO' not in os.environ
         assert not config.archive and not config.run_eval
@@ -135,8 +131,7 @@ def test_completed_review_exports_only_finalized_items_and_isolated_defaults(rev
     assert proof['cost_interpretation'] == 'API-equivalent estimate when available; subscription charges unknown'
     assert proof['retained_findings'] == items
     assert proof['resolved_configuration']['dataset_capture'] is capture_data
-    # The store's records end up in the agent logs.
-    assert (case.logs / 'dataset/runs/record.jsonl').is_file() is capture_data
+    assert proof['resolved_configuration']['dataset_store_path'] == (str(case.logs / 'dataset') if capture_data else None)
     assert proof['findings_sha256'] == hashlib.sha256((case.artifacts / 'findings.json').read_bytes()).hexdigest()
     assert (case.logs / 'trajectory.json').exists()
 
@@ -421,3 +416,17 @@ def test_freeze_comparison_records_what_the_image_holds(review_case):
     assert entrypoint.freeze_comparison(case.inputs) == case.comparison
     assert json.loads((case.inputs / 'comparison.json').read_text()) == case.comparison
     assert (case.inputs / 'diff.patch').read_text() == case.checkout.patch
+
+
+@pytest.mark.parametrize('status,outside', [
+    ('', False),
+    ('?? .daydream/\n', False),
+    (' M .daydream/runs/x/trajectory.json\n?? .review-output.md\n', False),
+    ('R  .daydream/a -> .daydream/b\n', False),
+    (' M file.php\n', True),
+    ('?? .review-output.md.bak\n', True),
+    ('?? .daydreamy\n', True),
+    ('R  .daydream/a -> file.php\n', True),
+])
+def test_only_daydreams_own_output_may_change(status, outside):
+    assert entrypoint._changed_outside_review(status) is outside
