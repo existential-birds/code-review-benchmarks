@@ -151,8 +151,6 @@ every claim, its source references and the settings it ran under.
 evidence is `evidence.otlp.jsonl`, with one `forks/<assignment>.otlp.jsonl` per assignment.
 Harbor reads the ATIF exported from it: `agent/trajectory.json` embeds every assignment as a
 subagent trajectory, and each assignment is also `agent/trajectory.subagent-<assignment>.json`.
-A Daydream build from before that evidence (the 0.36.0 pin) copies its own
-`trajectory.json` instead.
 
 ### What the report holds
 
