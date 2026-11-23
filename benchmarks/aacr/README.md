@@ -54,7 +54,7 @@ assets and results:
   access while it holds your Codex session, so a hostile review case could try to
   send that session elsewhere.
 - **Judge:** nothing is mounted. Before scoring, the verifier refreshes Pi's
-  `openai-codex` login on your machine with the pinned SDK, under Pi's own lock, when
+  `openai` (ChatGPT subscription) login on your machine with the pinned SDK, under Pi's own lock, when
   less than 30 minutes remain. It then uploads a copy holding only that login's
   access token, without the refresh token. If the refresh fails, the trial stops
   before scoring. If you raise the verifier timeout past about 20 minutes, set
