@@ -1,7 +1,8 @@
 """Check a candidate's Daydream commit, then run Daydream's gate, before it is scored.
 
 ``python -m loop.guard <daydream-worktree> <base> <commit>`` prints JSON for the
-ledger and exits 1 on a refusal. It clones the worktree's repository at the commit
+ledger and exits 1 on a refusal, or 2 with an ``error`` when it couldn't check the
+commit (an unknown revision, a missing or unpinned benchmark source). It clones the worktree's repository at the commit
 into a folder of its own, so nothing untracked, ignored or configured in the worktree
 reaches the checks or the gate. The commit must be the only one on top of the base,
 change at least one file and stay small, with no binary files; leave the gate, the
@@ -106,12 +107,16 @@ def benchmark_names(reviewbench_source: Path = REVIEWBENCH, aacr_source: Path = 
         names |= {aacr.task_name(record), parse_repo_from_pr_url(record['githubPrUrl'])}
     if None in names:
         raise ValueError('A review case has no GitHub repository')
+    if not names:
+        raise ValueError('The pinned sources gave no review case names')
     return names
 
 
 def name_pattern(names: set[str]) -> re.Pattern:
     """Whole names in any letter case, so a short name never matches inside a longer one.
     A full stop or ``.git`` may follow, but not a longer dotted name such as ``next.js``."""
+    if not names:
+        raise ValueError('No names to match; an empty pattern would match every line')
     alternatives = '|'.join(re.escape(name) for name in sorted(names, key=len, reverse=True))
     return re.compile(rf'(?<![\w.-])(?:{alternatives})(?![\w-]|\.(?!git\b)\w)', re.IGNORECASE)
 
@@ -293,8 +298,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument('--reviewbench', type=Path, default=REVIEWBENCH, help='Clean checkout of the pinned ReviewBench')
     parser.add_argument('--aacr', type=Path, default=AACR, help='Clean checkout of the pinned AACR-Bench')
     arguments = parser.parse_args(argv)
-    names = benchmark_names(arguments.reviewbench, arguments.aacr)
-    result = check(arguments.worktree, arguments.base, arguments.commit, settings.load(), names)
+    try:
+        names = benchmark_names(arguments.reviewbench, arguments.aacr)
+        result = check(arguments.worktree, arguments.base, arguments.commit, settings.load(), names)
+    except (OSError, RuntimeError, ValueError) as error:
+        # Not a refusal of the change: the guard couldn't check it. The ledger still gets JSON.
+        print(json.dumps(dict(accepted=False, error=str(error)), indent=2))
+        return 2
     print(json.dumps(result, indent=2))
     return 0 if result['accepted'] else 1
 

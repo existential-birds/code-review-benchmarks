@@ -285,3 +285,22 @@ def test_names_come_from_both_pinned_sources_and_keep_stdout_for_the_json(tmp_pa
     assert guard.benchmark_names(tmp_path, tmp_path) == {
         'acme_widgets_7-0123abcd', 'acme/widgets', 'other-gadget-js-12', 'Other/gadget.js'}
     assert capfd.readouterr() == ('', 'Exported 1 tasks\n')
+    monkeypatch.setattr(aacr, 'load_records', lambda upstream: [])
+    monkeypatch.setattr(reviewbench, 'export', lambda upstream, destination, split: destination.mkdir())
+    with pytest.raises(ValueError, match='gave no review case names'):
+        guard.benchmark_names(tmp_path, tmp_path)
+    with pytest.raises(ValueError, match='No names to match'):
+        guard.name_pattern(set())
+
+
+def test_a_commit_the_guard_cannot_check_still_gives_json(repo, git, monkeypatch, capsys):
+    path, base = repo
+    monkeypatch.setattr(guard, 'benchmark_names', lambda *_: NAMES)
+    assert guard.main([str(path), base, 'f' * 40]) == 2
+    result = json.loads(capsys.readouterr().out)
+    assert result['accepted'] is False and result['error']
+    def unpinned(*_):
+        raise ValueError('Expected ReviewBench revision x')
+    monkeypatch.setattr(guard, 'benchmark_names', unpinned)
+    assert guard.main([str(path), base, base]) == 2
+    assert json.loads(capsys.readouterr().out) == dict(accepted=False, error='Expected ReviewBench revision x')
