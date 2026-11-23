@@ -193,7 +193,7 @@ def daydream_artifacts(tmp_path, findings):
         'phase_outcomes': [{'phase': 'findings', 'status': 'complete', 'reason_codes': [],
                             'noop': False, 'usable_evidence': True}],
         'completed_stacks': ['php'], 'failed_stacks': [], 'uncovered_stacks': [],
-        'projection_valid': True,
+        'projection_valid': True, 'cause': None,
     }
     execution = {
         'schema_version': 1, 'invocation_id': invocation,

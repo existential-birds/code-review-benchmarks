@@ -125,7 +125,7 @@ FORMATS = {'aacr': _aacr_findings, 'reviewbench': _reviewbench_findings}
 
 def _configuration(config, backend) -> dict:
     from daydream.config import PHASE_DEFAULT_MODELS
-    from daydream.run_config import _resolved_model, _resolved_reasoning_effort
+    from daydream.run_config import resolved_phase_settings
     return {
         **{name: getattr(config, name) for name in ('backend', 'output_mode', 'flow_name',
             'non_interactive', 'dataset_capture', 'dataset_capture_disabled',
@@ -135,9 +135,7 @@ def _configuration(config, backend) -> dict:
         'review_profile': {'source_kind': config.review_profile.source_kind,
                            'digest': config.review_profile.digest,
                            'profile': asdict(config.review_profile.profile)},
-        'phase_defaults': {phase: {'model': _resolved_model(config, phase),
-            'reasoning_effort': _resolved_reasoning_effort(config, phase)}
-            for phase in sorted(PHASE_DEFAULT_MODELS['codex'])},
+        'phase_defaults': resolved_phase_settings(config, sorted(PHASE_DEFAULT_MODELS['codex'])),
         'fanout_concurrency': backend.fanout_concurrency,
         'retry_policy': asdict(backend.retry_policy),
     }
@@ -149,11 +147,10 @@ def _publish_evidence(staged: Path, logs: Path) -> None:
 
     Daydream records local OpenTelemetry evidence (``evidence.otlp.jsonl`` and ``forks/``);
     ``daydream.benchmarks.harbor`` exports it as ``trajectory.json`` with embedded subagent
-    trajectories plus flat ``trajectory.subagent-*.json`` files. A build from before that
-    evidence (the 0.36.0 pin) wrote ``trajectory.json`` itself, which is copied as before."""
+    trajectories plus flat ``trajectory.subagent-*.json`` files."""
     evidence = logs / 'daydream'
     evidence.mkdir(parents=True, exist_ok=False)
-    run, session_id, kind = _run_evidence(staged)
+    run, session_id = _run_evidence(staged)
     bundle = evidence if session_id is None else evidence / 'runs' / session_id
     for source in sorted(staged.rglob('*')):
         if source.is_symlink():
@@ -162,37 +159,28 @@ def _publish_evidence(staged: Path, logs: Path) -> None:
             target = bundle / source.relative_to(staged)
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(source, target)
-    if kind == 'evidence':
+    if run is not None:
         from daydream.benchmarks.harbor import export_run_directory, write_export
         exported = export_run_directory(run)
         write_export(exported, evidence)
         write_export(exported, logs)
-    elif kind == 'trajectory':
-        trajectory = run / 'trajectory.json'
-        shutil.copyfile(trajectory, evidence / 'trajectory.json')
-        shutil.copyfile(trajectory, logs / 'trajectory.json')
 
 
-def _run_evidence(staged: Path) -> tuple[Path, str | None, str | None]:
-    """The run directory, its session id when the dump holds a bundle, and its evidence kind."""
-    for name, kind in (('evidence.otlp.jsonl', 'evidence'), ('trajectory.json', 'trajectory')):
-        if (staged / name).is_file():
-            raw = (staged / name).read_bytes()
-            if kind == 'evidence':
-                from daydream.trajectory import read_document_view
-                session_id = read_document_view(raw)['session_id']
-            else:
-                session_id = json.loads(raw)['session_id']
-            if str(uuid.UUID(session_id)) != session_id:
-                raise ValueError('Invalid run session ID')
-            return staged, session_id, kind
+def _run_evidence(staged: Path) -> tuple[Path | None, str | None]:
+    """The directory holding the run's evidence, if it left any, and its session id when the dump
+    holds a bundle."""
+    document = staged / 'evidence.otlp.jsonl'
+    if document.is_file():
+        from daydream.trajectory import read_document_view
+        session_id = read_document_view(document.read_bytes())['session_id']
+        if str(uuid.UUID(session_id)) != session_id:
+            raise ValueError('Invalid run session ID')
+        return staged, session_id
     # Otherwise the evidence is in its run's own folder, which the copy keeps.
     runs = list(staged.glob('runs/*'))
-    if len(runs) == 1:
-        for name, kind in (('evidence.otlp.jsonl', 'evidence'), ('trajectory.json', 'trajectory')):
-            if (runs[0] / name).is_file():
-                return runs[0], None, kind
-    return staged, None, None
+    if len(runs) == 1 and (runs[0] / 'evidence.otlp.jsonl').is_file():
+        return runs[0], None
+    return None, None
 
 
 def _changed_outside_review(status: str) -> bool:
