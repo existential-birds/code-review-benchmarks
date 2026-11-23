@@ -2,7 +2,9 @@
 
 Every benchmark's round report shares this: a round is one job, a side is named from
 the Daydream commit its trials recorded, and each side needs one build of its own.
-The benchmark gives only how a scored trial's reward reads as ratios.
+The benchmark gives only how a scored trial's reward reads as ratios. ``spread`` gives
+a score's mean and sample standard deviation over rounds, for the AACR report and
+``loop.rounds``; ReviewBench's report keeps ReviewBench's own.
 """
 from __future__ import annotations
 

@@ -173,11 +173,13 @@ and `-r 0` and giving every job its own name.
 
 [`loop/rounds.py`](../../loop/rounds.py) does steps 1 and 2 for one build and writes the
 same scores and counts to `artifacts/loop/<name>/summary.json`, with each case's four
-reward counts per round. It resumes a run that stopped. AACR is scored only to confirm
-a change, so name the dev split; the held-out split is open only to confirmation:
+reward counts per round. It resumes a run that stopped, and a case that fails to convert
+leaves no catalog behind, so drop it from the list and run again. It uses only the dev
+split. The loop that tunes Daydream scores only ReviewBench's dev cases; AACR dev rounds
+exist to check this report and a build. Held-out rounds belong to confirmation (#54).
 
 ```sh
-.venv/bin/python -m loop.rounds --benchmark aacr --split dev --build pinned \
+.venv/bin/python -m loop.rounds --benchmark aacr --build pinned \
   --cases <case-list> --rounds 2 --name <fresh-name>
 ```
 
@@ -197,7 +199,9 @@ Each round lists its trials and the same counts as ReviewBench's report: `expect
 `missing`, `produced`, `completed_empty`, `incomplete`, `failed`, `evaluated`,
 `elapsed_seconds` and `cost_usd`, an API-equivalent estimate. A trial is scored by the
 same rule: not if it raised, never finished, was verified outside a separate
-environment or had a failed step.
+environment or had a failed step. Such a trial is dropped even if it left a reward, so a
+round's metric here can differ from Harbor's own pooled job metric, shown in the same
+round under `harbor`.
 
 Scores come in two blocks, each naming its review cases under `blocks`:
 
