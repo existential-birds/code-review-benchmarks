@@ -1,15 +1,13 @@
 """The guard against small Git repositories laid out like Daydream.
 
 The guard's decisions rest on what Git reports, so these tests use the real Git,
-called by absolute path with the operator's configuration shut out: HOME is a
-temporary folder, there is no system or global configuration, and the author and
-committer are fixed. Everywhere else the conftest's failing ``git`` still applies.
+called by absolute path through the conftest's ``git`` fixture, with the operator's
+configuration shut out. Everywhere else the conftest's failing ``git`` still applies.
 Daydream's gate never runs; a stand-in records what it was given.
 """
 import json
 import os
 from pathlib import Path
-import subprocess
 import sys
 import time
 
@@ -18,6 +16,7 @@ import pytest
 from benchmarks.aacr import convert as aacr
 from benchmarks.reviewbench import convert as reviewbench
 from loop import guard, settings
+from real_git import commit
 
 NAMES = {'acme/widgets', 'acme_widgets_7-0123abcd', 'acme-widgets-7'}
 TESTS = 'def test_one():\n    pass\n\n\ndef test_two():\n    pass\n'
@@ -45,36 +44,6 @@ sys.exit(0 if outcome == "linger" else int(outcome))
 '''
 
 
-def real_git() -> Path:
-    for directory in os.environ['PATH'].split(os.pathsep):
-        candidate = Path(directory) / 'git'
-        if candidate.is_file() and os.access(candidate, os.X_OK):
-            with candidate.open('rb') as file:
-                if b'tests must not run git' not in file.read(200):
-                    return candidate
-    pytest.fail('These tests need Git installed')
-
-
-@pytest.fixture
-def git(tmp_path, monkeypatch):
-    binary = real_git()
-    for name in [name for name in os.environ if name.startswith('GIT_')]:
-        monkeypatch.delenv(name)
-    (tmp_path / 'home').mkdir()
-    monkeypatch.setenv('HOME', str(tmp_path / 'home'))
-    for name, value in dict(GIT_CONFIG_NOSYSTEM='1', GIT_CONFIG_GLOBAL=os.devnull,
-                            GIT_AUTHOR_NAME='Proposer', GIT_AUTHOR_EMAIL='proposer@example.com',
-                            GIT_COMMITTER_NAME='Proposer', GIT_COMMITTER_EMAIL='proposer@example.com',
-                            GIT_AUTHOR_DATE='2026-01-01T00:00:00Z', GIT_COMMITTER_DATE='2026-01-01T00:00:00Z').items():
-        monkeypatch.setenv(name, value)
-    monkeypatch.setattr(guard, 'GIT', str(binary))
-
-    def run(repo, *arguments):
-        return subprocess.run([str(binary), '-C', str(repo), *arguments], check=True,
-                              capture_output=True, text=True).stdout.strip()
-    return run
-
-
 @pytest.fixture
 def repo(tmp_path, git):
     """A Daydream-shaped repository with one base commit; returns (path, base)."""
@@ -82,18 +51,6 @@ def repo(tmp_path, git):
     path.mkdir()
     git(path, 'init', '-q')
     return path, commit(git, path, DAYDREAM)
-
-
-def commit(git, path, files, *options):
-    for name, content in files.items():
-        if content is None:
-            (path / name).unlink()
-        else:
-            (path / name).parent.mkdir(parents=True, exist_ok=True)
-            (path / name).write_bytes(content if isinstance(content, bytes) else content.encode())
-    git(path, 'add', '-A')
-    git(path, 'commit', '-q', '-m', 'Change', *options)
-    return git(path, 'rev-parse', 'HEAD')
 
 
 @pytest.fixture

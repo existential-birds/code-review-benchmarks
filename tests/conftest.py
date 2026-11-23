@@ -1,11 +1,15 @@
 """Tests never run Git through PATH. A ``git`` that always fails comes first on PATH,
 so any call that slips past the fakes in ``fake_git.py`` fails the test instead of
-reaching the real Git and the operator's configuration. The one exception is
-``test_guard.py``, whose checks depend on what Git itself reports: it calls the real
-binary by absolute path with the operator's configuration shut out."""
+reaching the real Git and the operator's configuration. The exception is the ``git``
+fixture, for the guard's and the proposer step's tests, whose checks depend on what
+Git itself reports: it calls the real binary by absolute path with the operator's
+configuration shut out."""
 import os
+import subprocess
 
 import pytest
+
+from real_git import real_git
 
 
 @pytest.fixture(autouse=True, scope='session')
@@ -18,6 +22,30 @@ def no_real_git(tmp_path_factory):
     os.environ['PATH'] = f'{shim}{os.pathsep}{previous}'
     yield
     os.environ['PATH'] = previous
+
+
+@pytest.fixture
+def git(tmp_path, monkeypatch):
+    """The real Git, for the loop's own Git calls too, with a temporary HOME, no system or
+    global configuration, no other GIT_ variables, and a fixed author and committer.
+    Returns a function running it in a repository."""
+    from loop import guard
+    binary = real_git()
+    for name in [name for name in os.environ if name.startswith('GIT_')]:
+        monkeypatch.delenv(name)
+    (tmp_path / 'home').mkdir()
+    monkeypatch.setenv('HOME', str(tmp_path / 'home'))
+    for name, value in dict(GIT_CONFIG_NOSYSTEM='1', GIT_CONFIG_GLOBAL=os.devnull,
+                            GIT_AUTHOR_NAME='Proposer', GIT_AUTHOR_EMAIL='proposer@example.com',
+                            GIT_COMMITTER_NAME='Proposer', GIT_COMMITTER_EMAIL='proposer@example.com',
+                            GIT_AUTHOR_DATE='2026-01-01T00:00:00Z', GIT_COMMITTER_DATE='2026-01-01T00:00:00Z').items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setattr(guard, 'GIT', str(binary))
+
+    def run(repo, *arguments):
+        return subprocess.run([str(binary), '-C', str(repo), *arguments], check=True,
+                              capture_output=True, text=True).stdout.strip()
+    return run
 
 
 @pytest.fixture
