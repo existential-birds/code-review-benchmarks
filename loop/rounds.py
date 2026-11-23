@@ -12,8 +12,8 @@ it skips finished rounds and adds rounds up to ``--rounds``. A job that never
 finished is never reopened, since resuming can delete trials: it is recorded as
 abandoned and its round starts again as a fresh job.
 
-The summary's ``side`` and per-round counts come from ``benchmarks.reviewbench.report``,
-with its checks. Each round's scores pool its scored trials with
+The summary's ``side`` and per-round counts come from ``benchmarks.reviewbench.report``'s
+reading and checks; a summary whose rounds all failed before any review has no side. Each round's scores pool its scored trials with
 ``benchmarks.reviewbench.metric``; ``mean`` and ``stddev`` (sample, n-1) are over the
 rounds that define a score. ``cases`` keeps every case's overall counts in every
 round, null where unscored, so two summaries can be compared on the cases both scored.
@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 import statistics
 import subprocess
@@ -42,6 +43,8 @@ METRICS = ('grounded_precision', 'grounded_recall', 'grounded_f1',
 COUNTS = ('expected', 'evaluated', 'failed', 'incomplete', 'completed_empty', 'omitted_findings',
           'elapsed_seconds', 'cost_usd', 'cost_trials')
 TOKENS = ('n_input_tokens', 'n_cache_tokens', 'n_output_tokens')
+# The task containers read the logins from these; the Makefile sets them, harbor run alone doesn't.
+LOGINS = ('REVIEWER_CODEX_AUTH_DIR', 'JUDGE_PI_AUTH_DIR')
 
 
 def finished(job: str) -> bool:
@@ -53,10 +56,17 @@ def finished(job: str) -> bool:
 
 def summarise(catalog: Path, jobs: list[str]) -> dict:
     """The side, every round's counts and pooled scores, their spread, and each case's counts."""
-    side, = report.report(catalog, [[JOBS / job for job in jobs]])['sides'].items()
-    commit, block = side
+    listing = json.loads((catalog / 'catalog.json').read_text())
+    expected = {name: json.loads((catalog / name / 'tests/task.json').read_text()) for name in listing['tasks']}
+    entries = [report.read_round(JOBS / job, expected) for job in jobs]
+    # As in the round report, a side is the one build its trials recorded; rounds that all
+    # failed before any review started record none.
+    sides = {trial['side'] for entry in entries for trial in entry['trials']
+             if trial['side'] is not None or trial['reward'] is not None}
+    if len(sides) > 1 or None in sides:
+        raise ValueError(f'One build per summary, not {sorted(map(str, sides))}')
     rounds, cases = [], {}
-    for number, entry in enumerate(block['rounds'], 1):
+    for number, entry in enumerate(entries, 1):
         rewards = [trial['reward'] for trial in entry['trials']]
         pooled = compute(rewards)
         rounds.append(dict(
@@ -72,9 +82,8 @@ def summarise(catalog: Path, jobs: list[str]) -> dict:
         values = [entry[key] for entry in rounds if entry[key] is not None]
         spread[key] = dict(defined_rounds=len(values), mean=statistics.fmean(values) if values else None,
                            stddev=statistics.stdev(values) if len(values) > 1 else None)
-    expected = json.loads((catalog / 'catalog.json').read_text())['tasks']
-    return dict(side=commit, rounds=rounds, scores=spread,
-                cases={case: cases.get(case, [None] * len(jobs)) for case in expected})
+    return dict(side=next(iter(sides), None), rounds=rounds, scores=spread,
+                cases={case: cases.get(case, [None] * len(jobs)) for case in listing['tasks']})
 
 
 def run(build: str, cases_file: Path, rounds: int, name: str, *, limit: int | None = None,
@@ -83,6 +92,9 @@ def run(build: str, cases_file: Path, rounds: int, name: str, *, limit: int | No
     path, catalog = folder / 'summary.json', folder / 'catalog'
     cases = sets.read(cases_file)[:limit]
     request = dict(build=build, cases=cases)
+    missing = [name for name in LOGINS if not os.environ.get(name)]
+    if missing:
+        raise ValueError(f'Set {" and ".join(missing)} to the reviewer and judge login folders, as the Makefile does')
     concurrency = concurrency or settings.load()['concurrency']
 
     def save():

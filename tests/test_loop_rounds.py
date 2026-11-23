@@ -28,7 +28,7 @@ def counts(candidates, matched, matched_tp, unmatched_tp, golden_tp, covered):
                 golden_covered_count=covered)
 
 
-def write_job(job: Path, catalog: Path, rewards: dict, finished=True) -> None:
+def write_job(job: Path, catalog: Path, rewards: dict, finished=True, build=BUILD) -> None:
     """A job as Harbor writes it. A null reward is a trial that raised and left no review record."""
     expected = {name: json.loads((catalog / name / 'tests/task.json').read_text()) for name in rewards}
     trials = []
@@ -48,7 +48,7 @@ def write_job(job: Path, catalog: Path, rewards: dict, finished=True) -> None:
         if overall:
             (job / trial.trial_name / 'agent/execution.json').write_text(json.dumps({
                 'status': 'complete', 'omitted_findings': 1, 'elapsed_seconds': 60,
-                'usage': {'cost_usd': 2.5}, 'build': {'source_commit': BUILD}}))
+                'usage': {'cost_usd': 2.5}, 'build': {'source_commit': build}}))
     (job / 'result.json').write_text(JobResult(
         id=uuid.uuid4(), started_at=datetime.now(timezone.utc), n_total_trials=len(trials),
         finished_at=datetime.now(timezone.utc) if finished else None,
@@ -86,6 +86,13 @@ def test_summary_scores_each_round_pools_its_trials_and_keeps_every_cases_counts
     assert f1['defined_rounds'] == 2 and f1['mean'] == pytest.approx(.2875)
     assert f1['stddev'] == pytest.approx(.175 / 2 ** .5)
     assert summary['cases'] == {'case-a': [first, second], 'case-b': [second, None]}
+    # Rounds that failed before any review record no build, and still count their failures.
+    write_job(tmp_path / 'jobs/down', catalog, {'case-a': None, 'case-b': None})
+    down = rounds.summarise(catalog, ['down'])
+    assert down['side'] is None and down['rounds'][0]['failed'] == 2 and down['scores']['grounded_f1']['mean'] is None
+    write_job(tmp_path / 'jobs/other', catalog, {'case-a': first}, build='o' * 40)
+    with pytest.raises(ValueError, match='One build per summary'):
+        rounds.summarise(catalog, ['r1', 'other'])
 
 
 @pytest.fixture
@@ -102,15 +109,22 @@ def workspace(tmp_path, monkeypatch, pinned_wheel):
         (destination / 'metric.py').write_text('')
     monkeypatch.setattr(convert, 'check_source', lambda upstream: None)
     monkeypatch.setattr(convert, 'export', export)
+    for name in rounds.LOGINS:
+        monkeypatch.setenv(name, str(tmp_path / name))
     (tmp_path / 'cases.txt').write_text('# header\ncase-a\ncase-b\n')
     return tmp_path
 
 
-def test_a_case_outside_the_dev_split_is_refused(workspace):
+def test_a_case_outside_the_dev_split_is_refused(workspace, monkeypatch):
     (workspace / 'held-out.txt').write_text('case-a\ncase-t\n')
     with pytest.raises(ValueError, match=r"Unknown ReviewBench task names in the dev set: \['case-t'\]"):
         rounds.run('pinned', workspace / 'held-out.txt', 1, 'refused', upstream=workspace)
     assert not (workspace / 'artifacts/loop/refused/summary.json').exists()
+    # Without the login folders every trial would fail at once, so nothing starts.
+    monkeypatch.delenv('JUDGE_PI_AUTH_DIR')
+    with pytest.raises(ValueError, match='Set JUDGE_PI_AUTH_DIR'):
+        rounds.run('pinned', workspace / 'cases.txt', 1, 'no-login', upstream=workspace)
+    assert not (workspace / 'artifacts/loop/no-login').exists()
 
 
 def test_rerun_skips_finished_rounds_and_never_reopens_an_unfinished_job(workspace, monkeypatch):
