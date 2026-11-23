@@ -23,8 +23,9 @@ round, null where unscored, so two summaries can be compared on the cases both s
 
 ``--build oracle`` scores ReviewBench's own true findings with
 ``experiments/reviewbench-oracle.yaml`` instead of a Daydream review, so any spread
-between its rounds is the judge's alone (#45). It needs only the judge's login, its
-trials record no build, and a trial counts as failed when it left no score.
+between its rounds is the judge's alone (#45). It still needs both login folders, since
+the tasks mount both, but its trials record no build, and a trial counts as failed when it
+left no score.
 """
 from __future__ import annotations
 
@@ -124,8 +125,7 @@ def run(build: str, cases_file: Path, rounds: int, name: str, *, limit: int | No
         concurrency: int | None = None, upstream: Path = UPSTREAM) -> dict:
     if rounds < 1 or (limit is not None and limit < 1) or (concurrency is not None and concurrency < 1):
         raise ValueError('Rounds, --limit-cases and --concurrency must be positive')
-    logins = LOGINS[1:] if build == 'oracle' else LOGINS
-    missing = [name for name in logins if not os.environ.get(name) or not Path(os.environ[name]).is_dir()]
+    missing = [name for name in LOGINS if not os.environ.get(name) or not Path(os.environ[name]).is_dir()]
     if missing:
         raise ValueError(f'Set {" and ".join(missing)} to the reviewer and judge login folders, as the Makefile does')
     concurrency = concurrency or settings.load()['concurrency']

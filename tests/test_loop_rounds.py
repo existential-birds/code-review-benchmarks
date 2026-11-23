@@ -197,7 +197,7 @@ def test_a_pilot_scores_only_its_first_cases_and_one_name_runs_once(workspace, m
                        limit=bad.get('limit'), concurrency=bad.get('concurrency'))
 
 
-def test_the_oracle_needs_only_the_judges_login_and_counts_unscored_trials_as_failed(workspace, monkeypatch):
+def test_the_oracle_records_no_build_and_counts_unscored_trials_as_failed(workspace, monkeypatch):
     configs = []
     def harbor(command, check):
         configs.append(command[command.index('-c') + 1])
@@ -205,7 +205,6 @@ def test_the_oracle_needs_only_the_judges_login_and_counts_unscored_trials_as_fa
                   {'case-a': SCORED['case-a'], 'case-b': None if len(configs) == 2 else SCORED['case-b']},
                   record=False)
     monkeypatch.setattr(rounds, 'subprocess', SimpleNamespace(run=harbor))
-    monkeypatch.delenv('REVIEWER_CODEX_AUTH_DIR')
     with pytest.raises(RuntimeError, match='Round 2 failed'):
         rounds.run('oracle', workspace / 'cases.txt', 2, 'oracle')
     assert configs == [str(rounds.ORACLE_CONFIG)] * 2
@@ -219,9 +218,7 @@ def test_the_oracle_needs_only_the_judges_login_and_counts_unscored_trials_as_fa
     write_job(Path('jobs/daydream'), workspace / 'artifacts/loop/oracle/catalog', SCORED)
     with pytest.raises(ValueError, match='An oracle summary records no build'):
         rounds.summarise(workspace / 'artifacts/loop/oracle/catalog', ['daydream'], oracle=True)
-    # Without the judge's login nothing starts; a Daydream build still needs the reviewer's too.
+    # The tasks mount both login folders, so the oracle needs the reviewer's too.
+    monkeypatch.delenv('REVIEWER_CODEX_AUTH_DIR')
     with pytest.raises(ValueError, match='Set REVIEWER_CODEX_AUTH_DIR'):
-        rounds.run('pinned', workspace / 'cases.txt', 1, 'reviewer')
-    monkeypatch.delenv('JUDGE_PI_AUTH_DIR')
-    with pytest.raises(ValueError, match='Set JUDGE_PI_AUTH_DIR to'):
         rounds.run('oracle', workspace / 'cases.txt', 1, 'oracle-2')
