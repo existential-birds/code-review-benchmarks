@@ -1,6 +1,8 @@
-"""Tests never run Git. A ``git`` that always fails comes first on PATH, so any
-call that slips past the fakes in ``fake_git.py`` fails the test instead of
-reaching the real Git and the operator's configuration."""
+"""Tests never run Git through PATH. A ``git`` that always fails comes first on PATH,
+so any call that slips past the fakes in ``fake_git.py`` fails the test instead of
+reaching the real Git and the operator's configuration. The one exception is
+``test_guard.py``, whose checks depend on what Git itself reports: it calls the real
+binary by absolute path with the operator's configuration shut out."""
 import os
 
 import pytest
