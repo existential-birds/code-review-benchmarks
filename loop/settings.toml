@@ -1,0 +1,78 @@
+# The loop's settings, from the assumed defaults of
+# https://github.com/existential-birds/code-review-benchmarks/issues/42.
+# Change any of them here; a run may override a value for itself.
+
+# Benchmark scored every iteration: small catalogs and a round report; AACR's dev catalog is about 33 GB.
+climb_benchmark = "reviewbench"
+# Rests on matches with reference findings, not on the judge's opinion of unmatched ones.
+primary_metric = "grounded_f1"
+# Provisional until #45: twice the test set, whose complete rounds varied by about 0.01.
+climb_set_size = 50
+# The same size as the climb set, so the same noise figures apply.
+check_set_size = 50
+# About the recall gain accepted for committed review in existential-birds/daydream#1686.
+target_gain = 0.02
+# An unchanged build passes one comparison about 1 time in 40; the check set and confirmation catch most of those.
+accept_z = 2.0
+# Caps an iteration at 250 climb trials.
+rounds_max = 5
+# A rejected change usually shows it in the first round.
+futility_stop = true
+# Committed review was accepted at +14% cost and +19% time; more than that needs a person.
+max_cost_ratio = 1.25
+# A tripwire for flooding; the precision guards do the real work.
+max_findings_ratio = 2.0
+# Above these Daydream requires a simplification sweep, and a small diff is easier to attribute.
+max_diff_files = 5
+max_diff_lines = 500
+# Daydream's gate budget is 2 minutes on a cloud container.
+gate_timeout_seconds = 300
+# The documented -n; recorded runs used 2 or 3.
+concurrency = 2
+# A full iteration with its check-set rounds, at the provisional sizes.
+iteration_max_wall_hours = 24
+# The same, with headroom.
+iteration_max_cost_usd_equiv = 1000
+# One run is a few days, short enough to review.
+run_max_iterations = 10
+# About ten climb-only iterations.
+run_max_cost_usd_equiv = 4000
+# Five days.
+run_max_wall_hours = 120
+# Half a run without a kept change.
+plateau_iterations = 5
+# No stacking on an unreviewed change.
+max_unmerged_winners = 1
+# A winner opens a draft pull request for human review; nothing merges without a person.
+auto_open_pr = true
+# The convention of existential-birds/daydream#1672.
+holdout_rounds = 3
+# Not worse than baseline beyond noise, and a gain on ReviewBench's test set: 25 and 54 cases can't prove a 0.02 gain alone.
+holdout_rule = "no-worse-and-reviewbench-test-gain"
+# Keeps what the loop learns about held-out to a few bits.
+holdout_max_uses = 10
+# Judge-only trials are cheap.
+canary_cases = 10
+canary_every = 5
+# Limits drift between baseline and candidate rounds.
+baseline_max_age_days = 14
+# Enough to debug a recent rejection.
+keep_rejected_jobs = 3
+# Below this the two builds were scored on too few common cases to compare.
+min_matched_fraction = 0.8
+# A proposer that repeats itself three times has nothing new.
+max_proposal_attempts = 3
+# Three iterations lost to builds, jobs or logins means something is broken.
+invalid_streak_stop = 3
+# One wait for a subscription limit to clear, then stop.
+limit_backoff_minutes = 60
+# A dev round is 131 cases and about 8 reviewer-hours; AACR is used at confirmation.
+aacr_in_climb = false
+# The Codex login is already required; non-interactive, writes only to the worktree, no network.
+proposer_command = ["codex", "exec", "--sandbox", "workspace-write"]
+
+# Derived from the noise measurement in #45, and unset until it lands:
+# sigma (upper-bound SD of pooled grounded F1 between rounds), rounds, and the guard
+# margins precision_margin, wrong_findings_margin and incomplete_margin.
+# accept_threshold(R) = accept_z * sigma * sqrt(2 / R) follows from sigma.
+[derived]

@@ -48,7 +48,7 @@ aacr-source: $(SRC)/.aacr-bench-$(AACR_COMMIT)
 
 reviewbench-source: $(SRC)/.ReviewBench-$(REVIEWBENCH_COMMIT)
 
-test: $(SETUP)
+test: $(SETUP) $(SRC)/.ReviewBench-$(REVIEWBENCH_COMMIT)
 	uvx ruff@0.14.0 check
 	$(PY) -m pytest tests -q
 	node --test tests/pi_judge.test.mjs

@@ -22,6 +22,11 @@ pinned revision to confirm the capability isn't already there. Record what you
 inspected and the precise gap in your pull request. Any custom integration should
 cover only that gap and use Harbor's supported interfaces.
 
+The [loop](loop/) that tunes Daydream sits on top of Harbor, not beside it. Every
+trial still runs through `harbor run`; the loop adds no scheduling, retries, attempt
+counts or aggregation of its own. It decides which builds to score on which cases,
+and what to do with the scores.
+
 ## Pull requests
 
 Follow the [PR template](.github/pull_request_template.md). Keep every checklist

@@ -1,0 +1,57 @@
+# Loop check set: ReviewBench dev cases scored only for a change that passed on
+# the climb set. The proposer never reads their evidence.
+# Chosen from the dev cases of ReviewBench 4f04392 (its full set less its test
+# set, as `--split dev` converts them): sort the names by the SHA-256 hex digest of
+# the UTF-8 text "loop:" followed by the name, then take the first climb_set_size
+# for the climb set and the next check_set_size for the check set.
+# Listed in that order. Regenerate with `python -m loop.sets --upstream <ReviewBench>`.
+cardstack_boxel_4369-e9a6ef34
+tile-ai_TileOPs_864-574d04dc
+konturio_disaster-ninja-fe_1081-d2c0c636
+github_copilot-sdk_1049-4f18d31b
+Asjas_course-platform_946-ef3adc91
+NightHawkATL_ntp-dashboard_84-2f4b8699
+vndee_memex_6-e392a168
+rcrsr_rill_53-2ed44caf
+auspatious_ldn-lulc_44-bc5877c7
+LegionIO_legion-interlink_16-c3dafce0
+motif-ui_motifreact_34-cb636a17
+davidortinau_SentenceStudio_68-ac86e5c3
+sirosfoundation_go-wallet-backend_76-28ffb41a
+haoling_diary-notebook-blog-transformer_24-876934a6
+supa-magic_spm_19-c60d2e03
+mamu7211_feirb-mailclient_215-d15c6ca6
+shaypal5_pr-agent-context_51-a2fa89b7
+Martian-Engineering_lossless-claw_307-9b9a04b6
+SiaFoundation_indexd_939-933dc46d
+AgentParadise_agent-paradise-standards-system_61-fbdecd6b
+psxsplash_splashedit_22-431d5728
+hughdidit_DAISy-Agency_294-690f26b6
+cjolivier01_hm-cupano_14-03aa0246
+swt-labs_vibe-better-with-claude-code-vbw_358-c6082353
+Tzeusy_butlers_997-6890b2bc
+fentas_b_136-6423e610
+ls1intum_Artemis_12479-237b3656
+obot-platform_obot_6355-1414ee32
+confluentinc_mcp-confluent_143-abcb5d9f
+basecamp_basecamp-cli_415-f78f6fb8
+NestDevLab_nestjs-yalc_123-3ce6ba57
+tallclub_matimo_77-7e783139
+semitexa_semitexa-demo_17-2449142d
+ROCm_TransferBench_256-1cfd8bd9
+brendanjerwin_simple_wiki_766-dc1bd9ae
+dougborg_katana-openapi-client_309-dfc5d17b
+davidortinau_SentenceStudio_72-8941b5da
+jeduden_mdsmith_125-06f9d050
+wspulse_client-ts_20-2c7574bc
+wiyco_review-insights_31-e9c5280f
+rulecom_rule-io-sdk_36-778a137b
+bndF1_wavely_133-70f0d898
+AntManThePro_TwistedsCommandCenter_13-78f6157e
+tableau_server-client-python_1760-c2c05c5f
+kutanti_litmusai_67-48e73983
+whispr-messenger_mobile-app_64-9e7742e5
+bitmovin_bitmovin-player-ui_848-9d3d63c3
+joshjohanning_npm-version-check-action_92-a9fce756
+joshjohanning_bulk-github-repo-settings-sync-action_120-7d62e090
+jenkinsci_gitea-plugin_141-2e021e56

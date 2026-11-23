@@ -62,3 +62,23 @@ _Avoid_: Rounds
 **Round**:
 One job's complete pass over a catalog, with one trial for each review case.
 _Avoid_: Attempt count, whose trials pool into one job
+
+**Iteration**:
+One proposed change to Daydream with its candidate build, scores and verdict.
+
+**Proposer**:
+The agent that writes a change to Daydream from dev evidence.
+
+**Climb set**:
+The dev review cases scored in every iteration, and the only cases whose evidence
+the proposer reads.
+
+**Check set**:
+Dev review cases outside the climb set, scored only for a change that passed on the
+climb set. The proposer never reads their evidence.
+
+**Ledger**:
+The append-only record of every iteration.
+
+**Confirmation**:
+Scoring a kept change on the held-out split, outside the loop.
