@@ -86,7 +86,8 @@ def side_rounds(summary: dict, cases: list[str]) -> list[dict]:
             findings_per_case=pooled['candidate_count'] / len(cases),
             wrong_findings_per_case=pooled['unmatched_fp_count'] / len(cases),
             # Over the whole round, since a review that failed has left the matched cases.
-            failed_or_incomplete=entry['failed'] + entry['incomplete'],
+            # Every review that didn't finish: failed, incomplete or missing from the job.
+            unfinished=entry['failed'] + entry['incomplete'] + entry['missing'],
             # The summary keeps cost and time as round totals only, so per case is the total
             # over the trials it covers: cost_usd over cost_trials, the trials that reported a
             # cost, and elapsed_seconds over the scored trials.
@@ -157,7 +158,7 @@ def decide(baseline: dict, candidate: dict, stage: str, limits: settings.Setting
         'augmented_precision': (base['augmented_precision'] - precision, True),
         'wrong_findings_per_case': (base['wrong_findings_per_case'] + limits['wrong_findings_margin'], False),
         'findings_per_case': (base['findings_per_case'] * limits['max_findings_ratio'], False),
-        'failed_or_incomplete': (base['failed_or_incomplete'] + limits['incomplete_margin'], False),
+        'unfinished': (base['unfinished'] + limits['incomplete_margin'], False),
         'cost_per_case': (base['cost_per_case'] * cost, False),
         'seconds_per_case': (base['seconds_per_case'] * cost, False),
     }

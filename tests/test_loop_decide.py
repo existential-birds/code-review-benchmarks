@@ -15,15 +15,18 @@ BASE, WIN = counts(3, 2, 1, 1, 2, 1), counts(3, 2, 1, 1, 2, 2)
 HARD = counts(3, 2, 0, 0, 2, 0)
 
 
-def summary(per_case: list, rounds: int = 3, judge: str = 'j', cost: float | None = 2.5, seconds: float = 60) -> dict:
+def summary(per_case: list, rounds: int = 3, judge: str = 'j', cost: float | None = 2.5, seconds: float = 60,
+            missing: int = 0) -> dict:
     """A summary over case-0, case-1, ...: each item is a case's counts in every round, or a list per round.
-    A null is a trial that left no score; each round's cost and time are per scored trial."""
+    A null is a trial that left no score (failed, or missing from the job when ``missing`` says so);
+    each round's cost and time are per scored trial."""
     cases = {f'case-{number}': item if isinstance(item, list) else [item] * rounds
              for number, item in enumerate(per_case)}
     entries = []
     for number in range(rounds):
         scored = sum(counts[number] is not None for counts in cases.values())
-        entries.append(dict(round=number + 1, failed=len(cases) - scored, incomplete=0, evaluated=scored,
+        entries.append(dict(round=number + 1, failed=len(cases) - scored - missing, missing=missing, incomplete=0,
+                            evaluated=scored,
                             cost_usd=None if cost is None else cost * scored, cost_trials=scored,
                             elapsed_seconds=seconds * scored))
     return dict(catalog_identity=dict(reviewbench_revision='r', split='dev', judge=judge, daydream={'version': 'v'}),
@@ -57,7 +60,8 @@ def test_a_real_gain_is_accepted_and_reports_recall_and_precision_apart():
     # Seven findings per case, all valid, against three.
     (summary([counts(7, 2, 1, 5, 2, 2)] * 10), ['findings_per_case']),
     # One case fails in every round: one failed review per round against none.
-    (summary([WIN] * 9 + [None]), ['failed_or_incomplete']),
+    (summary([WIN] * 9 + [None]), ['unfinished']),
+    (summary([WIN] * 9 + [None], missing=1), ['unfinished']),
     (summary([WIN] * 10, cost=3.2), ['cost_per_case']),
     (summary([WIN] * 10, seconds=80), ['seconds_per_case']),
 ])
@@ -89,7 +93,7 @@ def test_a_candidate_that_fails_on_the_baselines_worst_cases_is_rejected_or_inva
     result = decide.decide(baseline, dodger, 'climb', LIMITS)
     assert decide.matched_cases(baseline, dodger) == easy and result['matched']['fraction'] == .8
     assert result['verdict'] == 'reject' and result['gain']['grounded_f1'] == 0
-    assert failed_guards(result) == ['failed_or_incomplete'] and len(result['reasons']) == 2
+    assert failed_guards(result) == ['unfinished'] and len(result['reasons']) == 2
     # Failing on a third case leaves too few to compare, after its first round already.
     worse = [BASE] * 7 + [None] * 3
     for rounds in (1, 3):
