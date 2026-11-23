@@ -225,3 +225,10 @@ def test_an_invalid_proposal_is_refused(step, written, reason):
     result, _ = step([dict(commits=[EFFORT], **({} if written is None else dict(proposal=written)))],
                      max_proposal_attempts=1)
     assert result['proposal'] is None and reason in result['refusals'][0]['reason']
+
+
+def test_codex_may_also_write_the_clones_git_folder_where_the_commit_lands(tmp_path):
+    clone = tmp_path / 'daydream'
+    assert propose.command(['codex', 'exec', '--sandbox', 'workspace-write'], clone) == [
+        'codex', 'exec', '--add-dir', str((clone / '.git').resolve()), '--sandbox', 'workspace-write']
+    assert propose.command(['python', 'stand-in.py'], clone) == ['python', 'stand-in.py']

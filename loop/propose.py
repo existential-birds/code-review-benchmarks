@@ -11,7 +11,8 @@ The proposer is ``proposer_command`` from ``loop/settings.toml``, run in the wor
 with the prompt on stdin, as ``codex exec`` takes it when given no prompt argument, for
 at most ``--timeout`` seconds an attempt (two hours by default). It gets a throwaway
 HOME, Codex's login folder and an allowlisted environment; the sandbox flags in
-``proposer_command`` decide what else it may write or reach. A sandbox that limits
+``proposer_command`` decide what else it may write or reach. For Codex the clone's Git
+folder is added as writable, since the worktree's one commit lands there. A sandbox that limits
 writes, as Codex's ``workspace-write`` does, may still let it read other files on the
 machine; it is shown only the copies. The prompt joins ``loop/proposer.md``, the paths
 of a fresh read-only copy of the evidence pack and of ``proposal.json``, both in a
@@ -218,6 +219,15 @@ def clone(root: Path, url: str, baseline: str) -> tuple[Path, str]:
     return repository, guard.git(repository, 'rev-parse', '--verify', '--end-of-options', f'{baseline}^{{commit}}').strip()
 
 
+def command(argv: list[str], repository: Path) -> list[str]:
+    """The proposer command. Codex's workspace-write sandbox lets it write only the worktree, but a
+    worktree's commit lands in the clone's Git folder, so that folder is added as writable too."""
+    if Path(argv[0]).name == 'codex' and 'exec' in argv:
+        at = argv.index('exec') + 1
+        return [*argv[:at], '--add-dir', str((Path(repository) / '.git').resolve()), *argv[at:]]
+    return list(argv)
+
+
 def copy_pack(pack: Path, target: Path) -> None:
     """A read-only copy of the evidence pack, refusing links and anything that isn't one."""
     if not (pack / 'index.json').is_file() or not (pack / 'labels.jsonl').is_file():
@@ -270,7 +280,7 @@ def propose(run: str, baseline: str, pack: Path, loaded: settings.Settings, *, r
             stdin = logs / f'attempt-{attempt}.prompt.md'
             stdin.write_text(prompt(worktree, branch, base, paths | dict(PROPOSAL=proposal_path), ideas, loaded)
                              + refusal_text(result['refusals']))
-            returncode, _ = guard.run_bounded(loaded['proposer_command'], worktree, environment,
+            returncode, _ = guard.run_bounded(command(loaded['proposer_command'], repository), worktree, environment,
                                               logs / f'attempt-{attempt}.log', timeout, stdin=stdin)
             try:
                 if returncode is None:
