@@ -139,7 +139,7 @@ def test_summaries_that_cannot_be_compared_are_refused():
     other_build = summary([WIN] * 10)
     other_build['catalog_identity']['daydream'] = {'version': 'candidate'}
     assert decide.decide(baseline, other_build, 'climb', LIMITS)['verdict'] == 'accept'
-    for key in decide.IDENTITY:
+    for key in ('reviewbench_revision', 'split', 'judge'):
         other = summary([WIN] * 10)
         other['catalog_identity'][key] = 'other'
         with pytest.raises(ValueError, match=f'Refusing to compare summaries of different {key}'):

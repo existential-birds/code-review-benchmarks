@@ -23,10 +23,13 @@ split, judge (ReviewBench) or dataset (AACR) and build, so two summaries can be 
 case's counts in every round (ReviewBench's overall counts, AACR's four reward counts), null where unscored, so two
 summaries can be compared on the cases both scored.
 
-Every catalog is generated from the dev split, so a held-out case is refused; held-out
-rounds belong to confirmation alone. ReviewBench is the default and the only benchmark
-the loop scores. ``--benchmark aacr`` scores AACR dev cases, to check its report and a
-build. A case that fails to convert leaves no catalog behind: drop it and run again.
+Every catalog is generated from the dev split, so a held-out case is refused, and
+``--name`` is a plain folder name, so nothing lands outside ``artifacts/loop/``. Held-out
+rounds belong to ``loop.confirm`` alone: it is the one caller of ``score`` with a held-out
+split, and keeps those rounds' folders and jobs under ``confirmations/``. ReviewBench is
+the default and the only benchmark the loop scores. ``--benchmark aacr`` scores AACR dev
+cases, to check its report and a build. A case that fails to convert leaves no catalog
+behind: drop it and run again.
 """
 from __future__ import annotations
 
@@ -35,6 +38,7 @@ import fcntl
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -61,11 +65,12 @@ LOGINS = ('REVIEWER_CODEX_AUTH_DIR', 'JUDGE_PI_AUTH_DIR')
 # A round with more unscored trials than this is failed, not finished: a lost login or a
 # Docker outage, not noise (the stop rule of #45). The command stops; a rerun scores it afresh.
 MAX_UNSCORED_FRACTION = 0.2
+NAME = re.compile(r'[A-Za-z0-9][A-Za-z0-9._-]*')
 
 
-def finished(job: str) -> bool:
+def finished(job: str, jobs_dir: Path | None = None) -> bool:
     try:
-        return json.loads((JOBS / job / 'result.json').read_text()).get('finished_at') is not None
+        return json.loads(((jobs_dir or JOBS) / job / 'result.json').read_text()).get('finished_at') is not None
     except (OSError, ValueError):
         return False
 
@@ -101,23 +106,23 @@ BENCHMARKS = {
         metrics=METRICS, pool=_reviewbench_pool,
         counts=lambda reward: read_counts(reward)['overall'],
         identity=lambda catalog, listing, expected: {key: listing[key] for key in CATALOG},
-        generate=lambda upstream, catalog, cases, build_file: convert.generate_catalog(
-            upstream, catalog, split='dev', task_names=cases, build_file=build_file)),
+        generate=lambda upstream, catalog, cases, build_file, split: convert.generate_catalog(
+            upstream, catalog, split=split, task_names=cases, build_file=build_file)),
     'aacr': SimpleNamespace(
         report=aacr_report, config=Path('experiments/aacr-baseline.yaml'), upstream=Path('.cache/src/aacr-bench'),
         metrics=aacr_report.RATES, pool=_aacr_pool,
         counts=lambda reward: {key: reward[key] for key in aacr_metric.COUNTS},
         identity=_aacr_identity,
-        generate=lambda upstream, catalog, cases, build_file: aacr_convert.generate_catalog(
-            upstream, catalog, daydream=True, split='dev', task_names=cases, build_file=build_file)),
+        generate=lambda upstream, catalog, cases, build_file, split: aacr_convert.generate_catalog(
+            upstream, catalog, daydream=True, split=split, task_names=cases, build_file=build_file)),
 }
 
 
-def summarise(catalog: Path, jobs: list[str], benchmark: str = 'reviewbench') -> dict:
+def summarise(catalog: Path, jobs: list[str], benchmark: str = 'reviewbench', jobs_dir: Path | None = None) -> dict:
     """The catalog, side, every round's counts and pooled scores, their spread, and each case's counts."""
     bench = BENCHMARKS[benchmark]
     listing, expected = bench.report.read_catalog(catalog)
-    entries = [bench.report.read_round(JOBS / job, expected) for job in jobs]
+    entries = [bench.report.read_round((jobs_dir or JOBS) / job, expected) for job in jobs]
     # Rounds that all failed before any review started record no build.
     sides = shared.builds(entries)
     if len(sides) > 1 or None in sides:
@@ -136,12 +141,12 @@ def summarise(catalog: Path, jobs: list[str], benchmark: str = 'reviewbench') ->
                 cases=cases)
 
 
-def outcome(job: str, catalog: Path, benchmark: str = 'reviewbench') -> str:
+def outcome(job: str, catalog: Path, benchmark: str = 'reviewbench', jobs_dir: Path | None = None) -> str:
     """finished, failed (too many trials unscored) or abandoned (the job never finished)."""
-    if not finished(job):
+    if not finished(job, jobs_dir):
         return 'abandoned'
     bench = BENCHMARKS[benchmark].report
-    entry = bench.read_round(JOBS / job, bench.read_catalog(catalog)[1])
+    entry = bench.read_round((jobs_dir or JOBS) / job, bench.read_catalog(catalog)[1])
     return 'failed' if entry['expected'] - entry['evaluated'] > MAX_UNSCORED_FRACTION * entry['expected'] else 'finished'
 
 
@@ -154,37 +159,58 @@ def _write(path: Path, state: dict) -> None:
 def run(build: str, cases_file: Path, rounds: int, name: str, *, benchmark: str = 'reviewbench',
         limit: int | None = None, concurrency: int | None = None, upstream: Path | None = None) -> dict:
     """Score ``build`` over ``rounds`` rounds of the benchmark's dev cases in ``cases_file``."""
+    if not NAME.fullmatch(name):
+        raise ValueError(f'A name is a plain folder name under {ARTIFACTS}/: {name!r}')
+    if limit is not None and limit < 1:
+        raise ValueError('Rounds, --limit-cases and --concurrency must be positive')
+    return score(build, sets.read(cases_file)[:limit], rounds, ARTIFACTS / name, name, benchmark=benchmark,
+                 split='dev', jobs_dir=JOBS, concurrency=concurrency, upstream=upstream)
+
+
+def score(build: str, cases: list[str] | None, rounds: int, folder: Path, name: str, *, benchmark: str,
+          split: str, jobs_dir: Path, concurrency: int | None = None, upstream: Path | None = None) -> dict:
+    """Score ``build`` over ``rounds`` rounds of ``cases`` from one split, or of the whole split when None.
+
+    The catalog and summary go in ``folder``, the jobs in ``jobs_dir``. ``run`` passes the dev
+    split; only ``loop.confirm`` passes a held-out one, with a folder and jobs under ``confirmations/``.
+    """
     if benchmark not in BENCHMARKS:
         raise ValueError(f'Unknown benchmark {benchmark!r}; choose one of {sorted(BENCHMARKS)}')
     bench = BENCHMARKS[benchmark]
-    if rounds < 1 or (limit is not None and limit < 1) or (concurrency is not None and concurrency < 1):
+    if rounds < 1 or (concurrency is not None and concurrency < 1):
         raise ValueError('Rounds, --limit-cases and --concurrency must be positive')
     missing = [name for name in LOGINS if not os.environ.get(name) or not Path(os.environ[name]).is_dir()]
     if missing:
         raise ValueError(f'Set {" and ".join(missing)} to the reviewer and judge login folders, as the Makefile does')
     concurrency = concurrency or settings.load()['concurrency']
-    folder = ARTIFACTS / name
     path, catalog = folder / 'summary.json', folder / 'catalog'
     build = build if build == 'pinned' else str(Path(build).resolve())
-    request = dict(build=build, cases=sets.read(cases_file)[:limit])
+    request = dict(build=build, cases=cases)
     if benchmark != 'reviewbench':
         # A ReviewBench summary written before AACR rounds existed still resumes.
         request['benchmark'] = benchmark
+    if split != 'dev':
+        request['split'] = split
     folder.mkdir(parents=True, exist_ok=True)
     with open(folder / 'lock', 'w') as lock:
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             raise RuntimeError(f'Another loop.rounds is scoring {name}') from None
-        return _rounds(benchmark, request, rounds, name, path, catalog, concurrency, upstream or bench.upstream)
+        return _rounds(benchmark, request, rounds, name, path, catalog, concurrency, upstream or bench.upstream,
+                       split, jobs_dir)
 
 
-def _generate(bench, upstream: Path, catalog: Path, request: dict) -> None:
-    """Generate the build's dev catalog. On failure, remove what this attempt wrote, so the name runs again."""
+def _generate(bench, upstream: Path, catalog: Path, request: dict, split: str) -> None:
+    """Generate the build's catalog. On failure, remove what this attempt wrote, so the name runs again.
+
+    A held-out set has no case list to drop a case from: when its conversion ran to the end, a
+    case that failed (its upstream commit gone) is left out, and catalog.json records it.
+    """
     existed = catalog.exists()
     try:
         bench.generate(upstream, catalog, request['cases'],
-                       None if request['build'] == 'pinned' else Path(request['build']))
+                       None if request['build'] == 'pinned' else Path(request['build']), split)
     except Exception as error:
         if existed:
             raise
@@ -192,16 +218,19 @@ def _generate(bench, upstream: Path, catalog: Path, request: dict) -> None:
             listing = json.loads((catalog / 'catalog.json').read_text())
         except (OSError, ValueError):
             listing = {}
-        shutil.rmtree(catalog, ignore_errors=True)
         failed = {case['task_name']: case.get('error') for case in listing.get('cases', [])
                   if case.get('status') == 'error'}
+        if (split != 'dev' and failed and len(listing['cases']) == listing.get('selected_records')
+                and len(failed) < len(listing['cases'])):
+            return
+        shutil.rmtree(catalog, ignore_errors=True)
         if failed:
             raise ValueError(f'These cases failed to convert: {failed}. Drop them from the case list and run '
                              'again; the partial catalog was removed') from error
         raise
 
 
-def _rounds(benchmark, request, rounds, name, path, catalog, concurrency, upstream) -> dict:
+def _rounds(benchmark, request, rounds, name, path, catalog, concurrency, upstream, split, jobs_dir) -> dict:
     bench = BENCHMARKS[benchmark]
 
     def save():
@@ -209,7 +238,7 @@ def _rounds(benchmark, request, rounds, name, path, catalog, concurrency, upstre
         _write(path, state)
         done = [entry['job'] for entry in state['jobs'] if entry['state'] == 'finished']
         if done:
-            state.update(summarise(catalog, done, benchmark))
+            state.update(summarise(catalog, done, benchmark, jobs_dir))
             _write(path, state)
 
     if path.exists():
@@ -217,25 +246,25 @@ def _rounds(benchmark, request, rounds, name, path, catalog, concurrency, upstre
         if state['request'] != request:
             raise ValueError(f'{name} already scored {state["request"]}; choose a new name')
     else:
-        # The converter refuses any case outside the dev split, and nothing here asks for another.
-        _generate(bench, upstream, catalog, request)
+        # The converter refuses any case outside the split asked for.
+        _generate(bench, upstream, catalog, request, split)
         state = dict(request=request, catalog=str(catalog), jobs=[])
     for entry in state['jobs']:
         if entry['state'] == 'started':
-            entry['state'] = outcome(entry['job'], catalog, benchmark)
+            entry['state'] = outcome(entry['job'], catalog, benchmark, jobs_dir)
     save()
     for number in range(1, rounds + 1):
         if any(entry['round'] == number and entry['state'] == 'finished' for entry in state['jobs']):
             continue
         attempt = 1 + sum(entry['round'] == number for entry in state['jobs'])
         job = f'{name}-round-{number}-attempt-{attempt}'
-        if (JOBS / job).exists():
-            raise FileExistsError(f'Refusing to reopen Harbor job {JOBS / job}; choose a new name')
+        if (jobs_dir / job).exists():
+            raise FileExistsError(f'Refusing to reopen Harbor job {jobs_dir / job}; choose a new name')
         state['jobs'].append(entry := dict(round=number, job=job, state='started'))
         save()
-        subprocess.run([str(HARBOR), 'run', '-c', str(bench.config), '-p', str(catalog), '-k', '1', '-r', '0',
-                        '-n', str(concurrency), '--job-name', job], check=False)
-        entry['state'] = outcome(job, catalog, benchmark)
+        subprocess.run([str(HARBOR), 'run', '-c', str(bench.config), '-p', str(catalog), '-o', str(jobs_dir),
+                        '-k', '1', '-r', '0', '-n', str(concurrency), '--job-name', job], check=False)
+        entry['state'] = outcome(job, catalog, benchmark, jobs_dir)
         save()
         if entry['state'] != 'finished':
             raise RuntimeError(f'Round {number} {entry["state"]} ({job}); fix the cause and run the command '
@@ -250,7 +279,7 @@ def main() -> None:
     parser.add_argument('--benchmark', choices=sorted(BENCHMARKS), default='reviewbench',
                         help="ReviewBench, the loop's own scorer, or AACR's dev cases, to check its report and a build")
     parser.add_argument('--rounds', required=True, type=int)
-    parser.add_argument('--name', required=True, help='Prefix of the catalog, summary and job names')
+    parser.add_argument('--name', required=True, help='A folder name under artifacts/loop/, and the prefix of its job names')
     parser.add_argument('--limit-cases', type=int, help='Score only the first N cases, for a pilot')
     parser.add_argument('--concurrency', type=int, help="Harbor's -n; defaults to the loop setting")
     arguments = parser.parse_args()
