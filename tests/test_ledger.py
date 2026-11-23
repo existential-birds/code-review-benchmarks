@@ -114,10 +114,12 @@ def test_entries_that_do_not_fit_the_schema_are_refused(tmp_path, run):
     assert not (run / 'patches/5.patch').exists()
     path = run / 'ledger.jsonl'
     lines = path.read_text().splitlines(keepends=True)
-    without_time, with_nan = json.loads(lines[-1]), json.loads(lines[-1])
+    without_time, with_nan, list_kind = json.loads(lines[-1]), json.loads(lines[-1]), json.loads(lines[-1])
     del without_time['time']
     with_nan['cost'] = {'trials': float('nan')}
-    for entry, message in ((without_time, 'line 6: it has no time'), (with_nan, 'line 6: NaN is not strict JSON')):
+    list_kind['kind'] = []
+    for entry, message in ((without_time, 'line 6: it has no time'), (with_nan, 'line 6: NaN is not strict JSON'),
+                           (list_kind, r'line 6: Unknown ledger entry kind: \[\]')):
         path.write_text(''.join(lines[:-1]) + json.dumps(entry) + '\n')
         with pytest.raises(ValueError, match=message):
             ledger.read(run)

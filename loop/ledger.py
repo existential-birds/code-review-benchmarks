@@ -72,7 +72,7 @@ def _refuse_constant(name: str) -> None:
 
 def _check(kind: str, fields: dict, earlier: list[dict]) -> None:
     """Refuse an entry that doesn't fit the schema or the entries before it."""
-    if kind not in FIELDS:
+    if not isinstance(kind, str) or kind not in FIELDS:
         raise ValueError(f'Unknown ledger entry kind: {kind}')
     if bool(earlier) == (kind == 'run-start'):
         raise ValueError('A ledger starts with one run-start entry, and only there')
