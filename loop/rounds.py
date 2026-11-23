@@ -106,13 +106,18 @@ def _write(path: Path, state: dict) -> None:
     os.replace(temporary, path)
 
 
+def check_logins() -> None:
+    """Refuse to start without the login folders, since every trial would fail at once."""
+    missing = [name for name in LOGINS if not os.environ.get(name) or not Path(os.environ[name]).is_dir()]
+    if missing:
+        raise ValueError(f'Set {" and ".join(missing)} to the reviewer and judge login folders, as the Makefile does')
+
+
 def run(build: str, cases_file: Path, rounds: int, name: str, *, limit: int | None = None,
         concurrency: int | None = None, upstream: Path = UPSTREAM) -> dict:
     if rounds < 1 or (limit is not None and limit < 1) or (concurrency is not None and concurrency < 1):
         raise ValueError('Rounds, --limit-cases and --concurrency must be positive')
-    missing = [name for name in LOGINS if not os.environ.get(name) or not Path(os.environ[name]).is_dir()]
-    if missing:
-        raise ValueError(f'Set {" and ".join(missing)} to the reviewer and judge login folders, as the Makefile does')
+    check_logins()
     concurrency = concurrency or settings.load()['concurrency']
     folder = ARTIFACTS / name
     path, catalog = folder / 'summary.json', folder / 'catalog'
