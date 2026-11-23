@@ -1,0 +1,57 @@
+# Loop climb set: ReviewBench dev cases scored in every iteration, and the only
+# cases whose evidence the proposer reads.
+# Chosen from the dev cases of ReviewBench 4f04392 (its full set less its test
+# set, as `--split dev` converts them): sort the names by the SHA-256 hex digest of
+# the UTF-8 text "loop:" followed by the name, then take the first climb_set_size
+# for the climb set and the next check_set_size for the check set.
+# Listed in that order. Regenerate with `python -m loop.sets --upstream <ReviewBench>`.
+semitexa_semitexa-core_38-bc76e026
+VeyronSakai_UniCortex_162-e74a1d69
+mareklesko_ProxmoxMCP-Plus_1-b44013c3
+chrisdevchroma_gsd-ng_16-3a6681c0
+dotnet_efcore_38115-009f4190
+laser-base_laser-core_393-345c5421
+taskless_skills_16-d7b6f3f5
+hughdidit_DAISy-Agency_274-1c88a238
+thomHayner_bicycle-repair-stations_6-567f44d4
+Gibbs-Morris_mississippi_471-fdc4ff8d
+PaulStSmith_PostmanOpenAPIConverter_7-41a95f20
+CLJunge_REFW.Umbra_88-600fa7cb
+charmbracelet_catwalk_268-69124a43
+shaypal5_pr-agent-context_75-7c51cc54
+s205109_AHKFlowApp_35-9ec13217
+namehash_ensnode_1938-73085b32
+FreeRTOS_FreeRTOS-Kernel_1379-c926adcf
+everruns_bashkit_1314-9afc1db1
+stuckj_mkvdup_180-4177c9e4
+Waferguard_waferguard-ml_17-62d4f66f
+shartma2_TTP_v2_33-e249f90f
+Imageomics_catalog_75-a8a7cdc7
+agent-sh_agentsys_298-a5224fae
+blamechris_chroxy_2266-7febfc48
+jeduden_mdsmith_112-ac0127ef
+dotnet_sdk_53906-a2a01660
+NIAEFEUP_enei_194-0442935c
+dotnet_sdk_53693-e993b64d
+nipoppy_nipoppy_964-9421a714
+iTwin_presentation_1288-31c0f13a
+capawesome-team_cli_127-5c1cc1c9
+control-theory_gonzo_129-0b9dd56f
+NightHawkATL_ntp-dashboard_96-23782271
+rulecom_rule-io-sdk_40-550f7bc0
+navikt_k9-brukerdialog-prosessering_480-f828e2d8
+scorbo2_ext-sn-statistics_20-12fad831
+konturio_disaster-ninja-fe_1234-2271e590
+gtronset_tablo-legacy-m3u_30-051c9cf3
+playcanvas_editor_1955-f3fdcf8a
+LittleAndi_FileHorizon_19-958f48b3
+melroyanthony_healthstream-rag_34-a1d2b3e0
+basecamp_omarchy_5203-617eca58
+burglekitt_worktree_17-276940da
+SpanPanel_span_207-212c534d
+konturio_disaster-ninja-fe_1208-04c27fe9
+konturio_disaster-ninja-fe_1237-09807d0d
+cybershoe_PingBar_4-e40744b3
+Nixbug_entebus-web-executive_120-630b29d5
+Pushedskydiver_chief-clancy_216-6baec2ab
+EdV4H_usketch_534-719aa834

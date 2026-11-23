@@ -14,12 +14,13 @@ dependencies = ["typing-extensions==4.16.0"]
 test = ["pytest==9.0.3"]
 
 [tool.setuptools.packages.find]
-include = ["benchmarks*"]
+include = ["benchmarks*", "loop*"]
 
 [tool.setuptools.package-data]
 "benchmarks.aacr" = ["holdout.txt", "templates/**/*"]
 "benchmarks.daydream" = ["build.json"]
 "benchmarks.pi" = ["*.mjs", "package*.json"]
+"loop" = ["*.toml", "*.txt"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

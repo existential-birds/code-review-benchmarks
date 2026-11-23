@@ -21,6 +21,10 @@ node_modules/
 /artifacts/
 /jobs/
 
+# Loop ledgers and held-out confirmations
+/loop-runs/
+/confirmations/
+
 # Daydream review output
 .daydream/
 .review-output.md
