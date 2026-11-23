@@ -60,7 +60,7 @@ def write_catalog(catalog: Path, names: list[str]) -> None:
         (catalog / name / 'tests').mkdir(parents=True)
         (catalog / name / 'tests/task.json').write_text(json.dumps({'task_id': number, 'evaluation_id': 7}))
     (catalog / 'catalog.json').write_text(json.dumps(
-        {'reviewbench_revision': 'r', 'split': 'dev', 'judge': 'j', 'tasks': names}))
+        {'reviewbench_revision': 'r', 'split': 'dev', 'judge': 'j', 'daydream': {'version': 'v'}, 'tasks': names}))
 
 
 def test_summary_scores_each_round_pools_its_trials_and_keeps_every_cases_counts(tmp_path, monkeypatch):
@@ -72,12 +72,14 @@ def test_summary_scores_each_round_pools_its_trials_and_keeps_every_cases_counts
     write_job(tmp_path / 'jobs/r2', catalog, {'case-a': second, 'case-b': None})
     summary = rounds.summarise(catalog, ['r1', 'r2'])
     assert summary['side'] == BUILD
+    assert summary['catalog_identity'] == {'reviewbench_revision': 'r', 'split': 'dev', 'judge': 'j',
+                                           'daydream': {'version': 'v'}}
     one, two = summary['rounds']
     # Round 1 pools both cases' counts: 3 of 6 matched are true, 3 of 10 golden covered, 4 of 10 sent valid.
     assert (one['grounded_precision'], one['grounded_recall'], one['grounded_f1']) == pytest.approx((.5, .3, .375))
     assert (one['augmented_precision'], one['augmented_recall']) == pytest.approx((4 / 10, 4 / 11))
     assert (one['findings_sent'], one['unmatched_judged_wrong'], one['n_input_tokens']) == (10, 3, 200)
-    assert (one['expected'], one['evaluated'], one['failed'], one['incomplete']) == (2, 2, 0, 0)
+    assert (one['expected'], one['missing'], one['evaluated'], one['failed'], one['incomplete']) == (2, 0, 2, 0, 0)
     assert (one['omitted_findings'], one['elapsed_seconds'], one['cost_usd']) == (2, 120, 5.0)
     # Round 2 scored case-a only; the failed trial leaves the pooled counts and is counted.
     assert (two['grounded_precision'], two['grounded_f1'], two['evaluated'], two['failed']) == pytest.approx(
@@ -90,6 +92,7 @@ def test_summary_scores_each_round_pools_its_trials_and_keeps_every_cases_counts
     write_job(tmp_path / 'jobs/down', catalog, {'case-a': None, 'case-b': None})
     down = rounds.summarise(catalog, ['down'])
     assert down['side'] is None and down['rounds'][0]['failed'] == 2 and down['scores']['grounded_f1']['mean'] is None
+    assert down['rounds'][0]['findings_sent'] is None
     write_job(tmp_path / 'jobs/other', catalog, {'case-a': first}, build='o' * 40)
     with pytest.raises(ValueError, match='One build per summary'):
         rounds.summarise(catalog, ['r1', 'other'])
@@ -110,6 +113,7 @@ def workspace(tmp_path, monkeypatch, pinned_wheel):
     monkeypatch.setattr(convert, 'check_source', lambda upstream: None)
     monkeypatch.setattr(convert, 'export', export)
     for name in rounds.LOGINS:
+        (tmp_path / name).mkdir()
         monkeypatch.setenv(name, str(tmp_path / name))
     (tmp_path / 'cases.txt').write_text('# header\ncase-a\ncase-b\n')
     return tmp_path
@@ -127,38 +131,67 @@ def test_a_case_outside_the_dev_split_is_refused(workspace, monkeypatch):
     assert not (workspace / 'artifacts/loop/no-login').exists()
 
 
-def test_rerun_skips_finished_rounds_and_never_reopens_an_unfinished_job(workspace, monkeypatch):
+SCORED = {'case-a': counts(2, 1, 1, 0, 2, 1), 'case-b': counts(2, 2, 1, 0, 2, 1)}
+
+
+def test_rerun_skips_finished_rounds_and_never_reopens_an_unfinished_or_failed_job(workspace, monkeypatch):
     outcomes, calls = [], []
     def harbor(command, check):
         job, catalog = command[command.index('--job-name') + 1], Path(command[command.index('-p') + 1])
         calls.append(job)
         assert command[command.index('-k') + 1] == '1' and command[command.index('-r') + 1] == '0'
         outcome = outcomes.pop(0)
-        write_job(Path('jobs') / job, catalog, {'case-a': counts(2, 1, 1, 0, 2, 1), 'case-b': counts(2, 2, 1, 0, 2, 1)},
-                  finished=outcome == 'finish')
-        if outcome == 'crash':
+        rewards = {'case-a': None, 'case-b': None} if outcome == 'fail' else SCORED
+        write_job(Path('jobs') / job, catalog, rewards, finished=outcome in ('finish', 'fail', 'finish-then-crash'))
+        if outcome in ('crash', 'finish-then-crash'):
             raise KeyboardInterrupt
     monkeypatch.setattr(rounds, 'subprocess', SimpleNamespace(run=harbor))
     summary = workspace / 'artifacts/loop/base/summary.json'
+    cases = workspace / 'cases.txt'
 
-    outcomes[:] = ['finish', 'die']
-    with pytest.raises(RuntimeError, match='Round 2 did not finish'):
-        rounds.run('pinned', workspace / 'cases.txt', 2, 'base', concurrency=2)
-    outcomes[:] = ['finish']
-    rounds.run('pinned', workspace / 'cases.txt', 2, 'base')
-    outcomes[:] = ['crash']
-    with pytest.raises(KeyboardInterrupt):
-        rounds.run('pinned', workspace / 'cases.txt', 3, 'base')
-    outcomes[:] = ['finish']
-    state = rounds.run('pinned', workspace / 'cases.txt', 3, 'base')
-    assert rounds.run('pinned', workspace / 'cases.txt', 3, 'base') == state
+    for planned, rounds_asked, error in ((['finish', 'die'], 2, 'Round 2 abandoned'), (['finish'], 2, None),
+                                         (['crash'], 3, KeyboardInterrupt), (['fail'], 3, 'Round 3 failed'),
+                                         (['finish-then-crash'], 4, KeyboardInterrupt), (['finish'], 4, None)):
+        outcomes[:] = planned
+        if error is None:
+            state = rounds.run('pinned', cases, rounds_asked, 'base', concurrency=2)
+        elif error is KeyboardInterrupt:
+            with pytest.raises(KeyboardInterrupt):
+                rounds.run('pinned', cases, rounds_asked, 'base')
+        else:
+            with pytest.raises(RuntimeError, match=error):
+                rounds.run('pinned', cases, rounds_asked, 'base')
+        assert not outcomes
+    assert rounds.run('pinned', cases, 4, 'base') == state and rounds.run('pinned', cases, 2, 'base') == state
 
-    assert calls == ['base-round-1-attempt-1', 'base-round-2-attempt-1', 'base-round-2-attempt-2',
-                     'base-round-3-attempt-1', 'base-round-3-attempt-2']
+    # The job that finished before its command was killed counts; the dead, crashed and failed ones never rerun.
     assert [(entry['job'][5:], entry['state']) for entry in json.loads(summary.read_text())['jobs']] == [
         ('round-1-attempt-1', 'finished'), ('round-2-attempt-1', 'abandoned'), ('round-2-attempt-2', 'finished'),
-        ('round-3-attempt-1', 'abandoned'), ('round-3-attempt-2', 'finished')]
+        ('round-3-attempt-1', 'abandoned'), ('round-3-attempt-2', 'failed'), ('round-3-attempt-3', 'finished'),
+        ('round-4-attempt-1', 'finished')]
+    assert calls == [entry['job'] for entry in state['jobs']]
     assert [entry['job'] for entry in state['rounds']] == [
-        'base-round-1-attempt-1', 'base-round-2-attempt-2', 'base-round-3-attempt-2']
+        'base-round-1-attempt-1', 'base-round-2-attempt-2', 'base-round-3-attempt-3', 'base-round-4-attempt-1']
     with pytest.raises(ValueError, match='already scored'):
-        rounds.run('pinned', workspace / 'cases.txt', 3, 'base', limit=1)
+        rounds.run('pinned', cases, 3, 'base', limit=1)
+
+
+def test_a_pilot_scores_only_its_first_cases_and_one_name_runs_once(workspace, monkeypatch):
+    monkeypatch.setattr(rounds, 'subprocess', SimpleNamespace(run=lambda command, check: write_job(
+        Path('jobs') / command[command.index('--job-name') + 1], Path(command[command.index('-p') + 1]),
+        {'case-a': SCORED['case-a']})))
+    state = rounds.run('pinned', workspace / 'cases.txt', 1, 'pilot', limit=1)
+    assert json.loads((workspace / 'artifacts/loop/pilot/catalog/catalog.json').read_text())['tasks'] == ['case-a']
+    assert list(state['cases']) == ['case-a'] and state['rounds'][0]['evaluated'] == 1
+    with open(workspace / 'artifacts/loop/pilot/lock') as held:
+        rounds.fcntl.flock(held, rounds.fcntl.LOCK_EX)
+        with pytest.raises(RuntimeError, match='Another loop.rounds is scoring pilot'):
+            rounds.run('pinned', workspace / 'cases.txt', 2, 'pilot', limit=1)
+    # A job folder already there, from an earlier summary that was lost, is never reopened.
+    (workspace / 'jobs/pilot-round-2-attempt-1').mkdir()
+    with pytest.raises(FileExistsError, match='Refusing to reopen'):
+        rounds.run('pinned', workspace / 'cases.txt', 2, 'pilot', limit=1)
+    for bad in ({'rounds': 0}, {'limit': 0}, {'concurrency': 0}):
+        with pytest.raises(ValueError, match='must be positive'):
+            rounds.run('pinned', workspace / 'cases.txt', bad.get('rounds', 1), 'other',
+                       limit=bad.get('limit'), concurrency=bad.get('concurrency'))

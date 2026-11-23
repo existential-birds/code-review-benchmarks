@@ -89,19 +89,29 @@ def score(rounds: list[dict], expected: dict[str, dict], tasks: set[str]) -> dic
     return compute_rounds(rewards, planned, len(rounds), len(expected))
 
 
+def read_catalog(catalog: Path) -> tuple[dict, dict[str, dict]]:
+    """The catalog's listing, and each review case's planned task and evaluation ids."""
+    listing = json.loads((catalog / 'catalog.json').read_text())
+    return listing, {name: json.loads((catalog / name / 'tests/task.json').read_text()) for name in listing['tasks']}
+
+
+def builds(entries: list[dict]) -> set:
+    """The Daydream builds a side's trials recorded. A trial without a review record names none:
+    it may fail in any side, but a scored one adds None, which no side may hold."""
+    return {trial['side'] for entry in entries for trial in entry['trials']
+            if trial['side'] is not None or trial['reward'] is not None}
+
+
 def report(catalog: Path, sides: list[list[Path]]) -> dict:
     """Every side's rounds, and ReviewBench's round metric for each block of review cases."""
-    listing = json.loads((catalog / 'catalog.json').read_text())
-    expected = {name: json.loads((catalog / name / 'tests/task.json').read_text()) for name in listing['tasks']}
+    listing, expected = read_catalog(catalog)
     paths = [job.resolve() for jobs in sides for job in jobs]
     if len(set(paths)) != len(paths):
         raise ValueError('A job is one round of one side, but one is listed more than once')
     rounds = {}
     for jobs in sides:
         entries = [read_round(job, expected) for job in jobs]
-        # A trial without a review record names no side: it may fail in any side, but not be scored in one.
-        identity = {trial['side'] for entry in entries for trial in entry['trials']
-                    if trial['side'] is not None or trial['reward'] is not None}
+        identity = builds(entries)
         if len(identity) != 1 or None in identity or identity & rounds.keys():
             raise ValueError(f'Each side needs one Daydream build of its own, not {sorted(map(str, identity))}')
         rounds[identity.pop()] = entries
