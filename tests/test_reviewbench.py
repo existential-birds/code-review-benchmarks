@@ -68,7 +68,7 @@ def test_task_runs_the_pinned_daydream_and_points_the_judge_at_its_login(tmp_pat
     assert config['metadata']['daydream_wheel_sha256'] == BUILD['wheel_sha256']
     assert config['task']['keywords'] == ['code-review', 'reviewbench', 'daydream']
     models = json.loads((task / 'tests/pi-models.json').read_text())
-    assert [model['id'] for model in models['providers']['openai-codex']['models']] == [MODEL]
+    assert [model['id'] for model in models['providers']['openai']['models']] == [MODEL]
     assert f'cp /tests/pi-models.json {JUDGE_AUTH_DIR}/models.json' in (task / 'tests/test.sh').read_text()
     reviewer_files = ''.join(path.read_text(errors='ignore') for path in (task / 'environment').rglob('*')
                              if path.is_file())
@@ -102,7 +102,7 @@ def test_catalog_keeps_selected_tasks_and_drops_the_exporters_stale_manifest(tmp
     assert tasks == [output / names[1]]
     assert sorted(path.name for path in output.iterdir()) == ['catalog.json', names[1]]
     catalog = json.loads((output / 'catalog.json').read_text())
-    assert catalog['tasks'] == [names[1]] and catalog['judge'] == f'openai-codex/{MODEL}'
+    assert catalog['tasks'] == [names[1]] and catalog['judge'] == f'openai/{MODEL}'
     assert catalog['reviewbench_revision'] == convert.REVIEWBENCH_REVISION
     # A candidate catalog says so, and so does each task, so its scores can't pass for the pin's.
     assert catalog['daydream']['candidate'] is True and catalog['daydream']['source_commit'] == 'c' * 40
@@ -174,7 +174,9 @@ def test_experiment_settings_reach_every_trial(tmp_path):
         assert trial.environment.kwargs['auto_mounting'] is True
         assert trial.verifier.import_path == 'benchmarks.daydream.verifier:DaydreamVerifier'
     for trial in [*trials, *plans['reviewbench-oracle']]:
-        # The judge's login must outlast the tasks' verifier timeout plus Pi's
-        # five-minute refresh threshold, or scoring can fail midway.
-        assert trial.verifier.kwargs['min_judge_validity_sec'] >= 7200 + 300
+        # The judge's login must outlast the verifier's timeout plus Pi's five-minute
+        # refresh threshold, or scoring can fail midway. The login's tokens last an hour.
+        assert trial.verifier.override_timeout_sec
+        assert trial.verifier.kwargs['min_judge_validity_sec'] >= trial.verifier.override_timeout_sec + 300
+        assert trial.verifier.kwargs['min_judge_validity_sec'] < 3600
     assert {trial.verifier.import_path for trial in plans['reviewbench-oracle']} == {'benchmarks.pi.verifier:PiJudgeVerifier'}

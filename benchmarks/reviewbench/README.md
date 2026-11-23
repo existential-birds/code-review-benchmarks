@@ -33,7 +33,7 @@ rounds, [run each as its own job](#compare-builds-over-rounds).
 
 **These scores aren't comparable with ReviewBench's leaderboard or its public Harbor
 dataset**, both of which use a Claude Opus 5 judge. Here the judge is `gpt-6.1-sol`
-on an OpenAI Codex subscription, so compare only runs of this suite. See
+on a ChatGPT subscription, so compare only runs of this suite. See
 [how this differs](../../docs/citing.md#how-this-differs-from-reviewbench).
 
 ReviewBench wants a line in the pull request's head for every finding. Daydream gives
@@ -54,7 +54,7 @@ make reviewbench-source
 Set the two login variables from [the AACR guide](../aacr/README.md#logins); both
 benchmarks use them the same way. ReviewBench's tasks fence the network more tightly
 than AACR's. The review can reach only `chatgpt.com` and `auth.openai.com`, and the
-judge only `chatgpt.com`, which needs Docker with Harbor's network isolation (Docker
+judge only `api.openai.com`, which needs Docker with Harbor's network isolation (Docker
 Desktop works).
 
 ## Generate a catalog

@@ -3,7 +3,7 @@
 Pi coordinates refreshes through an ``auth.json.lock`` directory beside
 ``auth.json``, which only works when every process shares that folder. So the
 host refreshes under Pi's own lock, and the judge's container gets a copy that
-holds only the ``openai-codex`` access token, with enough validity left that it
+holds only the ``openai`` access token (Pi's ChatGPT subscription login), with enough validity left that it
 never refreshes. The copy has no refresh token: a refresh there would rotate the
 token without saving the new one to the host, which would end the host login, so
 it fails instead.
@@ -21,7 +21,9 @@ import time
 from harbor.verifier.verifier import Verifier
 
 PACKAGE = Path(__file__).resolve().parent
-PROVIDER = 'openai-codex'
+# Pi's ChatGPT subscription login, which sends its token straight to api.openai.com.
+# It replaced the deprecated openai-codex login; the model is the same.
+PROVIDER = 'openai'
 MODEL = 'gpt-6.1-sol'
 JUDGE_AUTH_DIR = '/run/judge-pi'
 # Above AACR's 300-second verifier timeout plus Pi's 5-minute refresh threshold,
@@ -53,7 +55,7 @@ async def refresh_host_login(auth_path: Path, min_validity_ms: int) -> None:
 
 
 def read_login(auth_path: Path):
-    """Read the openai-codex entry, waiting out another process's in-place rewrite."""
+    """Read the openai entry, waiting out another process's in-place rewrite."""
     deadline = time.monotonic() + 1
     while True:
         try:
@@ -88,9 +90,9 @@ class PiJudgeVerifier(Verifier):
         credential = read_login(auth_path)
         if (not isinstance(credential, dict) or credential.get('type') != 'oauth'
                 or type(credential.get('expires')) not in (int, float)):
-            raise JudgeLoginError('Pi has no openai-codex subscription login')
+            raise JudgeLoginError('Pi has no openai (ChatGPT subscription) login; run /login in pi')
         if credential['expires'] - time.time() * 1000 < min_validity_ms:
-            raise JudgeLoginError('Pi openai-codex login has too little validity left to score')
+            raise JudgeLoginError('Pi openai login has too little validity left to score')
         # No -p: the folder already existing means a task generated before the
         # mount was removed still mounts the host login there, and the upload
         # would overwrite it.
