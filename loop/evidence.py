@@ -39,6 +39,7 @@ import sys
 import tempfile
 
 from benchmarks.daydream.entrypoint import _line
+from benchmarks.daydream import rounds as shared
 from benchmarks.reviewbench import report
 from loop import rounds, sets
 
@@ -204,7 +205,7 @@ def collect(summary_path: Path) -> tuple[dict, dict[str, dict], list[dict], dict
     trials, labels = {case: [] for case in listing['tasks']}, []
     for entry in summary['rounds']:
         for result in sorted((rounds.JOBS / entry['job']).glob('*/result.json')):
-            outcome = report.read_trial(result.parent)
+            outcome = shared.read_trial(result.parent, report.trial_ratios)
             case = outcome['task']
             if case not in climb or case not in trials:
                 raise ValueError(f'Refusing {result.parent}: {case} is outside loop/climb.txt or the catalog')

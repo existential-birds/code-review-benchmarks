@@ -142,6 +142,85 @@ A rerun's scores aren't merged into the original job's pooled score. A malformed
 reward or a failing metric subprocess ends the whole Harbor job; rerun the full
 selection in a fresh job to keep one pooled score.
 
+## Compare builds over rounds
+
+To compare the pinned build with a candidate, score each over several rounds. A round
+is its own job, one pass over the catalog with `-k 1`, because Harbor pools the trials
+of one job. AACR's match rate divides by every finding sent, so a build that floods
+findings loses here even where ReviewBench's grounded precision doesn't show it.
+
+**1. Build the candidate and generate one catalog per build**, from this revision of
+the suite. Use `--split dev`; the held-out split is only for confirming a change.
+
+```sh
+.venv/bin/python -m benchmarks.daydream.build <daydream-clone> --candidate <commit>
+.venv/bin/python -m benchmarks.aacr.convert --upstream .cache/src/aacr-bench --split dev \
+  --task <case> --output artifacts/aacr/<pinned-catalog>
+.venv/bin/python -m benchmarks.aacr.convert --upstream .cache/src/aacr-bench --split dev \
+  --task <case> --build .cache/daydream-candidates/<commit>/build.json --output artifacts/aacr/<candidate-catalog>
+```
+
+**2. Run every round of every side as a fresh job**, as in [Run](#run), keeping `-k 1`
+and `-r 0` and giving every job its own name.
+
+**3. Report every side's jobs, in round order:**
+
+```sh
+.venv/bin/python -m benchmarks.aacr.report --catalog artifacts/aacr/<pinned-catalog> \
+  --side jobs/<pinned-1> jobs/<pinned-2> jobs/<pinned-3> \
+  --side jobs/<candidate-1> jobs/<candidate-2> jobs/<candidate-3> > <report>.json
+```
+
+[`loop/rounds.py`](../../loop/rounds.py) does steps 1 and 2 for one build and writes the
+same scores and counts to `artifacts/loop/<name>/summary.json`, with each case's four
+reward counts per round. It resumes a run that stopped, and a case that fails to convert
+leaves no catalog behind, so drop it from the list and run again. It uses only the dev
+split. The loop that tunes Daydream scores only ReviewBench's dev cases; AACR dev rounds
+exist to check this report and a build. Held-out rounds belong to
+[`loop/confirm.py`](../../loop/confirm.py) alone, which confirms a kept change on these
+held-out cases and ReviewBench's test set, outside the loop.
+
+```sh
+.venv/bin/python -m loop.rounds --benchmark aacr --build pinned \
+  --cases <case-list> --rounds 2 --name <fresh-name>
+```
+
+### What the report holds
+
+[`report.py`](report.py) prints one JSON object. It reads jobs and checks sides with the
+same code as [ReviewBench's report](../reviewbench/README.md#what-the-report-holds), so a
+side is named from the Daydream commit its trials recorded, never from a label, and it
+refuses:
+
+- A side whose jobs mix builds, or hold a scored trial that left no review record.
+- Two sides that are the same, and a job listed twice.
+- A job with two trials for one review case, or a trial for a case outside the
+  catalog. A case that failed to convert has no task, so it is outside.
+
+Each round lists its trials and the same counts as ReviewBench's report: `expected`,
+`missing`, `produced`, `completed_empty`, `incomplete`, `failed`, `evaluated`,
+`elapsed_seconds` and `cost_usd`, an API-equivalent estimate. A trial is scored by the
+same rule: not if it raised, never finished, was verified outside a separate
+environment or had a failed step. Such a trial is dropped even if it left a reward, so a
+round's metric here can differ from Harbor's own pooled job metric, shown in the same
+round under `harbor`.
+
+Scores come in two blocks, each naming its review cases under `blocks`:
+
+- **`all`**: every review case in the catalog.
+- **`matched`**: a reduced set, only the review cases that every job of every side
+  scored.
+
+For each block, `rounds` holds every round's result from [`metric.py`](metric.py)'s
+`compute` over that round's rewards: `file_semantic_match_rate`,
+`file_semantic_recall_rate`, `balanced_score` and their pooled counts, where
+`generated_notes` is the findings sent. As in the job's own metric, an unscored trial
+leaves the denominators rather than withholding the round, so read the scores with
+`missing_instances`. A round with no scored trial defines no rate. `summary` holds each
+rate's mean and sample standard deviation (n-1) over the rounds that define it, as
+`loop/rounds.py` reports them; ReviewBench's report uses ReviewBench's own population
+deviation. The report adds no score, weight or threshold, and doesn't rank the sides.
+
 ## Inspect results
 
 ```sh

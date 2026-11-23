@@ -2,6 +2,7 @@
 from datetime import datetime, timezone
 import json
 from pathlib import Path
+import sys
 from types import SimpleNamespace
 import uuid
 
@@ -222,3 +223,112 @@ def test_the_oracle_records_no_build_and_counts_unscored_trials_as_failed(worksp
     monkeypatch.delenv('REVIEWER_CODEX_AUTH_DIR')
     with pytest.raises(ValueError, match='Set REVIEWER_CODEX_AUTH_DIR'):
         rounds.run('oracle', workspace / 'cases.txt', 1, 'oracle-2')
+
+
+def argument(command, flag):
+    return command[command.index(flag) + 1]
+
+
+@pytest.fixture
+def aacr_workspace(workspace, monkeypatch):
+    """The workspace with a stand-in AACR source of three cases, owner-project-3 held out."""
+    from benchmarks.aacr import convert as aacr_convert
+    records = [{'githubPrUrl': f'https://github.com/owner/project/pull/{number}', 'project_main_language': 'Go',
+                'source_commit': 'a' * 40, 'target_commit': 'b' * 40,
+                'comments': [{'path': 'main.go', 'note': 'verifier only reference', 'from_line': 1, 'to_line': 1}]}
+               for number in (1, 2, 3)]
+    def write_task(record, output, daydream, build_file):
+        assert daydream and build_file is None
+        task = output / aacr_convert.task_name(record)
+        (task / 'tests').mkdir(parents=True)
+        (task / 'tests/build.json').write_text(json.dumps({'source_commit': BUILD}))
+        return task
+    (workspace / 'holdout.txt').write_text('# held out\nowner-project-3\n')
+    monkeypatch.setattr(aacr_convert, 'HOLDOUT', workspace / 'holdout.txt')
+    monkeypatch.setattr(aacr_convert, 'load_records', lambda upstream: records)
+    monkeypatch.setattr(aacr_convert, 'write_task', write_task)
+    (workspace / 'aacr-cases.txt').write_text('owner-project-1\nowner-project-2\n')
+    return workspace
+
+
+def test_aacr_rounds_give_a_summary_of_the_same_shape_from_aacrs_report(aacr_workspace, monkeypatch):
+    from test_aacr_report import write_job as write_aacr_job
+    outcomes = [{'owner-project-1': (4, 2, 1, 1), 'owner-project-2': (2, 3, 2, 2)},
+                {'owner-project-1': (4, 4, 2, 2), 'owner-project-2': (2, 0, 0, 0)}]
+    commands = []
+    def harbor(command, check):
+        commands.append(command)
+        write_aacr_job(Path('jobs') / argument(command, '--job-name'), Path(argument(command, '-p')),
+                       outcomes.pop(0), BUILD)
+    monkeypatch.setattr(rounds, 'subprocess', SimpleNamespace(run=harbor))
+    monkeypatch.setattr(sys, 'argv', ['loop.rounds', '--benchmark', 'aacr', '--build', 'pinned',
+                                      '--cases', 'aacr-cases.txt', '--rounds', '2', '--name', 'aacr',
+                                      '--concurrency', '1'])
+    rounds.main()
+    assert [argument(command, '-c') for command in commands] == ['experiments/aacr-baseline.yaml'] * 2
+    summary = json.loads((aacr_workspace / 'artifacts/loop/aacr/summary.json').read_text())
+    assert summary['request'] == {'build': 'pinned', 'cases': ['owner-project-1', 'owner-project-2'],
+                                  'benchmark': 'aacr'}
+    assert summary['catalog_identity'] == {'aacr_revision': rounds.aacr_convert.AACR_REVISION,
+                                           'dataset_sha256': rounds.aacr_convert.DATASET_SHA256, 'split': 'dev',
+                                           'daydream': {'source_commit': BUILD}}
+    assert summary['side'] == BUILD
+    one, two = summary['rounds']
+    assert (one['expected'], one['missing'], one['evaluated'], one['failed'], one['incomplete']) == (2, 0, 2, 0, 0)
+    assert (one['findings_sent'], one['elapsed_seconds'], one['cost_usd'], one['n_input_tokens']) == (5, 40, .5, 200)
+    assert (one['file_semantic_match_rate'], one['file_semantic_recall_rate'], one['balanced_score']) == (.6, .5, .545)
+    assert (two['completed_empty'], two['findings_sent'], two['balanced_score']) == (1, 4, .4)
+    assert summary['scores']['balanced_score'] == pytest.approx(
+        {'defined_rounds': 2, 'mean': .4725, 'stddev': .145 / 2 ** .5})
+    counts = ('expected_notes', 'generated_notes', 'matched_generated_notes', 'matched_file_semantic_notes')
+    assert summary['cases'] == {'owner-project-1': [dict(zip(counts, (4, 2, 1, 1))), dict(zip(counts, (4, 4, 2, 2)))],
+                                'owner-project-2': [dict(zip(counts, (2, 3, 2, 2))), dict(zip(counts, (2, 0, 0, 0)))]}
+
+
+def test_aacr_rounds_refuse_a_held_out_case_and_a_failed_conversion_leaves_no_catalog(aacr_workspace, monkeypatch):
+    from benchmarks.aacr import convert as aacr_convert
+    from test_aacr_report import write_job as write_aacr_job
+    # Every catalog is dev: a held-out case is refused before anything is written, and nothing asks for another split.
+    (aacr_workspace / 'held-out.txt').write_text('owner-project-1\nowner-project-3\n')
+    with pytest.raises(ValueError, match=r"Unknown AACR task names in the dev set: \['owner-project-3'\]"):
+        rounds.run('pinned', aacr_workspace / 'held-out.txt', 1, 'refused', benchmark='aacr')
+    assert not (aacr_workspace / 'artifacts/loop/refused/catalog').exists()
+    with pytest.raises(TypeError):
+        rounds.run('pinned', aacr_workspace / 'aacr-cases.txt', 1, 'held-out', benchmark='aacr', split='holdout')
+    monkeypatch.setattr(sys, 'argv', ['loop.rounds', '--benchmark', 'aacr', '--split', 'holdout', '--build',
+                                      'pinned', '--cases', 'aacr-cases.txt', '--rounds', '1', '--name', 'cli'])
+    with pytest.raises(SystemExit):
+        rounds.main()
+
+    # A case whose commit is gone fails to convert; the catalog it half wrote is removed, so the name runs again.
+    write_task = aacr_convert.write_task
+    def unavailable(record, output, daydream, build_file):
+        if aacr_convert.task_name(record) == 'owner-project-2':
+            raise RuntimeError('commit unavailable')
+        return write_task(record, output, daydream, build_file)
+    monkeypatch.setattr(aacr_convert, 'write_task', unavailable)
+    cases = aacr_workspace / 'aacr-cases.txt'
+    with pytest.raises(ValueError, match=r"failed to convert: \{'owner-project-2': 'RuntimeError: commit unavailable'"
+                                         r"\}\. Drop them from the case list"):
+        rounds.run('pinned', cases, 1, 'gone', benchmark='aacr')
+    assert not (aacr_workspace / 'artifacts/loop/gone/catalog').exists()
+    assert not (aacr_workspace / 'artifacts/loop/gone/summary.json').exists()
+    monkeypatch.setattr(rounds, 'subprocess', SimpleNamespace(run=lambda command, check: write_aacr_job(
+        Path('jobs') / argument(command, '--job-name'), Path(argument(command, '-p')),
+        {'owner-project-1': (3, 1, 1, 1)}, BUILD)))
+    cases.write_text('owner-project-1\n')
+    state = rounds.run('pinned', cases, 1, 'gone', benchmark='aacr')
+    assert state['rounds'][0]['evaluated'] == 1 and list(state['cases']) == ['owner-project-1']
+
+
+def test_a_reviewbench_summary_from_before_aacr_rounds_still_resumes(workspace, monkeypatch):
+    calls = []
+    monkeypatch.setattr(rounds, 'subprocess', SimpleNamespace(run=lambda command, check: calls.append(command)
+                                                              or write_job(Path('jobs') / argument(command, '--job-name'),
+                                                                           Path(argument(command, '-p')), SCORED)))
+    first = rounds.run('pinned', workspace / 'cases.txt', 1, 'noise', concurrency=2)
+    assert first['request'] == {'build': 'pinned', 'cases': ['case-a', 'case-b']}
+    assert calls[0][1:] == ['run', '-c', 'experiments/reviewbench.yaml', '-p', 'artifacts/loop/noise/catalog',
+                            '-o', 'jobs', '-k', '1', '-r', '0', '-n', '2', '--job-name', 'noise-round-1-attempt-1']
+    resumed = rounds.run('pinned', workspace / 'cases.txt', 2, 'noise', concurrency=2)
+    assert len(calls) == 2 and [entry['round'] for entry in resumed['rounds']] == [1, 2]
