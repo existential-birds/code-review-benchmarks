@@ -2,7 +2,7 @@ import math
 
 import pytest
 
-from loop import noise, settings
+from loop import noise, sets, settings
 
 
 def counts(matched, matched_tp, covered, golden=10, unmatched_tp=0, unmatched_fp=0):
@@ -35,23 +35,26 @@ def test_the_upper_bound_widens_a_five_round_sd_by_the_chi_square_factor():
 
 
 def test_settings_follow_from_the_rounds_spread_and_the_target_gain():
-    # 30 cases over five rounds. Each case covers 4, 5 or 6 of its 10 golden findings in a round.
-    cases = {f'case-{index:02}': [counts(6, 6, 4 + (index + number) % 3, unmatched_fp=index % 2) for number in range(5)]
-             for index in range(30)}
+    # 30 cases over five rounds, numbered in the climb set's order. Each case covers 4, 5 or 6 of its
+    # 10 golden findings in a round.
+    names = sets.order(f'case-{index:02}' for index in range(30))
+    cases = {name: [counts(6, 6, 4 + (index + number) % 3, unmatched_fp=index % 2) for number in range(5)]
+             for index, name in enumerate(names)}
     oracle = summary({name: [counts(10, 10, 10 - (index == 0 and number == 1)) for number in range(5)]
-                      for index, name in enumerate(cases)}, side=None)
+                      for index, name in enumerate(names)}, side=None)
     loaded = settings.load(canary_cases=3)
-    result = noise.derive(summary(cases), oracle, loaded)
+    # A summary lists its cases by name, as the catalog does; the climb order still picks the first ones.
+    result = noise.derive(summary(dict(sorted(cases.items()))), oracle, loaded)
     derived, blocks = result['derived'], result['reviewer']['blocks']
     # Rotating which case covers what keeps every round's pooled recall equal, so the spread is zero
     # and one round would do; the tiny sigma then sets every threshold.
     assert blocks['all']['grounded_f1']['sd'] == pytest.approx(0, abs=1e-12)
     assert derived['rounds'] == 1 and derived['climb_set_size'] == 25
     assert derived['accept_threshold']['2'] == pytest.approx(loaded['accept_z'] * derived['sigma'])
-    assert result['judge']['cases_scored_differently'] == ['case-00']
-    assert result['canary']['cases'] == ['case-00', 'case-01', 'case-02']
-    assert result['canary']['reference']['case-00']['golden_covered_count'] == pytest.approx(9.8)
-    # Case 00 moved by 1 in one round: 0.8 from its mean, times accept_z.
+    assert result['judge']['cases_scored_differently'] == [names[0]]
+    assert result['canary']['cases'] == names[:3] and result['canary']['judge'] == 'j'
+    assert result['canary']['reference'][names[0]]['golden_covered_count'] == pytest.approx(9.8)
+    # The first case moved by 1 in one round: 0.8 from its mean, times accept_z.
     assert result['canary']['tolerance'] == pytest.approx(2 * 0.8)
 
 

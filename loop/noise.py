@@ -31,7 +31,7 @@ from pathlib import Path
 import statistics
 
 from benchmarks.reviewbench.metric import compute
-from loop import settings
+from loop import sets, settings
 
 METRICS = ('grounded_precision', 'grounded_recall', 'grounded_f1',
            'augmented_precision', 'augmented_recall', 'augmented_f1')
@@ -88,7 +88,8 @@ def block(rounds: list[dict]) -> dict:
 
 
 def derive(reviewer: dict, oracle: dict, loaded: settings.Settings) -> dict:
-    climb = list(reviewer['cases'])
+    # A summary lists its cases as the catalog does, by name; the climb set's own order picks the first ones.
+    climb = sets.order(reviewer['cases'])
     matched = [case for case in climb if all(counts is not None for counts in reviewer['cases'][case])]
     rounds = [{key: entry[key] for key in (*METRICS, 'unmatched_judged_wrong', 'incomplete', 'failed', 'missing',
                                             'evaluated', 'expected', 'cost_usd', 'elapsed_seconds')}
@@ -136,7 +137,7 @@ def derive(reviewer: dict, oracle: dict, loaded: settings.Settings) -> dict:
             # One margin for both precisions: the wider, so neither guard fires on noise alone.
             precision_margin=max(margin('grounded_precision'), margin('augmented_precision')),
             wrong_findings_margin=margin('wrong_per_case'), incomplete_margin=margin('unfinished')),
-        canary=dict(cases=canary, counts=list(CANARY_COUNTS),
+        canary=dict(cases=canary, counts=list(CANARY_COUNTS), judge=oracle['catalog_identity']['judge'],
                     reference={case: {key: statistics.fmean(x[key] for x in oracle_cases[case] if x is not None)
                                       for key in CANARY_COUNTS} for case in canary
                                if any(x is not None for x in oracle_cases[case])},
