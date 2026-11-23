@@ -60,8 +60,8 @@ assets and results:
   before scoring. If you raise the verifier timeout past about 20 minutes, set
   `min_judge_validity_sec` under `verifier.kwargs` to the new timeout plus 10
   minutes; otherwise the judge's token can expire mid-scoring and the trial fails.
-  That login's tokens last about an hour, so a verifier timeout can't go past about
-  45 minutes. The login shares Pi's `openai` slot with an OpenAI API key, which it
+  That login's tokens last about an hour and the verifier accepts at most 50 minutes
+  here, so a verifier timeout can't go past 40 minutes. The login shares Pi's `openai` slot with an OpenAI API key, which it
   replaces.
 
 Catalogs generated before the judge moved to this login (November 2026) still name

@@ -57,7 +57,7 @@ prereqs:
 	@docker info >/dev/null 2>&1 || { echo 'Docker is not running.'; exit 1; }
 	@test -f "$(REVIEWER_CODEX_AUTH_DIR)/auth.json" || { echo 'No Codex login in $(REVIEWER_CODEX_AUTH_DIR): run codex login, or set REVIEWER_CODEX_AUTH_DIR.'; exit 1; }
 	@test -f "$(JUDGE_PI_AUTH_DIR)/auth.json" || { echo 'No Pi login in $(JUDGE_PI_AUTH_DIR): run /login in Pi, or set JUDGE_PI_AUTH_DIR.'; exit 1; }
-	@python3 -c 'import json, sys; sys.exit(json.load(open(sys.argv[1])).get("openai", {}).get("type") != "oauth")' "$(JUDGE_PI_AUTH_DIR)/auth.json" \
+	@node -e 'process.exit(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).openai?.type === "oauth" ? 0 : 1)' "$(JUDGE_PI_AUTH_DIR)/auth.json" \
 		|| { echo 'No ChatGPT subscription login in Pi: run /login in Pi 1.6 or later and choose Sign in with ChatGPT.'; exit 1; }
 
 $(QUICKSTART)/catalog.json: $(SETUP) $(SRC)/.aacr-bench-$(AACR_COMMIT) $(SUITE)

@@ -30,7 +30,8 @@ JUDGE_AUTH_DIR = '/run/judge-pi'
 # with room for a --verifier-timeout-multiplier up to about 4. Benchmarks with a
 # longer verifier timeout raise it in their experiment configuration.
 DEFAULT_MIN_VALIDITY_SEC = 30 * 60
-# The ChatGPT login's tokens last about 57 minutes; Pi stores them with 3 minutes' margin.
+# The ChatGPT login's tokens last about 57 minutes and Pi stores them with 3 minutes'
+# margin, so a fresh one has about 54 left; the cap keeps a few minutes in hand.
 MAX_VALIDITY_SEC = 50 * 60
 
 
@@ -78,7 +79,8 @@ class PiJudgeVerifier(Verifier):
         if self.min_judge_validity_sec <= 0:
             raise ValueError('min_judge_validity_sec must be a positive number of seconds')
         if self.min_judge_validity_sec > MAX_VALIDITY_SEC:
-            # Every verification would refresh, and still get a token too short to use.
+            # Near or past a fresh token's life, every verification would refresh, and could
+            # still get a token too short to use.
             raise ValueError(f'min_judge_validity_sec can be at most {MAX_VALIDITY_SEC}: '
                              'the ChatGPT login\'s tokens last about an hour')
 
