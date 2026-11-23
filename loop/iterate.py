@@ -25,6 +25,14 @@ build on ``loop/climb.txt``. The iteration, numbered after the ledger's last:
 7. Removes the worktree unless the change was accepted. The branch stays in the
    clone, and builds and jobs stay.
 
+An iteration that died without its entry, the machine lost or the process killed, is
+redone when the next one starts, from where it got to. Its proposal and candidate are
+saved in ``.cache/loop/logs/<run>-<n>/iteration.json`` once proposed, and its build once
+built; with its worktree still at that commit, it skips the proposer, and the guard and
+build too once built, and ``loop.rounds`` resumes each stage from its last finished round.
+Without them, the worktree and branch it left are removed and it is proposed afresh. Its
+wall time counts from the resumption; its cost counts every round it scored.
+
 Every way out writes the entry, with as much as the iteration got to. No proposal, a
 guard refusal, a failed build, a round ``loop.rounds`` stops on (too many trials
 unscored, or the job never finished), too few cases to compare, passing
@@ -60,6 +68,10 @@ from loop import decide, evidence, guard, ledger, propose, rounds, sets, setting
 ROOT = Path(__file__).resolve().parents[1]
 CLONE = Path('.cache/loop/daydream')
 EVIDENCE = Path('.cache/loop/evidence')
+# loop.propose's folders for iteration n, as <run>-<n>.
+WORKTREES, LOGS = Path('.cache/loop/worktrees'), Path('.cache/loop/logs')
+# What an iteration saves as it goes, so one that dies without its ledger entry resumes.
+STATE = 'iteration.json'
 
 
 class Invalid(Exception):
@@ -176,7 +188,44 @@ def baseline_check(base: dict, loaded: settings.Settings, work: dict) -> Path:
     return path
 
 
-def _steps(run: str, base: dict, loaded: settings.Settings, root: Path, work: dict) -> tuple[str, list[str]]:
+def _state(root: Path, run: str, n: int) -> Path:
+    return root / LOGS / f'{run}-{n}' / STATE
+
+
+def _save(work: dict, root: Path, run: str) -> None:
+    path = _state(root, run, work['fields']['iteration'])
+    path.parent.mkdir(parents=True, exist_ok=True)
+    rounds._write(path, {key: work[key] for key in ('fields', 'patch', 'worktree', 'attempts')})
+
+
+def unfinished(run: str, n: int, root: Path = ROOT) -> dict | None:
+    """What iteration n saved before it died without its ledger entry, if its worktree still holds the commit.
+
+    Otherwise the worktree and branch it left, if any, are removed, so the proposer starts it afresh.
+    """
+    path, worktree, branch = _state(root, run, n), root / WORKTREES / f'{run}-{n}', f'loop/{run}/{n}'
+    if path.exists():
+        saved = json.loads(path.read_text())
+        candidate = saved['fields']['candidate']
+        if worktree.is_dir() and guard.git(worktree, 'rev-parse', 'HEAD').strip() == candidate['commit']:
+            if not Path(candidate.get('build', '')).is_file():
+                # Built again, with the guard first, rather than scored against a build that is gone.
+                for key in ('build', 'wheel_sha256'):
+                    candidate.pop(key, None)
+                saved['fields'].pop('gate', None)
+            return saved
+        path.unlink()
+    clone = root / CLONE
+    if (clone / '.git').exists():
+        guard.git(clone, 'worktree', 'prune')
+        if worktree.exists():
+            guard.git(clone, 'worktree', 'remove', '--force', str(worktree))
+        if guard.git(clone, 'branch', '--list', branch).strip():
+            guard.git(clone, 'branch', '-D', branch)
+    return None
+
+
+def _propose(run: str, base: dict, loaded: settings.Settings, root: Path, work: dict) -> None:
     fields, n = work['fields'], work['fields']['iteration']
     pack = root / EVIDENCE / base['name']
     if not pack.exists():
@@ -194,18 +243,33 @@ def _steps(run: str, base: dict, loaded: settings.Settings, root: Path, work: di
     work['patch'] = guard.git(Path(result['worktree']), 'diff', '--binary', *guard.DIFF, result['baseline'], commit)
     fields['candidate'] = dict(commit=commit, patch_id=result['patch_id'], baseline=result['baseline'],
                                branch=result['branch'], diff=result['diff'])
-    _budget(work, loaded)
-    fields['gate'] = gate = guard.check(Path(result['worktree']), result['baseline'], commit, loaded,
-                                        guard.benchmark_names())
+    _save(work, root, run)
+
+
+def _build(run: str, loaded: settings.Settings, root: Path, work: dict) -> None:
+    candidate = work['fields']['candidate']
+    work['fields']['gate'] = gate = guard.check(Path(work['worktree']), candidate['baseline'], candidate['commit'],
+                                                loaded, guard.benchmark_names())
     if not gate['accepted']:
         raise Invalid(*(f'The guard refused it: {refusal["check"]}: {refusal["detail"]}'
                         for refusal in gate['refusals']))
     _budget(work, loaded)
     try:
-        build_file = build.build_candidate(root / CLONE, commit)
+        build_file = build.build_candidate(root / CLONE, candidate['commit'])
     except (OSError, ValueError, subprocess.CalledProcessError) as error:
         raise Invalid(f'The candidate build failed: {error}') from error
-    fields['candidate'].update(build=str(build_file), wheel_sha256=json.loads(build_file.read_text())['wheel_sha256'])
+    candidate.update(build=str(build_file), wheel_sha256=json.loads(build_file.read_text())['wheel_sha256'])
+    _save(work, root, run)
+
+
+def _steps(run: str, base: dict, loaded: settings.Settings, root: Path, work: dict) -> tuple[str, list[str]]:
+    fields, n = work['fields'], work['fields']['iteration']
+    if 'candidate' not in fields:
+        _propose(run, base, loaded, root, work)
+    _budget(work, loaded)
+    if 'build' not in fields['candidate']:
+        _build(run, loaded, root, work)
+    build_file, commit = Path(fields['candidate']['build']), fields['candidate']['commit']
     accepted, reasons = _score('climb', base['summary'], build_file, commit, sets.CLIMB, f'{run}-{n}-climb',
                                loaded, work)
     if not accepted:
@@ -222,6 +286,7 @@ def iterate(run: str, loaded: settings.Settings, *, root: Path = ROOT) -> dict:
     rounds.check_logins()
     work = dict(fields=dict(iteration=base['iteration']), patch=None, worktree=None, rounds={}, attempts=0,
                 started=time.monotonic(), baseline_rounds=[], baseline_seconds=0.0)
+    work.update(unfinished(run, base['iteration'], root) or {})
     interrupted = None
     try:
         verdict, reasons = _steps(run, base, loaded, root, work)
@@ -239,9 +304,12 @@ def iterate(run: str, loaded: settings.Settings, *, root: Path = ROOT) -> dict:
         # Nothing recorded: say so, and let an interrupt still end the process as one.
         print(f'Iteration {base["iteration"]} could not be recorded ({type(error).__name__}: {error}); its '
               f'worktree {work["worktree"]} is left for a person', file=sys.stderr)
-        if interrupted is not None:
+        # An interrupt pending since the steps outranks an ordinary error in recording; a stop that came
+        # while recording ends the process itself.
+        if interrupted is not None and isinstance(error, Exception):
             raise interrupted from error
         raise
+    _state(root, run, base['iteration']).unlink(missing_ok=True)
     if work['worktree'] and verdict != 'accepted-on-dev':
         try:
             guard.git(root / CLONE, 'worktree', 'remove', '--force', work['worktree'])

@@ -22,7 +22,8 @@ the first line), ``kind`` and that kind's fields, and no others:
 - ``confirmation``: ``iteration`` (one accepted on dev) and ``verdict``, one word:
   confirmed, not-confirmed or regressed. No held-out score ever goes in the ledger,
   so a confirmation refuses any other field.
-- ``stop``: ``reason``, a string.
+- ``stop``: ``reason``, one of ``STOPS``, and optionally ``detail``, a string saying
+  which limit or failure (``loop.run``). A run resumed after a stop goes on appending.
 
 Lines are appended under an exclusive lock and fsynced, never rewritten or deleted.
 JSON is strict: NaN and infinities are refused. Reading verifies the chain, so an
@@ -51,11 +52,15 @@ FIELDS = {  # kind: (required, optional)
     'run-start': ({'settings', 'suite_commit', 'judge', 'baseline_commit', 'baseline_summary_sha256', 'canary'}, set()),
     'iteration': ({'iteration', 'verdict'}, {'proposal', 'candidate', 'gate', 'scores', 'cost'}),
     'confirmation': ({'iteration', 'verdict'}, set()),
-    'stop': ({'reason'}, set()),
+    'stop': ({'reason'}, {'detail'}),
 }
 PROPOSAL = {'hypothesis', 'category', 'evidence', 'prediction', 'rejection_criterion', 'files'}
 VERDICTS = ('accepted-on-dev', 'rejected', 'invalid')
 CONFIRMATIONS = ('confirmed', 'not-confirmed', 'regressed')
+# Why loop.run stopped: no gain lately, a budget spent, a confirmation that regressed, the judge drifting,
+# a winner waiting for a person, held-out cases used up, or broken builds, jobs, logins or limits.
+STOPS = ('plateau', 'budget', 'held-out-regression', 'judge-drift', 'winner-awaiting-merge', 'held-out-worn',
+         'infrastructure')
 
 
 def _sha256(line: bytes) -> str:
@@ -80,8 +85,10 @@ def _check(kind: str, fields: dict, earlier: list[dict]) -> None:
     if not required <= set(fields) <= required | optional:
         allowed = f' and may add {sorted(optional)}' if optional else ' only'
         raise ValueError(f'A {kind} entry holds {sorted(required)}{allowed}: got {sorted(fields)}')
-    if kind == 'stop' and not isinstance(fields['reason'], str):
+    if kind == 'stop' and (not isinstance(fields['reason'], str) or not isinstance(fields.get('detail', ''), str)):
         raise ValueError(f'A stop reason is a string: {fields["reason"]!r}')
+    if kind == 'stop' and fields['reason'] not in STOPS:
+        raise ValueError(f'A stop reason is one of {STOPS}: {fields["reason"]!r}')
     if kind in ('iteration', 'confirmation'):
         n = fields['iteration']
         if type(n) is not int or n < 1:

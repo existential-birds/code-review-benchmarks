@@ -8,6 +8,7 @@ build scores as the baseline, and a candidate's rounds follow a plan.
 import hashlib
 import json
 from pathlib import Path
+import shutil
 import subprocess
 from types import SimpleNamespace
 import zipfile
@@ -215,3 +216,62 @@ def test_the_baselines_check_rounds_count_against_neither_budget(loop):
     entry = loop.run(['win'] * 4, iteration_max_cost_usd_equiv=25)
     assert entry['verdict']['verdict'] == 'accepted-on-dev'
     assert entry['cost']['cost_usd_equiv'] == 20 and entry['cost']['baseline_check']['cost_usd_equiv'] == 10
+
+
+class Killed(BaseException):
+    """The process dying, so that the iteration's entry is never written."""
+
+
+def die_before_the_entry(monkeypatch):
+    def killed(*arguments, **options):
+        raise Killed
+    monkeypatch.setattr(ledger, 'append', killed)
+
+
+def test_an_iteration_that_died_without_its_entry_is_redone_from_its_last_finished_round(loop, monkeypatch):
+    append = ledger.append
+    die_before_the_entry(monkeypatch)
+    with pytest.raises(Killed):
+        loop.run(['win', 'interrupt'])
+    monkeypatch.setattr(ledger, 'append', append)
+    assert [entry['kind'] for entry in ledger.read(loop.root / 'loop-runs/run-a')] == ['run-start']
+    saved = json.loads((loop.root / 'artifacts/loop/run-a-1-climb/summary.json').read_text())
+    assert [entry['state'] for entry in saved['jobs']] == ['finished', 'started']
+    # The proposal, guard and build are kept; the climb set resumes at round 2 with a fresh job.
+    entry = loop.run(['win', 'win', 'win'])
+    assert entry['iteration'] == 1 and entry['verdict']['verdict'] == 'accepted-on-dev'
+    assert loop.jobs == ['run-a-1-climb-round-2-attempt-2', 'base-check-round-1-attempt-1',
+                         'base-check-round-2-attempt-1', 'run-a-1-check-round-1-attempt-1',
+                         'run-a-1-check-round-2-attempt-1']
+    assert loop.builds == [entry['candidate']['commit']] and entry['proposal'] == proposal()
+    assert entry['scores']['climb']['rounds']['candidate'] == 2
+    assert entry['cost']['rounds'] == {'run-a-1-climb': 2, 'run-a-1-check': 2}
+    assert entry['cost']['baseline_check']['rounds'] == 2
+    assert not (loop.root / '.cache/loop/logs/run-a-1/iteration.json').exists()
+    assert (loop.root / 'loop-runs/run-a/patches/1.patch').is_file()
+
+
+def test_an_iteration_that_died_before_its_proposal_was_saved_is_proposed_afresh(loop, monkeypatch, git):
+    append = ledger.append
+    die_before_the_entry(monkeypatch)
+    with pytest.raises(Killed):
+        loop.run(propose=False)
+    monkeypatch.setattr(ledger, 'append', append)
+    # The worktree and branch it left are removed, so the proposer can make them again.
+    assert worktree(loop, 1).is_dir() and not (loop.root / '.cache/loop/logs/run-a-1/iteration.json').exists()
+    entry = loop.run(['base'])
+    assert entry['iteration'] == 1 and entry['verdict']['verdict'] == 'rejected'
+    assert git(loop.clone, 'rev-parse', 'loop/run-a/1') == entry['candidate']['commit']
+
+
+def test_an_iteration_whose_build_is_gone_is_built_again_before_it_is_scored(loop, monkeypatch):
+    append = ledger.append
+    die_before_the_entry(monkeypatch)
+    with pytest.raises(Killed):
+        loop.run(['interrupt'])
+    monkeypatch.setattr(ledger, 'append', append)
+    commit = loop.builds[0]
+    shutil.rmtree(loop.root / '.cache/daydream-candidates' / commit)
+    entry = loop.run(['base'])
+    assert loop.builds == [commit, commit] and entry['gate']['accepted']
+    assert entry['verdict']['verdict'] == 'rejected'
