@@ -4,7 +4,8 @@ The dev cases are the tasks `--split dev` converts: ReviewBench's full set less 
 test set, as its own exporter writes them. They are sorted by the SHA-256 of
 ``loop:`` followed by the name; the climb set takes the first ``climb_set_size`` and
 the check set the next ``check_set_size``. The order is fixed, so a smaller set is
-always the start of a larger one.
+always the start of a larger one. The canary cases are the climb set's first
+``canary_cases``, which ``loop.canary`` scores with the oracle to catch the judge drifting.
 """
 from __future__ import annotations
 
@@ -17,12 +18,16 @@ from benchmarks.reviewbench import convert
 from loop import settings
 
 PACKAGE = Path(__file__).resolve().parent
-CLIMB, CHECK = PACKAGE / 'climb.txt', PACKAGE / 'check.txt'
+CLIMB, CHECK, CANARY = PACKAGE / 'climb.txt', PACKAGE / 'check.txt', PACKAGE / 'canary.txt'
 HEADERS = {
     CLIMB: ('# Loop climb set: ReviewBench dev cases scored in every iteration, and the only\n'
             '# cases whose evidence the proposer reads.\n'),
     CHECK: ('# Loop check set: ReviewBench dev cases scored only for a change that passed on\n'
             '# the climb set. The proposer never reads their evidence.\n'),
+    CANARY: ('# Loop canary cases: the ones an oracle round scores to catch the judge drifting\n'
+             '# (python -m loop.canary).\n'
+             '# The first canary_cases names of loop/climb.txt, in its order.\n'
+             '# Regenerate with `python -m loop.sets --upstream <ReviewBench>`.\n'),
 }
 RULE = ('# Chosen from the dev cases of ReviewBench {revision} (its full set less its test\n'
         '# set, as `--split dev` converts them): sort the names by the SHA-256 hex digest of\n'
@@ -59,16 +64,20 @@ def read(path: Path) -> list[str]:
     return [line for line in lines if line and not line.startswith('#')]
 
 
+def write(path: Path, names: list[str], rule: str = '') -> None:
+    path.write_text(HEADERS[path] + rule + ''.join(f'{name}\n' for name in names))
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--upstream', required=True, type=Path, help='Clean checkout of the pinned ReviewBench source')
     arguments = parser.parse_args()
     convert.check_source(arguments.upstream.resolve())
     loaded = settings.load()
-    sets = select(dev_cases(arguments.upstream), loaded['climb_set_size'], loaded['check_set_size'])
+    climb, check = select(dev_cases(arguments.upstream), loaded['climb_set_size'], loaded['check_set_size'])
     rule = RULE.format(revision=convert.REVIEWBENCH_REVISION[:7])
-    for path, names in zip((CLIMB, CHECK), sets):
-        path.write_text(HEADERS[path] + rule + ''.join(f'{name}\n' for name in names))
+    for path, names, header in ((CLIMB, climb, rule), (CHECK, check, rule), (CANARY, climb[:loaded['canary_cases']], '')):
+        write(path, names, header)
         print(f'{len(names)} cases in {path}')
 
 

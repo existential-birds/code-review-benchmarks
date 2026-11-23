@@ -20,7 +20,7 @@ and the loop uses that cautious figure:
   findings judged wrong per scored case, and unfinished reviews (failed, incomplete or
   missing) per round.
 - The canary's per-case reference counts from the oracle rounds, and a tolerance from
-  how far the judge moved a case's counts between those rounds.
+  how far the judge moved a case's counts between those rounds (``loop.canary``).
 """
 from __future__ import annotations
 
