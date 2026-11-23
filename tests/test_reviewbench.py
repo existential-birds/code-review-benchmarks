@@ -2,6 +2,7 @@
 import asyncio
 import json
 from pathlib import Path
+import subprocess
 from types import SimpleNamespace
 import tomllib
 
@@ -13,6 +14,7 @@ from harbor.job_plan import JobPlan
 from harbor.models.job.config import JobConfig
 
 from benchmarks.daydream.build import BUILD, CASE_DIR, CODEX_LOGIN_DIR
+from benchmarks.pi import verifier as judge_verifier
 from benchmarks.pi.verifier import JUDGE_AUTH_DIR, MODEL
 from benchmarks.reviewbench import convert
 
@@ -178,5 +180,17 @@ def test_experiment_settings_reach_every_trial(tmp_path):
         # refresh threshold, or scoring can fail midway. The login's tokens last an hour.
         assert trial.verifier.override_timeout_sec
         assert trial.verifier.kwargs['min_judge_validity_sec'] >= trial.verifier.override_timeout_sec + 300
-        assert trial.verifier.kwargs['min_judge_validity_sec'] < 3600
+        assert trial.verifier.kwargs['min_judge_validity_sec'] <= judge_verifier.MAX_VALIDITY_SEC
     assert {trial.verifier.import_path for trial in plans['reviewbench-oracle']} == {'benchmarks.pi.verifier:PiJudgeVerifier'}
+
+
+def test_the_task_hands_pinned_pi_the_chatgpt_login_as_a_plain_key(tmp_path):
+    # Pi 0.75.5 predates the ChatGPT login; the task script rewrites the uploaded copy.
+    script = convert.TEST_SCRIPT.split("node -e '", 1)[1].split("\n'\n", 1)[0]
+    script = script.replace(convert.JUDGE_AUTH_DIR, str(tmp_path))
+    auth = tmp_path / 'auth.json'
+    auth.write_text(json.dumps({'openai': {'type': 'oauth', 'access': 'token', 'refresh': '', 'expires': 1}}))
+    subprocess.run(['node', '-e', script], check=True)
+    assert json.loads(auth.read_text()) == {'openai': {'type': 'api_key', 'key': 'token'}}
+    auth.write_text(json.dumps({'openai-codex': {'type': 'oauth', 'access': 'token'}}))
+    assert subprocess.run(['node', '-e', script], capture_output=True).returncode != 0

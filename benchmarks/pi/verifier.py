@@ -30,6 +30,8 @@ JUDGE_AUTH_DIR = '/run/judge-pi'
 # with room for a --verifier-timeout-multiplier up to about 4. Benchmarks with a
 # longer verifier timeout raise it in their experiment configuration.
 DEFAULT_MIN_VALIDITY_SEC = 30 * 60
+# The ChatGPT login's tokens last about 57 minutes; Pi stores them with 3 minutes' margin.
+MAX_VALIDITY_SEC = 50 * 60
 
 
 class JudgeLoginError(RuntimeError):
@@ -75,6 +77,10 @@ class PiJudgeVerifier(Verifier):
         self.min_judge_validity_sec = int(min_judge_validity_sec)
         if self.min_judge_validity_sec <= 0:
             raise ValueError('min_judge_validity_sec must be a positive number of seconds')
+        if self.min_judge_validity_sec > MAX_VALIDITY_SEC:
+            # Every verification would refresh, and still get a token too short to use.
+            raise ValueError(f'min_judge_validity_sec can be at most {MAX_VALIDITY_SEC}: '
+                             'the ChatGPT login\'s tokens last about an hour')
 
     async def upload_judge_login(self) -> None:
         directory = os.environ.get('JUDGE_PI_AUTH_DIR')
@@ -89,7 +95,7 @@ class PiJudgeVerifier(Verifier):
         await refresh_host_login(auth_path, min_validity_ms)
         credential = read_login(auth_path)
         if (not isinstance(credential, dict) or credential.get('type') != 'oauth'
-                or type(credential.get('expires')) not in (int, float)):
+                or type(credential.get('expires')) not in (int, float) or not isinstance(credential.get('access'), str)):
             raise JudgeLoginError('Pi has no openai (ChatGPT subscription) login; run /login in pi')
         if credential['expires'] - time.time() * 1000 < min_validity_ms:
             raise JudgeLoginError('Pi openai login has too little validity left to score')

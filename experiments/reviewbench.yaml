@@ -11,12 +11,13 @@ agents:
     kwargs:
       capture_data: true
 verifier:
-  # Within the judge login's validity below; a verification has taken at most ten minutes.
+  # Within the judge login's validity below; across 105 recorded trials, Daydream reviews
+  # included, a verification took at most ten minutes.
   override_timeout_sec: 2100
   import_path: benchmarks.daydream.verifier:DaydreamVerifier
   kwargs:
     # The ChatGPT subscription login's tokens last about an hour, so the judge gets one with at
-    # least 40 minutes left: the verifier's timeout plus Pi's five-minute refresh threshold.
+    # least 40 minutes left: the verifier's timeout plus five minutes' margin.
     min_judge_validity_sec: 2400
 environment:
   type: docker
