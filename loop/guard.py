@@ -1,16 +1,27 @@
 """Check a candidate's Daydream commit, then run Daydream's gate, before it is scored.
 
 ``python -m loop.guard <daydream-worktree> <base> <commit>`` prints JSON for the
-ledger and exits 1 on a refusal. The commit must be the only one on top of the base
-and small; leave the gate, the coverage floor, tool settings, dependencies, the
-vendored Harbor export and agent guidance alone; keep every test; and carry no
-benchmark knowledge. Then ``make check`` must pass in the worktree, with a private
-HOME, within ``gate_timeout_seconds``. The guard only reads the repository and never
-commits, so it neither passes ``--no-verify`` nor touches the hooks.
+ledger and exits 1 on a refusal. It clones the worktree's repository at the commit
+into a folder of its own, so nothing untracked, ignored or configured in the worktree
+reaches the checks or the gate. The commit must be the only one on top of the base,
+change at least one file and stay small, with no binary files; leave the gate, the
+coverage floor, tool settings, ``.gitattributes``, dependencies, the vendored Harbor
+export and agent guidance alone; keep every test, add no skip, xfail, deselection,
+pytest hook or coverage exclusion; and carry no benchmark knowledge. Then ``make
+check`` must pass in the clone within ``gate_timeout_seconds``, with a throwaway HOME
+and only an allowlisted environment. uv runs offline from the operator's cache, so
+one ordinary ``make check`` in a Daydream checkout must have filled it first. The
+guard never commits, so it neither passes ``--no-verify`` nor touches the hooks.
+
+It does not catch gutted test bodies or assertions, code that behaves differently
+under test, or names written in disguise. It matches only a review case's name and
+its repository's full ``owner/name``, never a bare repository name, and it refuses
+any added line that mentions harbor, even one that already did before the change.
 """
 from __future__ import annotations
 
 import argparse
+import ast
 import contextlib
 import fnmatch
 import json
@@ -31,28 +42,37 @@ from loop import settings
 ROOT = Path(__file__).resolve().parents[1]
 REVIEWBENCH, AACR = ROOT / '.cache/src/ReviewBench', ROOT / '.cache/src/aacr-bench'
 GIT = 'git'
+# No global attributes file, which could hide content from the diff, and no fsmonitor hook.
+GIT_OPTIONS = ('-c', 'core.attributesFile=/dev/null', '-c', 'core.fsmonitor=')
 GATE = ('make', 'check')
+# The only variables the gate sees, besides HOME and uv's cache, Pythons and offline switch.
+GATE_ENVIRONMENT = ('PATH', 'LANG', 'LC_ALL', 'TERM', 'TMPDIR')
 # Paths from the repository root. Make reads GNUmakefile or makefile before Makefile,
 # and `make check` runs the two scripts named here.
-PROTECTED = ('Makefile', 'GNUmakefile', 'makefile', 'pyproject.toml', 'uv.lock', '.python-version',
+PROTECTED = ('Makefile', 'GNUmakefile', 'makefile', 'uv.lock', '.python-version',
              'scripts/hooks/*', 'scripts/ci_*', 'scripts/check-naming.sh', 'scripts/check-packaged-runtimes.sh',
              '.github/*', 'docs/coverage.md', 'daydream/benchmarks/*', '.agents/*', 'AGENTS.md', 'CONTRIBUTING.md')
-# Files that take precedence over pyproject.toml's tool settings, wherever they sit.
+# Wherever they sit: tool settings, and files that take precedence over pyproject.toml's,
+# and .gitattributes, which can turn a file's diff into "Binary files differ".
 SETTINGS_FILES = {'pyproject.toml', 'uv.toml', 'ruff.toml', '.ruff.toml', 'mypy.ini', '.mypy.ini',
-                  'pytest.ini', '.pytest.ini', 'tox.ini', 'setup.cfg', '.coveragerc'}
+                  'pytest.toml', '.pytest.toml', 'pytest.ini', '.pytest.ini', 'tox.ini', 'setup.cfg',
+                  '.coveragerc', '.gitattributes'}
 KEYWORDS = re.compile('reviewbench|aacr|harbor', re.IGNORECASE)
-TEST_FUNCTION = re.compile(r'^\s*(?:async\s+)?def\s+test_', re.MULTILINE)
-# Ways to skip, expect failure or deselect in pytest and unittest. The bare word
-# "skip" is common in Daydream's tests, so only its call or attribute forms count.
-ESCAPE = re.compile(r'\.skip(?:if|unless|test)?\b|\bskip(?:if)?\(|xfail|importorskip|skiptest|expectedfailure'
-                    r'|deselect|collect_ignore|pytest_collection_modifyitems|pytest_ignore_collect', re.IGNORECASE)
+# Ways to skip, expect failure, deselect or rewrite results in pytest and unittest.
+# The bare word "skip" is common in Daydream's tests, so only call and marker forms count.
+ESCAPE = re.compile(r'\bpytest\.(?:skip|xfail|importorskip)|\bmark\.(?:skip|xfail)|\.skip(?:if|unless|test)?\s*\('
+                    r'|\bskip(?:if)?\(|xfail|importorskip|skiptest|expectedfailure|deselect|collect_ignore'
+                    r'|^\s*(?:async\s+)?def\s+pytest_|pytest_plugins|__test__', re.IGNORECASE)
+SKIP_IMPORTS = {'skip', 'skipif', 'skipIf', 'skipUnless', 'xfail', 'importorskip', 'expectedFailure', 'SkipTest'}
+# coverage.py's default exclusion.
+NO_COVER = re.compile(r'#\s*pragma[:\s]?\s*no\s*cover', re.IGNORECASE)
 HUNK = re.compile(r'^@@ -\d+(?:,\d+)? \+(\d+)')
 DIFF = ('--no-renames', '--no-ext-diff', '--no-textconv', '--no-color')
 
 
-def git(worktree: Path, *arguments: str) -> str:
-    result = subprocess.run([GIT, '-C', str(worktree), *arguments], capture_output=True,
-                            encoding='utf-8', errors='surrogateescape')
+def git(repository: Path, *arguments: str) -> str:
+    result = subprocess.run([GIT, *GIT_OPTIONS, '-C', str(repository), *arguments], capture_output=True,
+                            encoding='utf-8', errors='surrogateescape', env=os.environ | {'GIT_ATTR_NOSYSTEM': '1'})
     if result.returncode:
         raise RuntimeError(f'git {" ".join(arguments)} failed: {result.stderr.strip()}')
     return result.stdout
@@ -110,10 +130,47 @@ def is_test_code(path: str) -> bool:
     return name.suffix == '.py' and (name.parts[0] == 'tests' or name.name == 'conftest.py')
 
 
-def added_lines(worktree: Path, base: str, commit: str, path: str):
-    """The new file's line number and text of each line the commit adds to path."""
+def _parse(source: str) -> ast.Module:
+    try:
+        return ast.parse(source)
+    except SyntaxError:
+        return ast.Module(body=[], type_ignores=[])
+
+
+def collected_tests(body: list[ast.stmt], prefix: str = '') -> set[str]:
+    """The tests pytest collects by name: test* functions, and test* methods of Test* classes.
+    A later binding of the same name replaces the test, as it does when the module runs."""
+    names = set()
+
+    def rebind(name: str) -> None:
+        names.difference_update({known for known in names if known == prefix + name or known.startswith(f'{prefix}{name}.')})
+    for node in body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            rebind(node.name)
+            if isinstance(node, ast.ClassDef) and node.name.startswith('Test'):
+                names |= collected_tests(node.body, f'{prefix}{node.name}.')
+            elif not isinstance(node, ast.ClassDef) and node.name.startswith('test'):
+                names.add(prefix + node.name)
+            continue
+        for child in ast.walk(node):
+            if isinstance(child, ast.Name) and not isinstance(child.ctx, ast.Load):
+                rebind(child.id)
+            elif isinstance(child, ast.alias):
+                rebind((child.asname or child.name).split('.')[0])
+    return names
+
+
+def skip_imports(tree: ast.Module) -> set[tuple[str, str]]:
+    """Skip and xfail helpers imported by name from pytest or unittest, under any alias."""
+    return {(node.module, alias.name) for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)
+            and (node.module or '').split('.')[0] in ('pytest', '_pytest', 'unittest')
+            for alias in node.names if alias.name in SKIP_IMPORTS}
+
+
+def added_lines(repository: Path, base: str, commit: str, path: str):
+    """The new file's line number and text of each line the commit adds to path, binary or not."""
     number = None
-    for line in git(worktree, 'diff', '-U0', *DIFF, base, commit, '--', f':(literal){path}').splitlines():
+    for line in git(repository, 'diff', '-U0', '--text', *DIFF, base, commit, '--', f':(literal){path}').splitlines():
         if hunk := HUNK.match(line):
             number = int(hunk[1])
         elif number is not None and line.startswith('+'):
@@ -121,25 +178,36 @@ def added_lines(worktree: Path, base: str, commit: str, path: str):
             number += 1
 
 
-def run_gate(worktree: Path, timeout: int) -> dict:
-    """Run Daydream's gate with a throwaway HOME, killing all of it at the timeout."""
-    with tempfile.TemporaryDirectory(prefix='loop-gate-home-', ignore_cleanup_errors=True) as home:
-        started, timed_out = time.monotonic(), False
-        process = subprocess.Popen(GATE, cwd=worktree, env=os.environ | {'HOME': home}, stdin=subprocess.DEVNULL,
-                                   stdout=subprocess.PIPE, stderr=subprocess.STDOUT, encoding='utf-8',
-                                   errors='replace', start_new_session=True)
-        try:
-            output = process.communicate(timeout=timeout)[0]
-        except subprocess.TimeoutExpired:
-            timed_out = True
-        finally:
-            if process.returncode is None:
-                os.killpg(process.pid, signal.SIGKILL)
-        if timed_out:
-            output = process.communicate()[0]
-        seconds = time.monotonic() - started
+def uv_directories() -> dict[str, str]:
+    """The operator's uv cache and Pythons, so the gate needs no downloads."""
+    return {name: subprocess.run(['uv', *command], check=True, capture_output=True, text=True).stdout.strip()
+            for name, command in (('UV_CACHE_DIR', ('cache', 'dir')), ('UV_PYTHON_INSTALL_DIR', ('python', 'dir')))}
+
+
+def run_gate(checkout: Path, scratch: Path, timeout: int) -> dict:
+    """Run Daydream's gate with a throwaway HOME, and kill whatever it leaves behind."""
+    home, log = scratch / 'home', scratch / 'gate.log'
+    home.mkdir()
+    # uv works offline from the operator's cache, so the gate needs no proxy or credentials.
+    environment = ({name: os.environ[name] for name in GATE_ENVIRONMENT if name in os.environ}
+                   | uv_directories() | {'UV_OFFLINE': '1', 'HOME': str(home)})
+    started, timed_out = time.monotonic(), False
+    # A file, not a pipe: a descendant that leaves the process group can't hold it open.
+    with log.open('wb') as output:
+        process = subprocess.Popen(GATE, cwd=checkout, env=environment, stdin=subprocess.DEVNULL,
+                                   stdout=output, stderr=subprocess.STDOUT, start_new_session=True)
+    try:
+        process.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        timed_out = True
+    finally:
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(process.pid, signal.SIGKILL)
+        process.wait()
+    seconds = time.monotonic() - started
     return dict(command=' '.join(GATE), returncode=None if timed_out else process.returncode,
-                timed_out=timed_out, seconds=round(seconds, 1), output_tail=output[-4000:])
+                timed_out=timed_out, seconds=round(seconds, 1),
+                output_tail=log.read_text(encoding='utf-8', errors='replace')[-4000:])
 
 
 def check(worktree: Path, base: str, commit: str, loaded: settings.Settings, names: set[str]) -> dict:
@@ -147,58 +215,79 @@ def check(worktree: Path, base: str, commit: str, loaded: settings.Settings, nam
     worktree = Path(worktree).resolve()
     base, commit = (git(worktree, 'rev-parse', '--verify', '--end-of-options', f'{revision}^{{commit}}').strip()
                     for revision in (base, commit))
+    with tempfile.TemporaryDirectory(prefix='loop-guard-', ignore_cleanup_errors=True) as temporary:
+        scratch = Path(temporary)
+        checkout = scratch / 'daydream'
+        git(scratch, 'clone', '--quiet', '--no-checkout', str(worktree), str(checkout))
+        git(checkout, 'checkout', '--quiet', '--detach', commit)
+        result = _check(checkout, scratch, base, commit, loaded, names)
+    return dict(accepted=not result['refusals'], worktree=str(worktree), base=base, commit=commit) | result
+
+
+def _check(checkout: Path, scratch: Path, base: str, commit: str, loaded: settings.Settings, names: set[str]) -> dict:
     refusals = []
 
     def refuse(kind: str, detail: str) -> None:
         refusals.append(dict(check=kind, detail=detail))
 
-    parents = git(worktree, 'rev-list', '--parents', '-n', '1', commit).split()[1:]
+    parents = git(checkout, 'rev-list', '--parents', '-n', '1', commit).split()[1:]
     if parents != [base]:
         refuse('shape', f'Expected one commit on top of {base}; its parents are {parents}')
-    if git(worktree, 'rev-parse', 'HEAD').strip() != commit or git(worktree, 'status', '--porcelain'):
-        refuse('worktree', 'The worktree must be clean and checked out at the commit, so the gate runs on it')
-    fields = git(worktree, 'diff', '--name-status', '-z', *DIFF, base, commit).split('\0')[:-1]
+    fields = git(checkout, 'diff', '--name-status', '-z', *DIFF, base, commit).split('\0')[:-1]
     changes = dict(zip(fields[1::2], fields[::2]))
-    counts = [record.split('\t', 2)[:2] for record in
-              git(worktree, 'diff', '--numstat', '-z', *DIFF, base, commit).split('\0') if record]
-    lines = sum(int(count) for pair in counts for count in pair if count != '-')
+    counts = {path: (added, deleted) for added, deleted, path in
+              (record.split('\t', 2) for record in
+               git(checkout, 'diff', '--numstat', '-z', *DIFF, base, commit).split('\0') if record)}
+    lines = sum(int(count) for pair in counts.values() for count in pair if count != '-')
+    if not changes:
+        refuse('shape', 'The commit changes no file')
     if len(changes) > loaded['max_diff_files']:
         refuse('shape', f'{len(changes)} files changed; at most {loaded["max_diff_files"]} may change')
     if lines > loaded['max_diff_lines']:
         refuse('shape', f'{lines} lines changed; at most {loaded["max_diff_lines"]} may change')
     pattern = name_pattern(names)
     for path, status in sorted(changes.items()):
+        if '-' in counts.get(path, ()):
+            refuse('shape', f'{path} is binary')
         if protected(path):
             refuse('paths', f'{path} may not change')
         if is_test_file(path) and status == 'D':
             refuse('tests', f'{path} is deleted')
-        elif is_test_file(path) and status != 'A':
-            before, after = (len(TEST_FUNCTION.findall(git(worktree, 'show', f'{revision}:{path}')))
-                             for revision in (base, commit))
-            if after < before:
-                refuse('tests', f'{path} has {after} test functions, fewer than its {before}')
-        for number, line in added_lines(worktree, base, commit, path):
+        elif is_test_code(path) and status != 'D':
+            before, after = (_parse(git(checkout, 'show', f'{revision}:{path}')) if exists else _parse('')
+                             for revision, exists in ((base, status != 'A'), (commit, True)))
+            tests_before, tests_after = len(collected_tests(before.body)), len(collected_tests(after.body))
+            if is_test_file(path) and tests_after < tests_before:
+                refuse('tests', f'{path} has {tests_after} test functions, fewer than its {tests_before}')
+            if skip_imports(after) - skip_imports(before):
+                refuse('tests', f'{path} imports a skip or xfail helper by name')
+        found = {}
+        for number, line in added_lines(checkout, base, commit, path):
             if keyword := KEYWORDS.search(line):
-                refuse('benchmark', f'{path}:{number} adds {keyword[0]!r}')
+                found.setdefault(('benchmark', f'adds {keyword[0].lower()!r}'), []).append(number)
             # The name stays out of the ledger, which the proposer may read.
             if pattern.search(line):
-                refuse('benchmark', f'{path}:{number} names a review case or its repository')
+                found.setdefault(('benchmark', 'names a review case or its repository'), []).append(number)
             if is_test_code(path) and ESCAPE.search(line):
-                refuse('tests', f'{path}:{number} adds a skip, xfail or deselection')
+                found.setdefault(('tests', 'adds a skip, xfail, deselection or pytest hook'), []).append(number)
+            if NO_COVER.search(line):
+                found.setdefault(('tests', 'adds a coverage exclusion'), []).append(number)
+        for (kind, finding), numbers in found.items():
+            more = f' (and {len(numbers) - 1} more lines)' if len(numbers) > 1 else ''
+            refuse(kind, f'{path}:{numbers[0]} {finding}{more}')
     gate = None
     if not refusals:
-        gate = run_gate(worktree, loaded['gate_timeout_seconds'])
+        gate = run_gate(checkout, scratch, loaded['gate_timeout_seconds'])
         if gate['timed_out']:
             refuse('gate', f'make check ran past {loaded["gate_timeout_seconds"]} seconds')
         elif gate['returncode']:
             refuse('gate', f'make check exited {gate["returncode"]}')
-    return dict(accepted=not refusals, worktree=str(worktree), base=base, commit=commit,
-                files=len(changes), lines=lines, refusals=refusals, gate=gate)
+    return dict(files=len(changes), lines=lines, refusals=refusals, gate=gate)
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('worktree', type=Path, help='Daydream worktree checked out at the commit')
+    parser.add_argument('worktree', type=Path, help="A Daydream worktree whose repository holds the commit")
     parser.add_argument('base', help='The Daydream commit the candidate builds on')
     parser.add_argument('commit', help="The proposer's commit")
     parser.add_argument('--reviewbench', type=Path, default=REVIEWBENCH, help='Clean checkout of the pinned ReviewBench')
