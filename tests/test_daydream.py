@@ -436,15 +436,46 @@ def test_reviewbench_format_sends_line_findings_and_counts_file_level_ones(revie
     assert len(proof['resolved_configuration']['review_profile']['digest']) == 64
 
 
-def test_freeze_comparison_records_what_the_image_holds(review_case):
-    case = review_case
-    for name in ('comparison.json', 'diff.patch'):
-        (case.inputs / name).unlink()
-    (case.inputs / 'case.json').write_text(json.dumps({'format': 'reviewbench', 'repository': str(case.repo),
-                                                      'base': BASE}))
-    assert entrypoint.freeze_comparison(case.inputs) == case.comparison
-    assert json.loads((case.inputs / 'comparison.json').read_text()) == case.comparison
-    assert (case.inputs / 'diff.patch').read_text() == case.checkout.patch
+def test_freeze_comparison_pins_the_bytes_daydream_reviews(tmp_path, monkeypatch, real_git):
+    from daydream.git_ops.captured_source import capture_source
+    # Daydream refuses inherited Git configuration, so a private HOME shuts out the operator's.
+    for name in [name for name in os.environ if name.startswith('GIT_')]:
+        monkeypatch.delenv(name)
+    monkeypatch.setenv('HOME', str(tmp_path))
+    monkeypatch.setenv('XDG_CONFIG_HOME', str(tmp_path / 'config'))
+    monkeypatch.setenv('PATH', f'{real_git.parent}{os.pathsep}{os.environ["PATH"]}')
+    def git(directory, *arguments):
+        return subprocess.run(['git', '-C', str(directory), '-c', 'user.name=Proposer',
+            '-c', 'user.email=proposer@example.com', *arguments],
+            check=True, capture_output=True, text=True).stdout.strip()
+    source, repo, inputs = tmp_path / 'source', tmp_path / 'repo', tmp_path / 'inputs'
+    source.mkdir()
+    inputs.mkdir()
+    git(source, 'init', '-q')
+    revisions = []
+    for files in ({'.gitattributes': '*.sln text eol=crlf\n', 'App.sln': 'Project\nEndProject\n', 'file.cs': 'base\n'},
+                  {'file.cs': 'head\n'}):
+        for name, text in files.items():
+            (source / name).write_text(text)
+        git(source, 'add', '-A')
+        git(source, 'commit', '-q', '-m', 'Change')
+        revisions.append(git(source, 'rev-parse', 'HEAD'))
+    base, head = revisions
+    # As ReviewBench's image does, check out the head, which writes App.sln with CRLF.
+    git(tmp_path, 'clone', '-q', '--no-checkout', str(source), str(repo))
+    git(repo, 'checkout', '-q', '--detach', head)
+    assert (repo / 'App.sln').read_bytes() == b'Project\r\nEndProject\r\n'
+    (inputs / 'case.json').write_text(json.dumps({'repository': str(repo), 'base': base}))
+    comparison = entrypoint.freeze_comparison(inputs)
+    assert json.loads((inputs / 'comparison.json').read_text()) == comparison
+    assert (comparison['head_sha'], comparison['merge_base_sha']) == (head, base)
+    # Daydream reviews the checkout's bytes, which now hold only the pull request's change.
+    captured = capture_source(repo, tmp_path / 'capture', base_sha=base, head_sha=head, local=True)
+    assert captured.files == ('file.cs',)
+    assert captured.diff == (inputs / 'diff.patch').read_text()
+    # Rewriting the line endings still changes the pinned comparison.
+    (repo / 'App.sln').write_bytes(b'Project\r\nEndProject\r\n')
+    assert entrypoint._comparison(repo, base)[0] != comparison
 
 
 @pytest.mark.parametrize('status,outside', [
