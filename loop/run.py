@@ -15,15 +15,16 @@ on ``loop/climb.txt`` with ``rounds`` rounds, while it is younger than
 ``baseline_max_age_days``; otherwise they are measured again as ``<run>-baseline``. A
 summary's age is its newest round's: the ``finished_at`` Harbor wrote in that job's
 ``result.json``, or the summary's modification time when no job folder is left. Then the
-run-start entry, with the effective settings.
+run-start entry, with the effective settings. The first run on a new pin first reports any
+gap beyond the noise between its baseline and the last merged winner's dev scores.
 
 Repeat: before each iteration, the stop rules below; every ``canary_every`` iterations,
 the canary again; then one iteration with ``loop.iterate``, and ``loop.prune`` between
 iterations once it exists (#56). After ``accepted-on-dev``, ``loop.confirm`` runs as a
 separate process against the run's baseline, and the loop reads only its word, from its
-``verdict.json``, into a confirmation entry: ``confirmed`` is a winner, whose draft pull
-request opens when ``auto_open_pr`` is on (#57; a stand-in that opens nothing until then);
-``not-confirmed`` goes on; ``regressed`` stops. One iteration runs at a time, and every
+``verdict.json``, into a confirmation entry: ``confirmed`` is a winner, which ``loop.land``
+lands: its draft pull request opens when ``auto_open_pr`` is on, and otherwise its branch
+and body are written locally, a dry run; ``not-confirmed`` goes on; ``regressed`` stops. One iteration runs at a time, and every
 Harbor job runs with ``-n`` ``concurrency``.
 
 Each stop is a ``stop`` entry, with its reason and a detail:
@@ -34,7 +35,8 @@ Each stop is a ``stop`` entry, with its reason and a detail:
   confirmations' aren't counted) or ``run_max_wall_hours`` since the run-start entry;
 - ``held-out-regression``: a confirmation said ``regressed``;
 - ``judge-drift``: the canary drifted;
-- ``winner-awaiting-merge``: ``max_unmerged_winners`` winners in the run;
+- ``winner-awaiting-merge``: ``max_unmerged_winners`` winners in the run with no ``merge``
+  entry (``loop.land --merged``);
 - ``held-out-worn``: ``loop.confirm`` refused, since its held-out sets' uses are spent (#58);
 - ``infrastructure``: ``invalid_streak_stop`` invalid iterations in a row, a subscription
   limit still there after one wait of ``limit_backoff_minutes``, a canary or confirmation
@@ -74,7 +76,8 @@ import time
 import tomllib
 
 from benchmarks.daydream import build
-from loop import canary, confirm as confirmation, guard, iterate as iteration, ledger, rounds, sets, settings
+from loop import canary, confirm as confirmation, guard, iterate as iteration, land as landing, ledger, rounds, sets, \
+    settings
 
 ROOT = Path(__file__).resolve().parents[1]
 # One loop per machine: its Docker and both subscriptions are shared.
@@ -82,7 +85,6 @@ ROOT = Path(__file__).resolve().parents[1]
 LOCK = Path('/tmp/code-review-benchmarks-loop.lock')
 # What Codex prints when a subscription's limit is reached.
 LIMIT = re.compile(r'hit your usage limit', re.IGNORECASE)
-LAND_ISSUE = 'https://github.com/existential-birds/code-review-benchmarks/issues/57'
 
 
 class Stop(Exception):
@@ -163,14 +165,26 @@ def prune(run: str, loaded: settings.Settings) -> dict | None:
         return None
 
 
-def land(run: str, n: int, commit: str) -> dict:
-    """STAND-IN for ``loop.land`` (#57), which isn't written yet: it will open the winner's draft pull request.
+def land(run: str, n: int, loaded: settings.Settings) -> dict | None:
+    """Land a winner with ``loop.land``: its draft pull request with ``auto_open_pr`` on, otherwise a dry run that
+    writes its branch and body locally and pushes nothing. A landing that stops is reported, and the run goes on."""
+    try:
+        return landing.land(run, n, dry_run=not loaded['auto_open_pr'], root=ROOT)
+    except (landing.Stop, OSError, LookupError, RuntimeError, ValueError, subprocess.CalledProcessError) as error:
+        print(f'#{n} is a winner, but loop.land stopped: {error}\nLand it by hand: '
+              f'python -m loop.land --run {run} --iteration {n}', file=sys.stderr)
+        return None
 
-    This one only says that landing is #57's. It opens nothing and reaches neither GitHub nor Daydream.
-    """
-    print(f"{run} #{n} ({commit}) is a winner; its pull request is not opened: landing is #57's ({LAND_ISSUE})",
-          file=sys.stderr)
-    return dict(run=run, iteration=n, commit=commit, opened=False, reason="landing is #57's")
+
+def pin_gap(summary: Path, loaded: settings.Settings) -> None:
+    """On the first run on a new pin, report its baseline against the merged winner's recorded dev scores."""
+    try:
+        gap = landing.pin_gap(summary, loaded, root=ROOT)
+    except (OSError, LookupError, ValueError, StopIteration) as error:
+        print(f'Could not compare the new pin with the merged winner: {error}', file=sys.stderr)
+        return
+    if gap:
+        print(landing.gap_text(gap), file=sys.stderr)
 
 
 def sleep(seconds: float) -> None:
@@ -326,8 +340,8 @@ def _confirm(folder: Path, start: dict, entry: dict, loaded: settings.Settings, 
     print(f'#{n} {word} on held-out', file=sys.stderr)
     if word == 'regressed':
         raise Stop('held-out-regression', f'#{n} regressed on held-out')
-    if word == 'confirmed' and loaded['auto_open_pr']:
-        land(folder.name, n, commit)
+    if word == 'confirmed':
+        land(folder.name, n, loaded)
 
 
 def _streak(verdicts: list[str], counted) -> int:
@@ -347,8 +361,9 @@ def due(entries: list[dict], loaded: settings.Settings, at: datetime) -> tuple[s
     recent = [entry['verdict']['verdict'] for entry in entries[last_stop + 1:] if entry['kind'] == 'iteration']
     if (invalid := _streak(recent, lambda verdict: verdict == 'invalid')) >= loaded['invalid_streak_stop']:
         return 'infrastructure', f'{invalid} invalid iterations in a row (invalid_streak_stop)'
+    merged = {entry['iteration'] for entry in entries if entry['kind'] == 'merge'}
     winners = [entry['iteration'] for entry in entries
-               if entry['kind'] == 'confirmation' and entry['verdict'] == 'confirmed']
+               if entry['kind'] == 'confirmation' and entry['verdict'] == 'confirmed' and entry['iteration'] not in merged]
     if len(winners) >= loaded['max_unmerged_winners']:
         return 'winner-awaiting-merge', (f'{len(winners)} confirmed and not merged, max_unmerged_winners: '
                                          f'{", ".join(f"#{n}" for n in winners)}')
@@ -470,6 +485,7 @@ def start(run: str, baseline_name: str | None, overrides: dict) -> int:
                   'whether the judge changed: python -m loop.canary --record', file=sys.stderr)
             return 1
         summary = baseline(run, baseline_name, loaded)
+        pin_gap(summary, loaded)
         ledger.append(folder, 'run-start', dict(
             settings=effective(loaded), suite_commit=commit, judge=result['judge'],
             baseline_commit=build.BUILD['source_commit'],

@@ -24,6 +24,10 @@ the first line), ``kind`` and that kind's fields, and no others:
   so a confirmation refuses any other field.
 - ``stop``: ``reason``, one of ``STOPS``, and optionally ``detail``, a string saying
   which limit or failure (``loop.run``). A run resumed after a stop goes on appending.
+- ``landing``: ``iteration`` (one confirmed), the draft pull request's ``url``, its
+  ``branch`` and the ``commit`` it proposes (``loop.land``), once per iteration.
+- ``merge``: ``iteration`` (one landed), the landing's ``url`` and the ``merge_commit``
+  a person merged it as. A merged winner no longer waits for a person.
 
 Lines are appended under an exclusive lock and fsynced, never rewritten or deleted.
 JSON is strict: NaN and infinities are refused. Reading verifies the chain, so an
@@ -53,6 +57,8 @@ FIELDS = {  # kind: (required, optional)
     'iteration': ({'iteration', 'verdict'}, {'proposal', 'candidate', 'gate', 'scores', 'cost'}),
     'confirmation': ({'iteration', 'verdict'}, set()),
     'stop': ({'reason'}, {'detail'}),
+    'landing': ({'iteration', 'url', 'branch', 'commit'}, set()),
+    'merge': ({'iteration', 'url', 'merge_commit'}, set()),
 }
 PROPOSAL = {'hypothesis', 'category', 'evidence', 'prediction', 'rejection_criterion', 'files'}
 VERDICTS = ('accepted-on-dev', 'rejected', 'invalid')
@@ -89,7 +95,7 @@ def _check(kind: str, fields: dict, earlier: list[dict]) -> None:
         raise ValueError(f'A stop reason is a string: {fields["reason"]!r}')
     if kind == 'stop' and fields['reason'] not in STOPS:
         raise ValueError(f'A stop reason is one of {STOPS}: {fields["reason"]!r}')
-    if kind in ('iteration', 'confirmation'):
+    if kind in ('iteration', 'confirmation', 'landing', 'merge'):
         n = fields['iteration']
         if type(n) is not int or n < 1:
             raise ValueError(f'An iteration number is a positive integer: {n!r}')
@@ -124,6 +130,21 @@ def _check(kind: str, fields: dict, earlier: list[dict]) -> None:
             raise ValueError(f'Only an iteration accepted on dev is confirmed, and iteration {n} is not')
         if any(entry['kind'] == 'confirmation' and entry['iteration'] == n for entry in earlier):
             raise ValueError(f'Iteration {n} is already confirmed')
+    if kind in ('landing', 'merge'):
+        if not all(isinstance(fields[key], str) and fields[key] for key in FIELDS[kind][0] - {'iteration'}):
+            raise ValueError(f'A {kind} entry holds strings besides its iteration number')
+        landed = [entry['url'] for entry in earlier if entry['kind'] == 'landing' and entry['iteration'] == n]
+    if kind == 'landing':
+        if not any(entry['kind'] == 'confirmation' and entry['iteration'] == n and entry['verdict'] == 'confirmed'
+                   for entry in earlier):
+            raise ValueError(f'Only a confirmed iteration is landed, and iteration {n} is not')
+        if landed:
+            raise ValueError(f'Iteration {n} is already landed: {landed[0]}')
+    if kind == 'merge':
+        if landed != [fields['url']]:
+            raise ValueError(f'Iteration {n} was not landed as {fields["url"]}')
+        if any(entry['kind'] == 'merge' and entry['iteration'] == n for entry in earlier):
+            raise ValueError(f'Iteration {n} is already merged')
 
 
 def _verified(run: Path) -> tuple[list[dict], list[bytes]]:
