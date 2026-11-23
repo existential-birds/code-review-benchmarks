@@ -8,7 +8,7 @@ climb_benchmark = "reviewbench"
 primary_metric = "grounded_f1"
 # Provisional until #45: twice the test set, whose complete rounds varied by about 0.01.
 climb_set_size = 50
-# The same size as the climb set, so the same noise figures apply.
+# The same size as the climb set, so the same noise figures apply; change the two together.
 check_set_size = 50
 # About the recall gain accepted for committed review in existential-birds/daydream#1686.
 target_gain = 0.02

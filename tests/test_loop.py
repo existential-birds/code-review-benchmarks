@@ -57,8 +57,9 @@ def test_derived_values_are_refused_until_measured():
     for name in settings.DERIVED:
         with pytest.raises(LookupError, match=f'{name} is unset .*/issues/45'):
             loaded[name]
-    with pytest.raises(LookupError, match='issues/45'):
-        loaded.accept_threshold(3)
+    for asked in (lambda: loaded.accept_threshold(3), lambda: loaded['accept_threshold']):
+        with pytest.raises(LookupError, match='(sigma|rounds) is unset .*/issues/45'):
+            asked()
     measured = settings.load(sigma=0.01, rounds=2)
-    assert measured.accept_threshold() == pytest.approx(0.02)
+    assert measured.accept_threshold() == measured['accept_threshold'] == pytest.approx(0.02)
     assert measured.accept_threshold(8) == pytest.approx(0.01)

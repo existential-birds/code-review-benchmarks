@@ -12,35 +12,29 @@ import tomllib
 
 FILE = Path(__file__).with_name('settings.toml')
 NOISE_ISSUE = 'https://github.com/existential-birds/code-review-benchmarks/issues/45'
-_INT, _FLOAT, _BOOL, _STR, _ARGV = 'int', 'float', 'bool', 'str', 'argv'
 SETTINGS = {
-    'climb_benchmark': _STR, 'primary_metric': _STR, 'climb_set_size': _INT, 'check_set_size': _INT,
-    'target_gain': _FLOAT, 'accept_z': _FLOAT, 'rounds_max': _INT, 'futility_stop': _BOOL,
-    'max_cost_ratio': _FLOAT, 'max_findings_ratio': _FLOAT, 'max_diff_files': _INT, 'max_diff_lines': _INT,
-    'gate_timeout_seconds': _INT, 'concurrency': _INT, 'iteration_max_wall_hours': _FLOAT,
-    'iteration_max_cost_usd_equiv': _FLOAT, 'run_max_iterations': _INT, 'run_max_cost_usd_equiv': _FLOAT,
-    'run_max_wall_hours': _FLOAT, 'plateau_iterations': _INT, 'max_unmerged_winners': _INT,
-    'auto_open_pr': _BOOL, 'holdout_rounds': _INT, 'holdout_rule': _STR, 'holdout_max_uses': _INT,
-    'canary_cases': _INT, 'canary_every': _INT, 'baseline_max_age_days': _FLOAT, 'keep_rejected_jobs': _INT,
-    'min_matched_fraction': _FLOAT, 'max_proposal_attempts': _INT, 'invalid_streak_stop': _INT,
-    'limit_backoff_minutes': _FLOAT, 'aacr_in_climb': _BOOL, 'proposer_command': _ARGV,
+    'climb_benchmark': str, 'primary_metric': str, 'climb_set_size': int, 'check_set_size': int,
+    'target_gain': float, 'accept_z': float, 'rounds_max': int, 'futility_stop': bool,
+    'max_cost_ratio': float, 'max_findings_ratio': float, 'max_diff_files': int, 'max_diff_lines': int,
+    'gate_timeout_seconds': int, 'concurrency': int, 'iteration_max_wall_hours': float,
+    'iteration_max_cost_usd_equiv': float, 'run_max_iterations': int, 'run_max_cost_usd_equiv': float,
+    'run_max_wall_hours': float, 'plateau_iterations': int, 'max_unmerged_winners': int,
+    'auto_open_pr': bool, 'holdout_rounds': int, 'holdout_rule': str, 'holdout_max_uses': int,
+    'canary_cases': int, 'canary_every': int, 'baseline_max_age_days': float, 'keep_rejected_jobs': int,
+    'min_matched_fraction': float, 'max_proposal_attempts': int, 'invalid_streak_stop': int,
+    'limit_backoff_minutes': float, 'aacr_in_climb': bool, 'proposer_command': list,
 }
-DERIVED = {'sigma': _FLOAT, 'rounds': _INT, 'precision_margin': _FLOAT,
-           'wrong_findings_margin': _FLOAT, 'incomplete_margin': _FLOAT}
+DERIVED = {'sigma': float, 'rounds': int, 'precision_margin': float,
+           'wrong_findings_margin': float, 'incomplete_margin': float}
 
 
-def _valid(kind: str, value: object) -> bool:
-    if kind == _BOOL:
-        return isinstance(value, bool)
-    if isinstance(value, bool):
+def _valid(kind: type, value: object) -> bool:
+    """TOML integers count as floats; booleans never count as numbers; a command is a list of strings."""
+    if isinstance(value, bool) != (kind is bool):
         return False
-    if kind == _INT:
-        return isinstance(value, int)
-    if kind == _FLOAT:
-        return isinstance(value, (int, float))
-    if kind == _STR:
-        return isinstance(value, str)
-    return isinstance(value, list) and bool(value) and all(isinstance(part, str) for part in value)
+    if kind is list:
+        return isinstance(value, list) and bool(value) and all(isinstance(part, str) for part in value)
+    return isinstance(value, (int, float) if kind is float else kind)
 
 
 class Settings:
@@ -48,6 +42,8 @@ class Settings:
         self._values = values
 
     def __getitem__(self, name: str):
+        if name == 'accept_threshold':
+            return self.accept_threshold()
         if name in DERIVED and name not in self._values:
             raise LookupError(f'{name} is unset until the noise measurement derives it: {NOISE_ISSUE}')
         if name not in SETTINGS and name not in DERIVED:
