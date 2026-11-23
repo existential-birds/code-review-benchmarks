@@ -46,3 +46,6 @@ not copies ([what each container sees](benchmarks/aacr/README.md#logins)). Add
 The [AACR guide](benchmarks/aacr/README.md) covers full runs, reruns and reading
 results. The [ReviewBench guide](benchmarks/reviewbench/README.md) runs the same
 reviewer and logins on ReviewBench's pull requests.
+
+To tune Daydream with the loop, which proposes changes, scores them on dev cases and
+confirms kept ones on held-out, see [Run the loop](docs/loop.md).

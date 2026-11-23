@@ -105,7 +105,9 @@ def test_entries_that_do_not_fit_the_schema_are_refused(tmp_path, run):
             (run, 'iteration', iteration(5, evidence='run:1'), PATCH, 'lists of strings'),
             (run, 'iteration', iteration(5, prediction=None), PATCH, 'lists of strings'),
             (run, 'iteration', iteration(5) | {'cost': {'trials': float('nan')}}, PATCH, 'not JSON compliant'),
-            (run, 'stop', {'reason': 'budget', 'note': 'x'}, None, r'stop entry holds \[.reason.\] only'),
+            (run, 'stop', {'reason': 'budget', 'note': 'x'}, None, r"stop entry holds \['reason'\] and may add"),
+            (run, 'stop', {'reason': 'tired'}, None, 'A stop reason is one of'),
+            (run, 'stop', {'reason': 'budget', 'detail': 3}, None, 'A stop reason is a string'),
             (run, 'pause', {}, None, 'Unknown ledger entry kind')):
         with pytest.raises(ValueError, match=message):
             ledger.append(target, kind, fields, patch=patch)
