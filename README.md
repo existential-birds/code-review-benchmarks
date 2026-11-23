@@ -24,7 +24,8 @@ without changing the pin, build it with `--candidate <commit>` and pass the
 You need Docker, Git LFS, [`uv`](https://docs.astral.sh/uv/), Node 22.19+ and `make`,
 plus two logins: [Codex](https://github.com/openai/codex) signed in with a ChatGPT
 subscription (`codex login`) for the reviewer, and [Pi](https://github.com/earendil-works/pi)
-logged in to an OpenAI Codex subscription (`/login`) for the judge.
+1.6 or later logged in with your ChatGPT subscription (`/login`, "Sign in with ChatGPT") for
+the judge.
 
 ```sh
 git clone https://github.com/existential-birds/code-review-benchmarks
