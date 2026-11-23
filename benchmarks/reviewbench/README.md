@@ -98,6 +98,17 @@ To compare the pinned build with a candidate, score each over several rounds of
 ReviewBench's test set. A round is its own job, because Harbor pools the trials of
 one job.
 
+On the dev split, [`loop/rounds.py`](../../loop/rounds.py) does steps 1, 3 and 4 for
+one build in one command, and resumes a run that stopped:
+
+```sh
+.venv/bin/python -m loop.rounds --build pinned --cases loop/climb.txt --rounds 5 --name <fresh-name>
+```
+
+Give a candidate's `build.json` as `--build` and add `--limit-cases <N>` for a pilot.
+Its `summary.json`, in `artifacts/loop/<name>/`, holds every round's pooled scores
+and counts, their mean and spread, and each case's counts per round.
+
 **1. Build the candidate and generate one catalog per build.**
 
 ```sh
