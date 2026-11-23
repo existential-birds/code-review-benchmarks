@@ -46,6 +46,8 @@ def dev_cases(upstream: Path) -> list[str]:
 
 
 def select(dev: list[str], climb_size: int, check_size: int) -> tuple[list[str], list[str]]:
+    if min(climb_size, check_size) < 0:
+        raise ValueError('Set sizes cannot be negative')
     if climb_size + check_size > len(dev):
         raise ValueError(f'{climb_size} climb and {check_size} check cases exceed the {len(dev)} dev cases')
     ordered = order(dev)

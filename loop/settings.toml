@@ -25,7 +25,7 @@ max_findings_ratio = 2.0
 # Above these Daydream requires a simplification sweep, and a small diff is easier to attribute.
 max_diff_files = 5
 max_diff_lines = 500
-# Daydream's gate budget is 2 minutes on a cloud container.
+# Daydream's gate budget is 2 minutes on a cloud container; 300 seconds leaves headroom for a slower machine.
 gate_timeout_seconds = 300
 # The documented -n; recorded runs used 2 or 3.
 concurrency = 2

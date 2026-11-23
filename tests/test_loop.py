@@ -27,6 +27,8 @@ def test_a_larger_climb_set_keeps_the_smaller_one():
     assert large[:5] == small and large[5:8] == after_small[:3]
     with pytest.raises(ValueError, match='exceed the 30 dev cases'):
         sets.select(names, 20, 11)
+    with pytest.raises(ValueError, match='cannot be negative'):
+        sets.select(names, -1, 5)
 
 
 def test_loader_reads_defaults_and_applies_overrides():
@@ -42,6 +44,7 @@ def test_loader_rejects_unknown_missing_and_mistyped_settings(tmp_path):
     for written, overrides, message in (
             (text.replace('concurrency = 2', 'concurency = 2'), {}, r'Unknown loop settings in settings: \[.concurency.\]'),
             (text + 'sigmaa = 0.01\n', {}, r'Unknown loop settings in \[derived\]'),
+            (text.replace('[derived]\n', 'derived = 1\n'), {}, r'\[derived\] must be a table'),
             (text, {'rounds_maximum': 4}, r'Unknown loop settings in overrides'),
             (text.replace('concurrency = 2\n', ''), {}, r'Missing loop settings: \[.concurrency.\]'),
             (text, {'concurrency': True}, r'wrong type: \[.concurrency.\]'),

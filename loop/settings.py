@@ -60,6 +60,8 @@ def load(path: Path = FILE, **overrides: object) -> Settings:
     """Read the settings file, apply overrides, and reject unknown, missing or mistyped values."""
     data = tomllib.loads(Path(path).read_text())
     derived = data.pop('derived', {})
+    if not isinstance(derived, dict):
+        raise ValueError('[derived] must be a table')
     for source, names, known in (('settings', data, SETTINGS), ('[derived]', derived, DERIVED),
                                  ('overrides', overrides, SETTINGS | DERIVED)):
         unknown = sorted(set(names) - set(known))
