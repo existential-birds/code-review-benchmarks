@@ -70,8 +70,9 @@ invalid_streak_stop = 3
 limit_backoff_minutes = 60
 # A dev round is 131 cases and about 8 reviewer-hours; AACR is used at confirmation.
 aacr_in_climb = false
-# The Codex login is already required; non-interactive, writes only to the worktree, no network.
-proposer_command = ["codex", "exec", "--sandbox", "workspace-write"]
+# Run in loop.propose's container, which holds only a copy of the baseline, the evidence pack and the Codex
+# login: the container is the sandbox, since Codex's own limits writes but not reads. Non-interactive.
+proposer_command = ["codex", "exec", "--dangerously-bypass-approvals-and-sandbox", "--skip-git-repo-check"]
 
 # Derived by the noise measurement of #45 (docs/loop-noise.md, loop/noise.json): five rounds of
 # Daydream 0.37.0 on the 50 climb cases. accept_threshold(R) = accept_z * sigma * sqrt(2 / R)

@@ -1,13 +1,16 @@
 """Tests never run Git through PATH. A ``git`` that always fails comes first on PATH,
 so any call that slips past the fakes in ``fake_git.py`` fails the test instead of
 reaching the real Git and the operator's configuration. The exceptions are checks that
-depend on what Git itself reports, which ask for ``real_git``: ``test_guard.py`` calls it
-by absolute path with the operator's configuration shut out, and the frozen-comparison
-test runs Daydream's own Git reads on a real checkout."""
+depend on what Git itself reports: the ``git`` fixture, for the guard's and the proposer
+step's tests, calls the real binary by absolute path with the operator's configuration
+shut out, and ``real_git`` hands the binary to the frozen-comparison test, which runs
+Daydream's own Git reads on a real checkout."""
 import os
-from pathlib import Path
+import subprocess
 
 import pytest
+
+from real_git import real_git as find_real_git
 
 
 @pytest.fixture(autouse=True, scope='session')
@@ -25,13 +28,31 @@ def no_real_git(tmp_path_factory):
 @pytest.fixture
 def real_git():
     """The installed Git binary, past the failing one."""
-    for directory in os.environ['PATH'].split(os.pathsep):
-        candidate = Path(directory) / 'git'
-        if candidate.is_file() and os.access(candidate, os.X_OK):
-            with candidate.open('rb') as file:
-                if b'tests must not run git' not in file.read(200):
-                    return candidate
-    pytest.fail('These tests need Git installed')
+    return find_real_git()
+
+
+@pytest.fixture
+def git(tmp_path, monkeypatch):
+    """The real Git, for the loop's own Git calls too, with a temporary HOME, no system or
+    global configuration, no other GIT_ variables, and a fixed author and committer.
+    Returns a function running it in a repository."""
+    from loop import guard
+    binary = find_real_git()
+    for name in [name for name in os.environ if name.startswith('GIT_')]:
+        monkeypatch.delenv(name)
+    (tmp_path / 'home').mkdir()
+    monkeypatch.setenv('HOME', str(tmp_path / 'home'))
+    for name, value in dict(GIT_CONFIG_NOSYSTEM='1', GIT_CONFIG_GLOBAL=os.devnull,
+                            GIT_AUTHOR_NAME='Proposer', GIT_AUTHOR_EMAIL='proposer@example.com',
+                            GIT_COMMITTER_NAME='Proposer', GIT_COMMITTER_EMAIL='proposer@example.com',
+                            GIT_AUTHOR_DATE='2026-01-01T00:00:00Z', GIT_COMMITTER_DATE='2026-01-01T00:00:00Z').items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setattr(guard, 'GIT', str(binary))
+
+    def run(repo, *arguments):
+        return subprocess.run([str(binary), '-C', str(repo), *arguments], check=True,
+                              capture_output=True, text=True).stdout.strip()
+    return run
 
 
 @pytest.fixture
