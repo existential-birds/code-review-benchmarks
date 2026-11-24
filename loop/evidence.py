@@ -295,9 +295,10 @@ def build(summary_path: Path, out: Path) -> dict:
         for folder, sources in copies.items():
             for source in sources:
                 _copy(source, staged / folder / source.name)
-        _set_mode(staged, 0o444, 0o555)
-        # Renamed within one folder, a read-only folder keeps its place.
+        # Moved into place first: macOS won't rename a folder that is itself read-only.
         os.rename(staged, out)
+        staged = out
+        _set_mode(out, 0o444, 0o555)
     except BaseException:
         _set_mode(staged, 0o644, 0o755)
         shutil.rmtree(staged)
