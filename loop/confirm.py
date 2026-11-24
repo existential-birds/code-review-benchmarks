@@ -140,8 +140,10 @@ def _first_cases(benchmark: str, limit: int, upstream: Path) -> list[str]:
     else:
         upstream = Path(upstream).resolve()
         convert.check_source(upstream)
+        # The names don't depend on the slots; the exporter needs some to write its tasks.
+        loaded = settings.load()
         with tempfile.TemporaryDirectory(prefix='loop-confirm-') as temporary:
-            convert.export(upstream, Path(temporary) / 'test', 'test')
+            convert.export(upstream, Path(temporary) / 'test', 'test', loaded['reviewer'], loaded['judge'])
             names = [path.name for path in (Path(temporary) / 'test').iterdir() if path.is_dir()]
     return sorted(names)[:limit]
 

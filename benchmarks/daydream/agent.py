@@ -13,6 +13,7 @@ from harbor.agents.installed.base import BaseInstalledAgent
 from harbor.agents.options import Cli, InstalledAgentOptions
 
 from benchmarks.daydream.build import BUILD, CASE_DIR, CODEX_LOGIN_DIR
+from loop import slots
 
 
 class DaydreamOptions(InstalledAgentOptions):
@@ -38,15 +39,35 @@ class DaydreamAgent(BaseInstalledAgent):
         if not environment.is_path_mounted('/logs/agent', self.logs_dir):
             raise RuntimeError('Daydream requires shared agent logs; configure auto_mounting=true')
 
+    def _credentials(self, reviewer: dict) -> None:
+        """Admit only reviewer keys from Harbor's agent env, and the slot's own set."""
+        if unknown := sorted(set(self.extra_env) - set(slots.REVIEWER_KEYS)):
+            raise ValueError(f'Daydream takes only reviewer keys from the agent env, not {unknown}')
+        key = slots.reviewer_access(reviewer)['key']
+        if key and not self.extra_env.get(key):
+            raise RuntimeError(f'The {reviewer["backend"]} reviewer needs {key}: set it where harbor run starts, '
+                               'and keep the experiment\'s agent env that passes it')
+
     async def install(self, environment) -> None:
         self._require_shared_logs(environment)
-        result = await environment.exec('unshare -Ur true')
-        if result.return_code != 0:
-            raise RuntimeError('Codex needs user namespaces in the reviewer container')
-        result = await environment.exec(f'test "$(ls -A {CODEX_LOGIN_DIR})" = auth.json')
-        if result.return_code != 0:
-            raise RuntimeError('The reviewer must see only the Codex auth.json; '
-                               'regenerate tasks made before the login mount changed')
+        result = await environment.exec(f'cat {CASE_DIR}/case.json')
+        try:
+            reviewer = slots.reviewer(json.loads(result.stdout or '').get('reviewer'))
+        except (ValueError, AttributeError):
+            raise RuntimeError('Task names no valid reviewer slot; regenerate it') from None
+        self._credentials(reviewer)
+        if reviewer['backend'] == 'codex':
+            result = await environment.exec('unshare -Ur true')
+            if result.return_code != 0:
+                raise RuntimeError('Codex needs user namespaces in the reviewer container')
+            result = await environment.exec(f'test "$(ls -A {CODEX_LOGIN_DIR})" = auth.json')
+            if result.return_code != 0:
+                raise RuntimeError('The reviewer must see only the Codex auth.json; '
+                                   'regenerate tasks made before the login mount changed')
+        else:
+            result = await environment.exec(f'test ! -e {CODEX_LOGIN_DIR}')
+            if result.return_code != 0:
+                raise RuntimeError(f'A {reviewer["backend"]} reviewer task mounts no Codex login')
         # Refuse a catalog generated for another pin instead of measuring an old
         # reviewer. A candidate task names its own build, checked by verify_build.
         result = await environment.exec(f'cat {CASE_DIR}/build.json')
@@ -66,8 +87,10 @@ class DaydreamAgent(BaseInstalledAgent):
 
     async def run(self, instruction, environment, context) -> None:
         self._require_shared_logs(environment)
-        if self.extra_env:
-            raise ValueError('Daydream uses the baked runtime and dedicated credential mount')
+        # Harbor sets the agent env on this phase's commands only; the entrypoint passes the slot's key to
+        # its backend and drops every other variable.
+        if unknown := sorted(set(self.extra_env) - set(slots.REVIEWER_KEYS)):
+            raise ValueError(f'Daydream takes only reviewer keys from the agent env, not {unknown}')
         invocation = str(uuid.uuid4())
         receipt = {'invocation_id': invocation, 'status': 'failed', 'return_code': None}
         # The trial root is outside the mounts the reviewer can write.
@@ -131,4 +154,5 @@ class DaydreamAgent(BaseInstalledAgent):
             'review_status': execution.get('status'),
             'omitted_findings': execution.get('omitted_findings'),
             'build': execution.get('build'),
+            'reviewer': execution.get('reviewer'),
             'resolved_configuration': execution.get('resolved_configuration')}

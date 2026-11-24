@@ -17,6 +17,7 @@ from benchmarks.aacr.upstream import repo_utils, schema
 from benchmarks.aacr.upstream.converters.aacr_bench import convert_record
 from benchmarks.daydream import build
 from benchmarks.daydream.verifier import HOST_RECEIPT
+from loop import settings, slots
 
 AACR_REVISION = 'ee9d7fef70ef31acea2ff7ae316ce0a9575fe4df'
 DATASET_SHA256 = '02c8561f1c3994a26f427d479b2a3f6e6c8e6858161fbc903b45248fa2cb2097'
@@ -43,11 +44,13 @@ def validated_instance(record: dict) -> schema.ReviewInstance:
     return schema.ReviewInstance.from_dict(instance.to_dict(), task_name(record))
 
 
-def render_task(record: dict, destination: Path) -> schema.ReviewInstance:
+def render_task(record: dict, destination: Path, judge: dict | None = None) -> schema.ReviewInstance:
     """Reuse AACR's converter/schema and keep annotations only in verifier assets."""
     instance = validated_instance(record)
     destination = Path(destination)
     shutil.copytree(PACKAGE / 'templates', destination)
+    # The verifier's scorer asks Pi for this judge slot's model and effort.
+    (destination / 'tests/judge.json').write_text(json.dumps(_slots()[1] if judge is None else judge, indent=2) + '\n')
     oracle = (record['githubPrUrl'] == PR_URL and
               instance.base_commit == BASE and instance.head_commit == HEAD)
     if not oracle:
@@ -137,7 +140,14 @@ def prepare_context(instance: schema.ReviewInstance, task: Path) -> Path:
     return repository
 
 
-def configure_daydream_task(task: Path, build_file: Path | None = None) -> None:
+def _slots(reviewer: dict | None = None, judge: dict | None = None) -> tuple[dict, dict]:
+    """The reviewer and judge slots, by default those in loop/settings.toml."""
+    loaded = settings.load() if reviewer is None or judge is None else None
+    return (slots.reviewer(reviewer if reviewer is not None else loaded['reviewer']),
+            slots.judge(judge if judge is not None else loaded['judge']))
+
+
+def configure_daydream_task(task: Path, build_file: Path | None = None, reviewer: dict | None = None) -> None:
     """Make a rendered task run the pinned Daydream reviewer, or a candidate build."""
     from daydream import git_ops
     from daydream.deep.artifacts import diff_key
@@ -158,8 +168,10 @@ def configure_daydream_task(task: Path, build_file: Path | None = None) -> None:
         patch_sha256=hashlib.sha256(patch.encode()).hexdigest())
     case = environment / 'daydream-case'
     case.mkdir()
+    reviewer = _slots()[0] if reviewer is None else reviewer
     (case / 'case.json').write_text(json.dumps(dict(format='aacr', repository='/workspace/repo',
-        findings='/logs/artifacts/findings.json'), indent=2) + '\n')
+        findings='/logs/artifacts/findings.json', reviewer=reviewer,
+        reviewer_credential=slots.reviewer_access(reviewer)['key']), indent=2) + '\n')
     (case / 'comparison.json').write_text(json.dumps(comparison, indent=2) + '\n')
     (case / 'diff.patch').write_text(patch)
     (case / 'build.json').write_text(json.dumps(identity, indent=2) + '\n')
@@ -175,7 +187,8 @@ def configure_daydream_task(task: Path, build_file: Path | None = None) -> None:
         'RUN git lfs install --system\n' + suffix +
         f'COPY repo/ /workspace/repo/\nCOPY daydream-case/ {build.CASE_DIR}/\n'
         'WORKDIR /workspace/repo\n')
-    (environment / 'docker-compose.yaml').write_text(build.codex_login_compose())
+    if compose := build.reviewer_compose(reviewer):
+        (environment / 'docker-compose.yaml').write_text(compose)
     (task / 'tests/Dockerfile').write_text(
         f'FROM {build.NODE_IMAGE}\nRUN apt-get update && apt-get install -y --no-install-recommends '
         'git ca-certificates && rm -rf /var/lib/apt/lists/*\n' + verifier_suffix +
@@ -192,7 +205,7 @@ def configure_daydream_task(task: Path, build_file: Path | None = None) -> None:
     config = config.replace('review case and subscription judge',
                             'review case with the complete Daydream reviewer and subscription judge')
     config = config.replace('["code-review", "aacr"]', '["code-review", "aacr", "daydream"]')
-    config += build.task_metadata(identity)
+    config += build.task_metadata(identity, reviewer)
     (task / 'task.toml').write_text(config)
     if (task / 'solution').exists():
         shutil.rmtree(task / 'solution')
@@ -226,16 +239,17 @@ def load_records(upstream: Path) -> list[dict]:
     return sorted(records, key=task_name)
 
 
-def write_task(record: dict, output: Path, daydream: bool, build_file: Path | None = None) -> Path:
+def write_task(record: dict, output: Path, daydream: bool, build_file: Path | None = None,
+               reviewer: dict | None = None, judge: dict | None = None) -> Path:
     destination = output / task_name(record)
     if destination.exists():
         raise FileExistsError(f'Refusing to replace generated task: {destination}')
     with tempfile.TemporaryDirectory(prefix='.aacr-task-', dir=output) as temporary:
         stage = Path(temporary) / destination.name
-        instance = render_task(record, stage)
+        instance = render_task(record, stage, judge)
         prepare_context(instance, stage)
         if daydream:
-            configure_daydream_task(stage, build_file)
+            configure_daydream_task(stage, build_file, reviewer)
         stage.rename(destination)
     return destination
 
@@ -247,12 +261,16 @@ def generate_task(upstream: Path, output: Path, *, daydream: bool = False) -> Pa
         raise ValueError('Expected exactly the pinned Laravel review case')
     output = Path(output).resolve()
     output.mkdir(parents=True, exist_ok=True)
-    return write_task(records[0], output, daydream)
+    reviewer, judge = _slots()
+    return write_task(records[0], output, daydream, reviewer=reviewer, judge=judge)
 
 
 def generate_catalog(upstream: Path, output: Path, *, daydream: bool = False, split: str = 'full',
-                     task_names: list[str] | None = None, build_file: Path | None = None) -> list[Path]:
-    """Generate every selected case and retain explicit revision/conversion failures."""
+                     task_names: list[str] | None = None, build_file: Path | None = None,
+                     reviewer: dict | None = None, judge: dict | None = None) -> list[Path]:
+    """Generate every selected case and retain explicit revision/conversion failures, under the
+    reviewer and judge slots, by default those in loop/settings.toml."""
+    reviewer, judge = _slots(reviewer, judge)
     records = load_records(upstream)
     total = len(records)
     if split != 'full':
@@ -275,6 +293,7 @@ def generate_catalog(upstream: Path, output: Path, *, daydream: bool = False, sp
             raise FileExistsError(f'Refusing to replace generated catalog assets: {destination}')
     output.mkdir(parents=True, exist_ok=True)
     report = dict(aacr_revision=AACR_REVISION, dataset_sha256=DATASET_SHA256, split=split,
+                  judge=slots.judge_name(judge), reviewer=reviewer if daydream else None,
                   total_records=total, selected_records=len(records), generated_tasks=0,
                   reference_findings=0, errors=0, cases=[])
     tasks = []
@@ -286,7 +305,7 @@ def generate_catalog(upstream: Path, output: Path, *, daydream: bool = False, sp
                     reference_findings=len(instance.reference_comments))
         report['reference_findings'] += case['reference_findings']
         try:
-            tasks.append(write_task(record, output, daydream, build_file))
+            tasks.append(write_task(record, output, daydream, build_file, reviewer, judge))
         except Exception as error:
             case.update(status='error', error=f'{type(error).__name__}: {error}')
             report['errors'] += 1

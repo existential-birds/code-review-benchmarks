@@ -1,7 +1,10 @@
 """Run one Daydream review inside the task sandbox and write its findings.
 
-Each task's case directory names the repository, where its findings go and in
-which benchmark's format; the review itself is the same for every benchmark.
+Each task's case directory names the repository, where its findings go, in which
+benchmark's format, and the reviewer slot (#81): Daydream's backend, provider, model
+and effort. The review itself is the same for every benchmark. The Codex backend uses
+the mounted Codex login; the Pi backend gets its provider's key from the environment
+Harbor hands the agent phase, and passes it to Pi alone.
 """
 from __future__ import annotations
 
@@ -24,6 +27,9 @@ import uuid
 
 CASE_DIR = Path('/opt/daydream-case')
 CODEX_LOGIN_DIR = Path('/run/reviewer-codex')
+DEFAULT = 'default'
+# Pi makes no update checks, downloads or install telemetry from a task container.
+PI_QUIET = {'PI_OFFLINE': '1', 'PI_TELEMETRY': '0', 'PI_SKIP_VERSION_CHECK': '1'}
 
 
 def _write_json(path: Path, value) -> None:
@@ -35,7 +41,7 @@ def _write_json(path: Path, value) -> None:
 
 
 def verify_build(path: Path) -> dict:
-    """Check the baked wheel, dependency lock and Codex CLI against the build."""
+    """Check the baked wheel, dependency lock, Codex CLI and Pi CLI against the build."""
     build = json.loads(path.read_text())
     wheel = Path('/opt') / build['wheel_name']
     if hashlib.sha256(wheel.read_bytes()).hexdigest() != build['wheel_sha256']:
@@ -47,6 +53,8 @@ def verify_build(path: Path) -> dict:
     actual = subprocess.check_output(['codex', '--version'], text=True).strip()
     if actual != 'codex-cli ' + build['codex_cli']:
         raise ValueError('Codex CLI version differs')
+    if subprocess.check_output(['pi', '--version'], text=True).strip() != build['pi_cli']:
+        raise ValueError('Pi CLI version differs')
     return build
 
 
@@ -140,6 +148,7 @@ FORMATS = {'aacr': _aacr_findings, 'reviewbench': _reviewbench_findings}
 def _configuration(config, backend) -> dict:
     from daydream.config import PHASE_DEFAULT_MODELS
     from daydream.run_config import resolved_phase_settings
+    # Codex's table names every phase; Pi has none, so its phases resolve to the slot's model.
     return {
         **{name: getattr(config, name) for name in ('backend', 'output_mode', 'flow_name',
             'non_interactive', 'dataset_capture', 'dataset_capture_disabled',
@@ -150,6 +159,7 @@ def _configuration(config, backend) -> dict:
                            'digest': config.review_profile.digest,
                            'profile': asdict(config.review_profile.profile)},
         'phase_defaults': resolved_phase_settings(config, sorted(PHASE_DEFAULT_MODELS['codex'])),
+        'pi_provider': backend.pi_provider,
         'fanout_concurrency': backend.fanout_concurrency,
         'retry_policy': asdict(backend.retry_policy),
     }
@@ -235,6 +245,31 @@ def _check_codex_login(auth: Path) -> None:
         raise ValueError('The reviewer needs a Codex ChatGPT subscription login, not an API key') from None
 
 
+def _setting(value: str) -> str | None:
+    return None if value == DEFAULT else value
+
+
+@contextmanager
+def _reviewer_controls(reviewer: dict, credential: str | None, login: Path, private: Path, source: dict):
+    """What the slot's backend adds to the reviewer's isolated environment: a Codex home linked to the
+    mounted login, or for Pi an empty agent folder, the provider and its key."""
+    if reviewer['backend'] == 'codex':
+        with _codex_home(login, private) as home:
+            yield {'CODEX_HOME': str(home)}
+        return
+    if reviewer['backend'] != 'pi':
+        raise ValueError(f"Unsupported reviewer slot {reviewer['backend']}/{reviewer['provider']}")
+    if not credential:
+        raise ValueError('The task names no key variable for the Pi reviewer; regenerate it')
+    key = source.get(credential)
+    if not key:
+        raise ValueError(f'The Pi reviewer needs {credential} from the agent environment')
+    agent_dir = private / 'pi'
+    # No operator settings, models or logins: the slot and the key are everything Pi gets.
+    agent_dir.mkdir(mode=0o700)
+    yield {'PI_CODING_AGENT_DIR': str(agent_dir), 'PI_PROVIDER': reviewer['provider'], credential: key, **PI_QUIET}
+
+
 @contextmanager
 def _codex_home(login: Path, private: Path):
     """A disposable Codex home whose only state is a link to the mounted login."""
@@ -265,7 +300,7 @@ async def review_once(*, case_dir: Path, artifacts: Path, agent_logs: Path,
     proof = artifacts / 'daydream'
     execution_path = proof / 'execution.json'
     prior_execution = execution_path.exists()
-    record = dict(schema_version=1, invocation_id=invocation_id, status='failed',
+    record = dict(schema_version=2, invocation_id=invocation_id, status='failed', reviewer=None,
         runner_exit_code=None, terminal_result=None, analyzed_comparison={}, post_comparison={},
         usage={}, retained_findings=[], omitted_findings=0, resolved_configuration={}, build={},
         findings_sha256=None, diagnostics=[], elapsed_seconds=0,
@@ -275,6 +310,9 @@ async def review_once(*, case_dir: Path, artifacts: Path, agent_logs: Path,
             raise ValueError('Invalid invocation identity')
         case = json.loads((case_dir / 'case.json').read_text())
         repository, output, translate = Path(case['repository']), Path(case['findings']), FORMATS[case['format']]
+        reviewer = case['reviewer']
+        record['reviewer'] = {key: reviewer[key] for key in ('harness', 'backend', 'provider', 'model', 'effort')}
+        backend_name = reviewer['backend']
         if prior_execution or output.exists() or (agent_logs / 'daydream').exists():
             raise ValueError('Prior reviewer artifacts exist; use a fresh trial')
         if json.loads((proof / 'request.json').read_text()) != {'invocation_id': invocation_id}:
@@ -293,11 +331,14 @@ async def review_once(*, case_dir: Path, artifacts: Path, agent_logs: Path,
             private = Path(temporary)
             staged = private / 'run-artifacts'
             staged.mkdir()
+            source = dict(os.environ)
             with (_isolated_environment(private) as controls,
-                  _codex_home(credential_home, private) as role_home):
-                controls['CODEX_HOME'] = str(role_home)
-                backend = BackendExecutionInput.from_environment(controls, backend='codex')
-                config = RunConfig(target=str(repository), backend='codex', output_mode='review',
+                  _reviewer_controls(reviewer, case.get('reviewer_credential'), credential_home,
+                                     private, source) as added):
+                controls.update(added)
+                backend = BackendExecutionInput.from_environment(controls, backend=backend_name)
+                config = RunConfig(target=str(repository), backend=backend_name, output_mode='review',
+                    model=_setting(reviewer['model']), reasoning_effort=_setting(reviewer['effort']),
                     non_interactive=True, dataset_capture=capture_data, dataset_capture_disabled=not capture_data,
                     dataset_store_path=agent_logs / 'dataset' if capture_data else None,
                     archive=False, run_eval=False,
@@ -308,7 +349,7 @@ async def review_once(*, case_dir: Path, artifacts: Path, agent_logs: Path,
                     frozen_author_description=FrozenAuthorDescription(expected['head_sha'], description)
                         if description else None)
                 execution = RunnerExecutionInput(backend, GitHubExecutionInput(auth=StaticGitHubAuth(controls)),
-                    backends={'codex': backend})
+                    backends={backend_name: backend})
                 try:
                     record['runner_exit_code'] = await runner.run(config,
                         review_result_handler=finalized.append, execution=execution)

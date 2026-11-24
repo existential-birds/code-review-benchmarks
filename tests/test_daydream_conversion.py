@@ -8,6 +8,9 @@ import yaml
 
 from benchmarks.aacr import convert
 from fake_git import BASE, HEAD, PATCH, FakeCheckout
+from loop import settings
+
+CODEX = dict(harness='daydream', backend='codex', provider='openai', model='default', effort='default')
 
 
 def daydream_case(tmp_path, monkeypatch, pr_url=convert.PR_URL, comments=()):
@@ -28,7 +31,7 @@ def test_daydream_task_freezes_runtime_comparison_and_keeps_oracle_separate(tmp_
     task, checkout = daydream_case(tmp_path, monkeypatch, pr_url,
                                    [{'path': 'file.php', 'note': 'verifier only annotation'}])
     wheel = pinned_wheel
-    convert.configure_daydream_task(task)
+    convert.configure_daydream_task(task, reviewer=CODEX)
     comparison = json.loads((task / 'environment/daydream-case/comparison.json').read_text())
     patch = (task / 'environment/daydream-case/diff.patch').read_bytes()
     assert patch == PATCH.encode()
@@ -53,10 +56,26 @@ def test_daydream_task_freezes_runtime_comparison_and_keeps_oracle_separate(tmp_
     assert 'verifier only annotation' not in ''.join(p.read_text() for p in (task / 'environment/daydream-case').glob('*.json'))
     assert config['task']['keywords'] == ['code-review', 'aacr', 'daydream']
     assert json.loads((task / 'environment/daydream-case/case.json').read_text()) == {
-        'format': 'aacr', 'repository': '/workspace/repo', 'findings': '/logs/artifacts/findings.json'}
+        'format': 'aacr', 'repository': '/workspace/repo', 'findings': '/logs/artifacts/findings.json',
+        'reviewer': CODEX, 'reviewer_credential': None}
+    # The verifier's scorer reads the judge slot; the template passes it.
+    assert json.loads((task / 'tests/judge.json').read_text()) == settings.load()['judge']
+    assert '--judge /tests/judge.json' in (task / 'tests/test.sh').read_text()
     # Only the reviewer image gets the entrypoint; the verifier installs the whole suite itself.
     assert (task / 'environment/daydream-suite/benchmarks/daydream/entrypoint.py').is_file()
     assert 'daydream-suite' not in (task / 'tests/Dockerfile').read_text()
+    # The verifier image takes the reviewer's shared lines, which check ripgrep and fd: it installs both.
+    verifier = (task / 'tests/Dockerfile').read_text()
+    assert 'fd-find ripgrep' in verifier and verifier.index('fd-find ripgrep') < verifier.index('rg --version')
+
+
+def test_a_pi_reviewer_task_mounts_no_codex_login(tmp_path, monkeypatch, pinned_wheel):
+    task, _ = daydream_case(tmp_path, monkeypatch)
+    convert.configure_daydream_task(task)
+    case = json.loads((task / 'environment/daydream-case/case.json').read_text())
+    assert case['reviewer'] == settings.load()['reviewer'] and case['reviewer_credential'] == 'OPENROUTER_API_KEY'
+    assert not (task / 'environment/docker-compose.yaml').exists()
+    assert tomllib.loads((task / 'task.toml').read_text())['metadata']['reviewer_backend'] == 'pi'
 
 
 def test_candidate_task_installs_the_candidate_for_reviewer_and_verifier(tmp_path, monkeypatch, candidate_build):
