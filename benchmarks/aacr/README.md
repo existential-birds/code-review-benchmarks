@@ -204,7 +204,8 @@ refuses:
 
 Each round lists its trials and the same counts as ReviewBench's report: `expected`,
 `missing`, `produced`, `completed_empty`, `incomplete`, `failed`, `evaluated`,
-`elapsed_seconds` and `cost_usd`, an API-equivalent estimate. A trial is scored by the
+`elapsed_seconds`, and `cost_usd`, the API-equivalent estimates of the `cost_trials`
+trials that reported one, null when none did. A trial is scored by the
 same rule: not if it raised, never finished, was verified outside a separate
 environment or had a failed step. Such a trial is dropped even if it left a reward, so a
 round's metric here can differ from Harbor's own pooled job metric, shown in the same
