@@ -438,16 +438,18 @@ def test_reviewbench_format_sends_line_findings_and_counts_file_level_ones(revie
 
 def test_freeze_comparison_pins_the_bytes_daydream_reviews(tmp_path, monkeypatch, real_git):
     from daydream.git_ops.captured_source import capture_source
-    # Daydream refuses inherited Git configuration, so a private HOME shuts out the operator's.
+    # Daydream refuses inherited Git configuration variables, so its reads shut out only the
+    # operator's attributes and global configuration; the fixture's own Git sees neither config.
     for name in [name for name in os.environ if name.startswith('GIT_')]:
         monkeypatch.delenv(name)
     monkeypatch.setenv('HOME', str(tmp_path))
     monkeypatch.setenv('XDG_CONFIG_HOME', str(tmp_path / 'config'))
+    monkeypatch.setenv('GIT_ATTR_NOSYSTEM', '1')
     monkeypatch.setenv('PATH', f'{real_git.parent}{os.pathsep}{os.environ["PATH"]}')
     def git(directory, *arguments):
         return subprocess.run(['git', '-C', str(directory), '-c', 'user.name=Proposer',
-            '-c', 'user.email=proposer@example.com', *arguments],
-            check=True, capture_output=True, text=True).stdout.strip()
+            '-c', 'user.email=proposer@example.com', *arguments], check=True, capture_output=True, text=True,
+            env={**os.environ, 'GIT_CONFIG_NOSYSTEM': '1', 'GIT_CONFIG_GLOBAL': os.devnull}).stdout.strip()
     source, repo, inputs = tmp_path / 'source', tmp_path / 'repo', tmp_path / 'inputs'
     source.mkdir()
     inputs.mkdir()
