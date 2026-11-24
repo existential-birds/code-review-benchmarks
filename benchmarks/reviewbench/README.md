@@ -113,6 +113,13 @@ the judge's spread alone.
 Its `summary.json`, in `artifacts/loop/<name>/`, holds every round's pooled scores
 and counts, their mean and spread, and each case's counts per round.
 
+`.venv/bin/python -m loop.canary --name <fresh-name>` scores the canary cases in
+`loop/canary.txt` in one oracle round and compares each case's counts with the
+reference in `loop/noise.json`, within its tolerance. It prints JSON and exits 0 when
+the judge is stable, 1 when it drifted and 2 when there is nothing to compare with.
+`--summary` compares a round already scored; `--record` makes a round the new
+reference, only after a person decides the judge changed.
+
 On the test set, [`loop/confirm.py`](../../loop/confirm.py) alone scores a kept change
 against the baseline, with AACR's held-out cases, and gives one word: `confirmed`,
 `not-confirmed` or `regressed`. Its rule, storage and use count are in its help.
