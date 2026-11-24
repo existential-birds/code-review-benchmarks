@@ -18,7 +18,7 @@ from types import SimpleNamespace
 import pytest
 
 from benchmarks.daydream import build
-from loop import confirm as confirmation, land as landing, ledger, rounds, run as looprun, sets, settings
+from loop import confirm as confirmation, land as landing, ledger, rounds, run as looprun, sets, settings, slots
 
 PIN = build.BUILD['source_commit']
 DERIVED = dict(sigma=0.02, rounds=2, precision_margin=0.03, wrong_findings_margin=0.2, incomplete_margin=0.5)
@@ -33,6 +33,11 @@ class Killed(BaseException):
     """The process dying without recording anything."""
 
 
+# The [derived] values are taken as measured under the configured reviewer and judge slots.
+MEASURED = (f"judge = \"{slots.judge_name(settings.load()['judge'])}\"\n[derived.reviewer]\n"
+            + ''.join(f'{key} = "{value}"\n' for key, value in settings.load()['reviewer'].items()))
+
+
 @pytest.fixture
 def loop(tmp_path, monkeypatch):
     """A repository root with the derived settings set, and stand-ins that follow plans."""
@@ -41,7 +46,7 @@ def loop(tmp_path, monkeypatch):
     monkeypatch.setattr(looprun, 'LOCK', tmp_path / 'loop.lock')
     derived = tmp_path / 'settings.toml'
     derived.write_text(settings.FILE.read_text().split('[derived]')[0] + '[derived]\n'
-                       + ''.join(f'{key} = {value}\n' for key, value in DERIVED.items()))
+                       + ''.join(f'{key} = {value}\n' for key, value in DERIVED.items()) + MEASURED)
     monkeypatch.setattr(settings, 'load', partial(settings.load, derived))
     done = SimpleNamespace(iterations=[], confirms=[], canaries=[], canary_names=[], sleeps=[], prereqs=0,
                            confirmed=[], landed=[], root=tmp_path, clock=None,

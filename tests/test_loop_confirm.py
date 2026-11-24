@@ -37,7 +37,7 @@ def held_out(tmp_path, monkeypatch, pinned_wheel, candidate_build):
     monkeypatch.setattr(build, 'CANDIDATES', candidate_build.parents[1])
     exported = {'full': ['case-a', *RB_CASES], 'test': list(RB_CASES)}
 
-    def export(upstream, destination, split):
+    def export(upstream, destination, split, reviewer, judge):
         for name in exported[split]:
             exported_task(destination / name, name)
             (destination / name / 'tests/task.json').write_text(
@@ -52,7 +52,7 @@ def held_out(tmp_path, monkeypatch, pinned_wheel, candidate_build):
                 'comments': [{'path': 'main.go', 'note': 'verifier only reference', 'from_line': 1, 'to_line': 1}]}
                for number in (1, 2, 3, 4)]
 
-    def write_task(record, output, daydream, build_file):
+    def write_task(record, output, daydream, build_file, reviewer=None, judge=None):
         task = output / aacr_convert.task_name(record)
         if task.name == 'owner-project-4':
             raise RuntimeError('commit unavailable')
@@ -248,11 +248,11 @@ def test_a_comparison_the_rule_cannot_make_is_counted_as_not_confirmed(held_out,
 
 def test_a_held_out_case_that_fails_to_convert_once_is_not_left_out(held_out, monkeypatch):
     real, failures = aacr_convert.write_task, ['owner-project-3']
-    def flaky(record, output, daydream, build_file):
+    def flaky(record, output, daydream, build_file, *slots):
         if aacr_convert.task_name(record) in failures:
             failures.remove(aacr_convert.task_name(record))
             raise OSError('disk full')
-        return real(record, output, daydream, build_file)
+        return real(record, output, daydream, build_file, *slots)
     monkeypatch.setattr(aacr_convert, 'write_task', flaky)
     harbor(monkeypatch, dict(reviewbench=GAIN, aacr=BASELINE['aacr']))
     with pytest.raises(ValueError, match="These cases failed to convert: .*owner-project-3"):

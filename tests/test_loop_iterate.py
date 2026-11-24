@@ -40,6 +40,7 @@ def candidate_folder(root: Path, commit: str) -> Path:
     (folder / 'build.json').write_text(json.dumps({
         'source_commit': commit, 'version': '0.38.0', 'wheel_name': wheel.name,
         'wheel_sha256': hashlib.sha256(wheel.read_bytes()).hexdigest(), 'codex_cli': build.BUILD['codex_cli'],
+        'pi_cli': build.BUILD['pi_cli'],
         'candidate': True}))
     return folder / 'build.json'
 
