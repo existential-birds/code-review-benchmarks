@@ -372,7 +372,7 @@ def due(entries: list[dict], loaded: settings.Settings, at: datetime) -> tuple[s
         return 'winner-merged', (f'#{", #".join(map(str, sorted(merged)))} merged into Daydream; start a new run '
                                  'once the pin moves to a release holding it (python -m loop.land --bump)')
     winners = [entry['iteration'] for entry in entries
-               if entry['kind'] == 'confirmation' and entry['verdict'] == 'confirmed' and entry['iteration'] not in merged]
+               if entry['kind'] == 'confirmation' and entry['verdict'] == 'confirmed']
     if len(winners) >= loaded['max_unmerged_winners']:
         return 'winner-awaiting-merge', (f'{len(winners)} confirmed and not merged, max_unmerged_winners: '
                                          f'{", ".join(f"#{n}" for n in winners)}')

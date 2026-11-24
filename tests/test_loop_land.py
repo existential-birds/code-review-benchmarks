@@ -172,6 +172,8 @@ def test_a_dry_run_writes_an_unsigned_branch_and_a_body_with_the_dev_numbers_and
                      'python -m loop.rounds', '151.2500 USD-equivalent', '## Motivation', '## Test Plan'):
         assert expected in text
     assert '0.6123' not in text and 'held-out-case-7' not in text and '<!--' not in text
+    # Unsigned, so the body claims no signature.
+    assert f'the scored commit `{daydream.scored}` with the changelog line added;' in text and 'signature' not in text
     # The checklist: answered with evidence, or N/A with a reason, every item kept.
     assert '- [x] Repository PR template followed' in text
     assert '- [x] Root and workflow gate `make check` completed successfully' in text and '81.5 seconds' in text
@@ -252,8 +254,15 @@ def test_landing_pushes_with_hooks_opens_a_draft_and_records_its_url(daydream, m
 
 
 @pytest.mark.parametrize('daydream', [False], indirect=True)
-def test_with_auto_open_pr_off_a_landing_is_a_dry_run(daydream):
-    assert land.land('run-a', 2, root=daydream.root)['dry_run']
+def test_with_auto_open_pr_off_a_person_still_lands_it_and_can_record_the_merge(daydream, monkeypatch):
+    # auto_open_pr governs only what loop.run does by itself; a person's loop.land lands unless --dry-run.
+    url = 'https://github.com/existential-birds/daydream/pull/2002'
+    monkeypatch.setattr(land, 'push', PUSH)
+    monkeypatch.setattr(land, 'open_pr', lambda *_: url)
+    assert land.main(['--run', 'run-a', '--iteration', '2']) == 0
+    assert ledger.read(daydream.folder)[-1]['kind'] == 'landing'
+    monkeypatch.setattr(land, 'pr_state', lambda pr: dict(url=url, state='MERGED', merge_commit='m' * 40))
+    assert land.main(['--merged', url]) == 0 and ledger.read(daydream.folder)[-1]['kind'] == 'merge'
 
 
 def test_merged_records_the_merge_and_clears_the_winner(daydream, monkeypatch):
@@ -281,6 +290,12 @@ def test_bump_prepares_the_pin_change_on_a_branch_and_runs_nothing(git, tmp_path
     pin = json.loads((Path(__file__).parents[1] / land.PIN).read_text())
     template = (Path(__file__).parents[1] / land.SUITE_TEMPLATE).read_text()
     commit(git, root, {str(land.PIN): json.dumps(pin, indent=2) + '\n', str(land.SUITE_TEMPLATE): template})
+    # The person's identity is in their global Git settings only, as on a usual machine.
+    for role in ('AUTHOR', 'COMMITTER'):
+        for key in ('NAME', 'EMAIL'):
+            monkeypatch.delenv(f'GIT_{role}_{key}')
+    (tmp_path / 'gitconfig').write_text('[user]\n\tname = Person\n\temail = person@example.com\n')
+    monkeypatch.setenv('GIT_CONFIG_GLOBAL', str(tmp_path / 'gitconfig'))
     origin = tmp_path / 'origin.git'
     git(tmp_path, 'init', '-q', '--bare', '-b', 'main', str(origin))
     git(tmp_path, 'clone', '-q', str(origin), str(root / land.CLONE))
@@ -303,7 +318,7 @@ def test_bump_prepares_the_pin_change_on_a_branch_and_runs_nothing(git, tmp_path
         source_commit='n' * 40, version='0.38.0', wheel_name='daydream-0.38.0.whl', wheel_sha256='h' * 64,
         codex_cli=pin['codex_cli'])
     assert (root / land.PIN).read_text() == before
-    assert git(root, 'log', '-1', '--format=%s', 'pin/daydream-0.38.0') == 'Pin Daydream 0.38.0'
+    assert git(root, 'log', '-1', '--format=%s %an', 'pin/daydream-0.38.0') == 'Pin Daydream 0.38.0 Person'
     assert git(root, 'diff', '--name-only', 'main', 'pin/daydream-0.38.0') == str(land.PIN)
     body = (root / land.BUMPS / '0.38.0.md').read_text()
     for heading in ('## Summary', '## Added', '## Changed', '## Removed', '## Verification steps'):

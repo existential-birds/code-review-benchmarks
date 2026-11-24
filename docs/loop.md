@@ -66,8 +66,9 @@ kill, is redone from its last finished round; one stopped by Ctrl-C is recorded 
 and the next is proposed afresh. A change accepted on dev but not yet confirmed is
 confirmed first.
 After a stop, the plateau and invalid streaks count again from zero, but the budgets and
-winners count the whole run: raise the setting to go on past one. After merging a winner,
-start a new run, since the pin, and so the baseline, changed.
+winners count the whole run: raise the setting to go on past one. Once a winner merges
+(`loop.land --merged`), the run stops with `winner-merged`; start a new run after the pin
+moves to a release holding it (`loop.land --bump`), since that changes the baseline.
 
 ## Land a winner
 
@@ -82,8 +83,9 @@ conflict stops for you; if `main` moved, the guard and gate run again), adds a
 commit with your `user.signingkey` (without one it stops and says what to set up). The
 branch is `loop/<pattern>`, and the body, from Daydream's pull request template, is
 `loop-runs/<run>/land/<n>.md`: the proposal, both builds' dev scores, "Confirmed on the
-held-out split" and no held-out number, and how to score it again. `--dry-run`, the default
-when `auto_open_pr` is off, stops there. Without it the branch is pushed with hooks on, a
+held-out split" and no held-out number, and how to score it again. `--dry-run` stops there,
+as `loop.run` does when `auto_open_pr` is off; run `loop.land` again without it to land the
+winner. Without it the branch is pushed with hooks on, a
 draft pull request opens, and its URL goes in the ledger; it is never marked ready or
 merged by the loop.
 
