@@ -22,7 +22,7 @@ and the loop uses that cautious figure:
   mean count per round and at least one event, since five rounds can't show the spread
   of a rare count.
 - The canary's per-case reference counts from the oracle rounds, and a tolerance from
-  how far the judge moved a case's counts between those rounds.
+  how far the judge moved a case's counts between those rounds (``loop.canary``).
 """
 from __future__ import annotations
 

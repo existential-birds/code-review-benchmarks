@@ -12,7 +12,7 @@ pytest hook or coverage exclusion; and carry no benchmark knowledge. Then ``make
 check`` must pass in the clone within ``gate_timeout_seconds``, with a throwaway HOME
 and only an allowlisted environment. uv runs offline from the operator's cache, so
 one ordinary ``make check`` in a Daydream checkout must have filled it first. The
-guard never commits, so it neither passes ``--no-verify`` nor touches the hooks.
+guard never commits; the Git it runs has hooks off, so nothing a candidate holds runs outside its gate.
 
 It does not catch gutted test bodies or assertions, code that behaves differently
 under test, or names written in disguise. It matches only a review case's name and
@@ -43,8 +43,12 @@ from loop import settings
 ROOT = Path(__file__).resolve().parents[1]
 REVIEWBENCH, AACR = ROOT / '.cache/src/ReviewBench', ROOT / '.cache/src/aacr-bench'
 GIT = 'git'
-# No global attributes file, which could hide content from the diff, and no fsmonitor hook.
-GIT_OPTIONS = ('-c', 'core.attributesFile=/dev/null', '-c', 'core.fsmonitor=')
+# No system or global configuration, so no filter, diff or merge driver of the operator's runs on files a
+# candidate commits.
+ISOLATED = {'GIT_ATTR_NOSYSTEM': '1', 'GIT_CONFIG_NOSYSTEM': '1', 'GIT_CONFIG_GLOBAL': os.devnull}
+# No hooks, filesystem monitor or global attributes file, which could hide content from the diff: nothing a
+# repository holds runs.
+GIT_OPTIONS = ('-c', 'core.attributesFile=/dev/null', '-c', 'core.fsmonitor=', '-c', 'core.hooksPath=/dev/null')
 GATE = ('make', 'check')
 # The only variables the gate sees, besides HOME and uv's cache, Pythons and offline switch.
 GATE_ENVIRONMENT = ('PATH', 'LANG', 'LC_ALL', 'TERM', 'TMPDIR')
@@ -71,9 +75,10 @@ HUNK = re.compile(r'^@@ -\d+(?:,\d+)? \+(\d+)')
 DIFF = ('--no-renames', '--no-ext-diff', '--no-textconv', '--no-color')
 
 
-def git(repository: Path, *arguments: str) -> str:
-    result = subprocess.run([GIT, *GIT_OPTIONS, '-C', str(repository), *arguments], capture_output=True,
-                            encoding='utf-8', errors='surrogateescape', env=os.environ | {'GIT_ATTR_NOSYSTEM': '1'})
+def git(repository: Path, *arguments: str, input: str | None = None, environment: dict[str, str] | None = None) -> str:
+    result = subprocess.run([GIT, *GIT_OPTIONS, '-C', str(repository), *arguments], capture_output=True, input=input,
+                            encoding='utf-8', errors='surrogateescape',
+                            env=os.environ | ISOLATED | (environment or {}))
     if result.returncode:
         raise RuntimeError(f'git {" ".join(arguments)} failed: {result.stderr.strip()}')
     return result.stdout
@@ -196,10 +201,19 @@ def run_gate(checkout: Path, scratch: Path, timeout: int) -> dict:
     # uv works offline from the operator's cache, so the gate needs no proxy or credentials.
     environment = ({name: os.environ[name] for name in GATE_ENVIRONMENT if name in os.environ}
                    | uv_directories() | {'UV_OFFLINE': '1', 'HOME': str(home)})
+    returncode, seconds = run_bounded(GATE, checkout, environment, log, timeout)
+    return dict(command=' '.join(GATE), returncode=returncode, timed_out=returncode is None,
+                seconds=round(seconds, 1), output_tail=log.read_text(encoding='utf-8', errors='replace')[-4000:])
+
+
+def run_bounded(command, directory: Path, environment: dict[str, str], log: Path, timeout: float,
+                stdin: Path | None = None) -> tuple[int | None, float]:
+    """Run a command in a session of its own, output to log and input from stdin, and kill whatever it
+    leaves behind. Return its exit code, None if it ran past the timeout, and its seconds."""
     started, timed_out = time.monotonic(), False
-    # A file, not a pipe: a descendant that leaves the process group can't hold it open.
-    with log.open('wb') as output:
-        process = subprocess.Popen(GATE, cwd=checkout, env=environment, stdin=subprocess.DEVNULL,
+    # Files, not pipes: a descendant that leaves the process group can't hold them open.
+    with log.open('wb') as output, (stdin.open('rb') if stdin else open(os.devnull, 'rb')) as source:
+        process = subprocess.Popen(command, cwd=directory, env=environment, stdin=source,
                                    stdout=output, stderr=subprocess.STDOUT, start_new_session=True)
     try:
         process.wait(timeout=timeout)
@@ -209,10 +223,7 @@ def run_gate(checkout: Path, scratch: Path, timeout: int) -> dict:
         with contextlib.suppress(ProcessLookupError):
             os.killpg(process.pid, signal.SIGKILL)
         process.wait()
-    seconds = time.monotonic() - started
-    return dict(command=' '.join(GATE), returncode=None if timed_out else process.returncode,
-                timed_out=timed_out, seconds=round(seconds, 1),
-                output_tail=log.read_text(encoding='utf-8', errors='replace')[-4000:])
+    return None if timed_out else process.returncode, time.monotonic() - started
 
 
 def check(worktree: Path, base: str, commit: str, loaded: settings.Settings, names: set[str]) -> dict:
