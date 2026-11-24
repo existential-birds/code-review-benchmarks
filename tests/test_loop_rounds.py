@@ -220,6 +220,7 @@ def aacr_workspace(workspace, monkeypatch):
     monkeypatch.setattr(aacr_convert, 'HOLDOUT', workspace / 'holdout.txt')
     monkeypatch.setattr(aacr_convert, 'load_records', lambda upstream: records)
     monkeypatch.setattr(aacr_convert, 'write_task', write_task)
+    monkeypatch.setattr(rounds.build, 'built_wheel', lambda build_file: None)
     (workspace / 'aacr-cases.txt').write_text('owner-project-1\nowner-project-2\n')
     return workspace
 
@@ -332,3 +333,13 @@ def test_the_oracle_records_no_build_and_counts_unscored_trials_as_failed(worksp
     monkeypatch.delenv('REVIEWER_CODEX_AUTH_DIR')
     with pytest.raises(ValueError, match='Set REVIEWER_CODEX_AUTH_DIR'):
         rounds.run('oracle', workspace / 'cases.txt', 1, 'oracle-2')
+
+
+def test_aacr_rounds_check_the_build_before_converting_any_case(aacr_workspace, monkeypatch):
+    from benchmarks.aacr import convert as aacr_convert
+    def missing(build_file):
+        raise FileNotFoundError('Build Daydream first: make setup')
+    monkeypatch.setattr(rounds.build, 'built_wheel', missing)
+    monkeypatch.setattr(aacr_convert, 'write_task', lambda *arguments: pytest.fail('converted before the check'))
+    with pytest.raises(FileNotFoundError, match='make setup'):
+        rounds.run('pinned', aacr_workspace / 'aacr-cases.txt', 1, 'unbuilt', benchmark='aacr')

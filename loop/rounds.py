@@ -47,7 +47,7 @@ import sys
 from types import SimpleNamespace
 
 from benchmarks.aacr import convert as aacr_convert, metric as aacr_metric, report as aacr_report
-from benchmarks.daydream import rounds as shared
+from benchmarks.daydream import build, rounds as shared
 from benchmarks.reviewbench import convert, report
 from benchmarks.reviewbench.metric import compute
 from benchmarks.reviewbench.upstream.metric import read_counts
@@ -199,9 +199,12 @@ def run(build: str, cases_file: Path, rounds: int, name: str, *, benchmark: str 
 def _generate(bench, upstream: Path, catalog: Path, request: dict) -> None:
     """Generate the build's dev catalog. On failure, remove what this attempt wrote, so the name runs again."""
     existed = catalog.exists()
+    build_file = None if request['build'] in ('pinned', 'oracle') else Path(request['build'])
+    if bench is BENCHMARKS['aacr']:
+        # AACR prepares each case's repository before it bakes in the build: fail first, as its converter does.
+        build.built_wheel(build_file)
     try:
-        bench.generate(upstream, catalog, request['cases'],
-                       None if request['build'] in ('pinned', 'oracle') else Path(request['build']))
+        bench.generate(upstream, catalog, request['cases'], build_file)
     except Exception as error:
         if existed:
             raise

@@ -221,7 +221,7 @@ For each block, `rounds` holds every round's result from [`metric.py`](metric.py
 `file_semantic_recall_rate`, `balanced_score` and their pooled counts, where
 `generated_notes` is the findings sent. As in the job's own metric, an unscored trial
 leaves the denominators rather than withholding the round, so read the scores with
-`missing_instances`. A round with no scored trial defines no rate. `summary` holds each
+`missing_instances`. A round with no scored trial defines no rate; one whose scored reviews sent no finding has a match rate of 0, as in AACR's own summary. `summary` holds each
 rate's mean and sample standard deviation (n-1) over the rounds that define it, as
 `loop/rounds.py` reports them; ReviewBench's report uses ReviewBench's own population
 deviation. The report adds no score, weight or threshold, and doesn't rank the sides.
