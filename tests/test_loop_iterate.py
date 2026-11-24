@@ -128,9 +128,11 @@ def test_a_change_accepted_on_the_climb_set_is_scored_on_the_check_set_against_t
     check = loop.root / 'artifacts/loop/base-check/summary.json'
     assert first['scores']['check']['baseline_summary'] == str(Path('artifacts/loop/base-check/summary.json'))
     assert json.loads(check.read_text())['request']['cases'] == ['case-b', 'case-a']
-    # Six rounds of two trials at 2.5 each, the baseline's two check rounds included.
-    assert first['cost']['rounds'] == {'run-a-1-climb': 2, 'base-check': 2, 'run-a-1-check': 2}
-    assert first['cost']['cost_usd_equiv'] == 30 and first['cost']['trials'] == 12
+    # Four rounds of two trials at 2.5 each; the baseline's two check rounds are reported apart.
+    assert first['cost']['rounds'] == {'run-a-1-climb': 2, 'run-a-1-check': 2}
+    assert first['cost']['cost_usd_equiv'] == 20 and first['cost']['trials'] == 8
+    assert first['cost']['baseline_check'] | dict(wall_seconds=0) == dict(rounds=2, cost_usd_equiv=10,
+                                                                         reviewer_seconds=240, wall_seconds=0)
     assert not worktree(loop, 1).exists() and git(loop.clone, 'rev-parse', 'loop/run-a/1') == first['candidate']['commit']
 
     second = loop.run(['win'] * 4)
@@ -138,7 +140,8 @@ def test_a_change_accepted_on_the_climb_set_is_scored_on_the_check_set_against_t
     assert [second['scores'][stage]['verdict'] for stage in ('climb', 'check')] == ['accept', 'accept']
     # The baseline's check rounds are reused, and cost this iteration nothing.
     assert loop.jobs == [f'run-a-2-{stage}-round-{n}-attempt-1' for stage in ('climb', 'check') for n in (1, 2)]
-    assert second['cost']['rounds'] == {'run-a-2-climb': 2, 'base-check': 0, 'run-a-2-check': 2}
+    assert second['cost']['rounds'] == {'run-a-2-climb': 2, 'run-a-2-check': 2}
+    assert second['cost']['baseline_check']['rounds'] == 0
     # Its worktree, build and jobs stay; the evidence pack was built once.
     candidate = second['candidate']
     assert worktree(loop, 2).is_dir() and Path(candidate['build']).is_file() and (loop.root / 'jobs').is_dir()
@@ -205,3 +208,10 @@ def test_an_iteration_that_cannot_start_records_nothing(loop, tmp_path, monkeypa
     monkeypatch.setattr(iterate, 'ROOT', tmp_path / 'elsewhere')
     assert iterate.main(['--run', 'run-a']) == 2
     assert 'No ledger' in json.loads(capsys.readouterr().out)['error']
+
+
+def test_the_baselines_check_rounds_count_against_neither_budget(loop):
+    # The iteration's own four rounds cost 20; with the baseline's two check rounds it would be 30.
+    entry = loop.run(['win'] * 4, iteration_max_cost_usd_equiv=25)
+    assert entry['verdict']['verdict'] == 'accepted-on-dev'
+    assert entry['cost']['cost_usd_equiv'] == 20 and entry['cost']['baseline_check']['cost_usd_equiv'] == 10

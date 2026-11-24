@@ -31,8 +31,12 @@ unscored, or the job never finished), too few cases to compare, passing
 ``iteration_max_wall_hours`` or ``iteration_max_cost_usd_equiv``, an error and an
 interrupt are all invalid, with the reason: not a rejection of the idea, which may be
 tried again. An interrupt is raised again once recorded. The budget is checked between
-steps and after every round; the cost is the API-equivalent cost of the rounds this
-iteration ran, the baseline's check-set rounds included when it made them.
+steps and after every round, so a round can carry it past by up to its own length; the
+cost is the API-equivalent cost of the rounds this iteration ran, counting rounds that
+finished before a failure. The baseline's check-set rounds measure the baseline, not
+the change: they are reported apart, under ``baseline_check``, and count against neither
+budget, though ``loop.run`` counts their cost against the run's. SIGTERM and SIGHUP are
+recorded as interrupts.
 
 Nothing here changes the pin or makes the candidate the baseline: that waits for
 confirmation (#54) and the loop (#55). Prints the entry, or exits 2 with an ``error``,
@@ -45,6 +49,7 @@ import argparse
 import hashlib
 import json
 from pathlib import Path
+import signal
 import subprocess
 import sys
 import time
@@ -87,8 +92,14 @@ def baseline(run: Path, loaded: settings.Settings) -> dict:
                 iteration=1 + max((entry['iteration'] for entry in entries if entry['kind'] == 'iteration'), default=0))
 
 
+def _spent(entries: list[dict]) -> dict:
+    return dict(reviewer_seconds=sum(entry['elapsed_seconds'] or 0 for entry in entries),
+                cost_usd_equiv=sum(entry['cost_usd'] or 0 for entry in entries))
+
+
 def cost(work: dict) -> dict:
-    """What the iteration has spent so far: its rounds' trials, time, cost and tokens."""
+    """What the iteration has spent so far: its rounds' trials, time, cost and tokens, and apart from them the
+    baseline's check-set rounds it made."""
     entries = [entry for made in work['rounds'].values() for entry in made]
     return dict(trials=sum(entry['expected'] for entry in entries),
                 scored_trials=sum(entry['evaluated'] for entry in entries),
@@ -96,11 +107,15 @@ def cost(work: dict) -> dict:
                 cost_usd_equiv=sum(entry['cost_usd'] or 0 for entry in entries),
                 **{key: sum(entry[key] or 0 for entry in entries) for key in rounds.TOKENS},
                 rounds={name: len(made) for name, made in work['rounds'].items()},
-                wall_seconds=round(time.monotonic() - work['started'], 1), proposer_attempts=work['attempts'])
+                wall_seconds=round(time.monotonic() - work['started'] - work['baseline_seconds'], 1),
+                proposer_attempts=work['attempts'],
+                baseline_check=dict(rounds=len(work['baseline_rounds']), wall_seconds=round(work['baseline_seconds'], 1),
+                                    **_spent(work['baseline_rounds'])))
 
 
 def _budget(work: dict, loaded: settings.Settings) -> None:
-    hours, spent = (time.monotonic() - work['started']) / 3600, cost(work)['cost_usd_equiv']
+    hours = (time.monotonic() - work['started'] - work['baseline_seconds']) / 3600
+    spent = cost(work)['cost_usd_equiv']
     if hours > loaded['iteration_max_wall_hours']:
         raise Invalid(f'The iteration ran {hours:.2f} hours, past iteration_max_wall_hours '
                       f'{loaded["iteration_max_wall_hours"]:g}')
@@ -109,13 +124,22 @@ def _budget(work: dict, loaded: settings.Settings) -> None:
                       f'{loaded["iteration_max_cost_usd_equiv"]:g}')
 
 
+def _scored(name: str) -> list[dict]:
+    """The rounds a loop.rounds name has scored so far, read back after it stopped."""
+    path = rounds.ARTIFACTS / name / 'summary.json'
+    return json.loads(path.read_text()).get('rounds', []) if path.exists() else []
+
+
 def _score(stage: str, against: Path, build_file: Path, side: str, cases: Path, name: str,
            loaded: settings.Settings, work: dict) -> tuple[bool, list[str]]:
     """Score the candidate one round at a time until loop.decide accepts or rejects it."""
     base = json.loads(against.read_text())
     for done in range(1, loaded['rounds'] + 1):
-        state = rounds.run(str(build_file), cases, done, name, concurrency=loaded['concurrency'])
-        work['rounds'][name] = state['rounds']
+        try:
+            state = rounds.run(str(build_file), cases, done, name, concurrency=loaded['concurrency'])
+        finally:
+            # Counted even when the round stopped: the rounds before it were spent.
+            work['rounds'][name] = _scored(name)
         if state['side'] != side:
             raise Invalid(f'{name} scored the build {state["side"]}, not the candidate {side}')
         result = decide.decide(base, state, stage, loaded)
@@ -140,10 +164,13 @@ def baseline_check(base: dict, loaded: settings.Settings, work: dict) -> Path:
                       "so the baseline's check-set rounds can't be made")
     name = f'{base["name"]}-check'
     path = rounds.ARTIFACTS / name / 'summary.json'
-    before = {entry['job'] for entry in json.loads(path.read_text()).get('rounds', [])} if path.exists() else set()
-    state = rounds.run('pinned', sets.CHECK, loaded['rounds'], name, concurrency=loaded['concurrency'])
-    work['rounds'][name] = [entry for entry in state['rounds'] if entry['job'] not in before]
-    _budget(work, loaded)
+    before = {entry['job'] for entry in _scored(name)}
+    started = time.monotonic()
+    try:
+        state = rounds.run('pinned', sets.CHECK, loaded['rounds'], name, concurrency=loaded['concurrency'])
+    finally:
+        work['baseline_rounds'] = [entry for entry in _scored(name) if entry['job'] not in before]
+        work['baseline_seconds'] += time.monotonic() - started
     if state['side'] != base['commit']:
         raise Invalid(f'{path} scored the build {state["side"]}, not the baseline {base["commit"]}')
     return path
@@ -194,7 +221,7 @@ def iterate(run: str, loaded: settings.Settings, *, root: Path = ROOT) -> dict:
     base = baseline(folder, loaded)
     rounds.check_logins()
     work = dict(fields=dict(iteration=base['iteration']), patch=None, worktree=None, rounds={}, attempts=0,
-                started=time.monotonic())
+                started=time.monotonic(), baseline_rounds=[], baseline_seconds=0.0)
     interrupted = None
     try:
         verdict, reasons = _steps(run, base, loaded, root, work)
@@ -205,8 +232,16 @@ def iterate(run: str, loaded: settings.Settings, *, root: Path = ROOT) -> dict:
     except BaseException as error:
         verdict, reasons, interrupted = 'invalid', [f'Interrupted: {type(error).__name__}'], error
     work['fields']['cost'] = cost(work)
-    entry = ledger.append(folder, 'iteration', dict(work['fields'], verdict=dict(verdict=verdict, reasons=reasons)),
-                          patch=work['patch'])
+    try:
+        entry = ledger.append(folder, 'iteration', dict(work['fields'], verdict=dict(verdict=verdict, reasons=reasons)),
+                              patch=work['patch'])
+    except BaseException as error:
+        # Nothing recorded: say so, and let an interrupt still end the process as one.
+        print(f'Iteration {base["iteration"]} could not be recorded ({type(error).__name__}: {error}); its '
+              f'worktree {work["worktree"]} is left for a person', file=sys.stderr)
+        if interrupted is not None:
+            raise interrupted from error
+        raise
     if work['worktree'] and verdict != 'accepted-on-dev':
         try:
             guard.git(root / CLONE, 'worktree', 'remove', '--force', work['worktree'])
@@ -221,6 +256,12 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--run', required=True, type=ledger._run_name, help='The run, a folder name under loop-runs/')
     arguments = parser.parse_args(argv)
+
+    def interrupt(number, frame):
+        raise KeyboardInterrupt(signal.Signals(number).name)
+    # A stop from outside is recorded as an interrupt, as Ctrl-C is.
+    for number in (signal.SIGTERM, signal.SIGHUP):
+        signal.signal(number, interrupt)
     try:
         entry = iterate(arguments.run, settings.load(), root=ROOT)
     except (OSError, LookupError, RuntimeError, ValueError) as error:
