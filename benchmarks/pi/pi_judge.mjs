@@ -3,9 +3,9 @@ import { readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-export const PROVIDER = 'openai-codex';
+export const PROVIDER = 'openai';
 export const MODEL = 'gpt-6.1-sol';
-const SDK_VERSION = '1.5.0';
+const SDK_VERSION = '1.6.0';
 
 export function failure(category, message, details = {}) {
   return Object.assign(new Error(message), { category, ...details });
