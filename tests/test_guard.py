@@ -45,19 +45,9 @@ sys.exit(0 if outcome == "linger" else int(outcome))
 '''
 
 
-def real_git() -> Path:
-    for directory in os.environ['PATH'].split(os.pathsep):
-        candidate = Path(directory) / 'git'
-        if candidate.is_file() and os.access(candidate, os.X_OK):
-            with candidate.open('rb') as file:
-                if b'tests must not run git' not in file.read(200):
-                    return candidate
-    pytest.fail('These tests need Git installed')
-
-
 @pytest.fixture
-def git(tmp_path, monkeypatch):
-    binary = real_git()
+def git(tmp_path, monkeypatch, real_git):
+    binary = real_git
     for name in [name for name in os.environ if name.startswith('GIT_')]:
         monkeypatch.delenv(name)
     (tmp_path / 'home').mkdir()
