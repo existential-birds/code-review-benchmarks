@@ -110,7 +110,22 @@ def block(rounds: list[dict]) -> dict:
             for key in (*METRICS, *GUARDS) if any(key in entry for entry in rounds)}
 
 
+# What the reviewer's and the oracle's rounds must share; the oracle runs no Daydream build.
+IDENTITY = ('reviewbench_revision', 'split', 'judge')
+
+
+def comparable(reviewer: dict, oracle: dict) -> None:
+    """Refuse an oracle summary from another catalog, judge or set of cases than the reviewer's."""
+    for key in IDENTITY:
+        if reviewer['catalog_identity'].get(key) != oracle['catalog_identity'].get(key):
+            raise ValueError(f'The reviewer and oracle summaries differ in {key}: '
+                             f'{reviewer["catalog_identity"].get(key)!r} and {oracle["catalog_identity"].get(key)!r}')
+    if set(reviewer['cases']) != set(oracle['cases']):
+        raise ValueError('The reviewer and oracle summaries scored different review cases')
+
+
 def derive(reviewer: dict, oracle: dict, loaded: settings.Settings) -> dict:
+    comparable(reviewer, oracle)
     # A summary lists its cases as the catalog does, by name; the climb set's own order picks the first ones.
     climb = sets.order(reviewer['cases'])
     matched = [case for case in climb if all(counts is not None for counts in reviewer['cases'][case])]

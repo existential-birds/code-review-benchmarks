@@ -80,3 +80,17 @@ def test_a_guard_count_that_held_still_takes_poissons_spread():
     scale = loaded['accept_z'] * math.sqrt(2 / derived['rounds'])
     assert derived['wrong_findings_margin'] == pytest.approx(scale * math.sqrt(4) / 40)
     assert derived['incomplete_margin'] == pytest.approx(scale * 1)
+
+
+def test_an_oracle_from_another_catalog_judge_or_set_of_cases_is_refused():
+    cases = {f'case-{index}': [counts(6, 6, 5)] * 5 for index in range(30)}
+    oracle = summary({name: [counts(10, 10, 10)] * 5 for name in cases}, side=None)
+    noise.derive(summary(cases), oracle, settings.load())
+    for key in noise.IDENTITY:
+        other = summary({name: [counts(10, 10, 10)] * 5 for name in cases}, side=None)
+        other['catalog_identity'][key] = 'other'
+        with pytest.raises(ValueError, match=f'differ in {key}'):
+            noise.derive(summary(cases), other, settings.load())
+    fewer = summary({name: [counts(10, 10, 10)] * 5 for name in list(cases)[:29]}, side=None)
+    with pytest.raises(ValueError, match='different review cases'):
+        noise.derive(summary(cases), fewer, settings.load())
