@@ -15,7 +15,8 @@ round of the canary cases, one scored by another judge, ReviewBench revision or 
 than the reference's, or one that failed outright (more than a fifth of its trials
 unscored, which ``loop.rounds`` refuses). ``loop.run`` stops on either: drift as
 ``judge-drift``, no verdict as ``infrastructure``. ``--name`` must be new, since
-``loop.rounds`` would otherwise return the round it scored before.
+``loop.rounds`` would otherwise return the round it scored before; a name whose round
+failed is scored afresh.
 
 ``--record`` makes the round the new reference instead, keeping the tolerance, and
 prints the reference it replaced. Only a person runs it, after deciding the judge
@@ -125,7 +126,9 @@ def main(argv: list[str] | None = None) -> int:
         block = canary_block(arguments.noise, referenced=not arguments.record)
         if arguments.name:
             path = rounds.ARTIFACTS / arguments.name / 'summary.json'
-            if path.exists():
+            # A round scored under this name would be returned again; one that failed is scored afresh.
+            if path.exists() and any(job.get('state') == 'finished'
+                                     for job in json.loads(path.read_text()).get('jobs', [])):
                 raise ValueError(f'{arguments.name} was scored already; give the canary a new name')
             summary = rounds.run('oracle', CASES, 1, arguments.name)
         else:
@@ -138,8 +141,8 @@ def main(argv: list[str] | None = None) -> int:
         result = compare(block, summary)
     except NoReference as error:
         result = dict(verdict='no-reference', error=str(error))
-    except (ValueError, RuntimeError, OSError, KeyError, TypeError) as error:
-        # A malformed reference or summary is no verdict on the judge, never drift.
+    except Exception as error:
+        # A failed round, or a malformed reference or summary, is no verdict on the judge, never drift.
         result = dict(verdict='invalid', error=f'{type(error).__name__}: {error}')
     print(json.dumps(result, indent=2, allow_nan=False))
     for case in result.get('moved', []):

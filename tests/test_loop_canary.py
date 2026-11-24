@@ -165,3 +165,25 @@ def test_a_malformed_reference_is_no_verdict_not_drift(oracle, capsys):
     oracle.noise.write_text(json.dumps(data))
     code, result, _ = check(capsys, '--name', 'canary-1', '--noise', str(oracle.noise))
     assert code == 2 and result['verdict'] == 'invalid' and result['error'].startswith('KeyError')
+
+
+def test_a_summary_that_isnt_an_object_or_a_null_catalog_is_no_verdict(oracle, capsys):
+    Path('list.json').write_text('[]')
+    code, result, _ = check(capsys, '--summary', 'list.json', '--noise', str(oracle.noise))
+    assert code == 2 and result['verdict'] == 'invalid' and result['error'].startswith('AttributeError')
+    oracle.plan.append(STEADY)
+    assert check(capsys, '--name', 'canary-1', '--noise', str(oracle.noise))[0] == 0
+    data = json.loads(oracle.noise.read_text())
+    data['canary']['catalog'] = None
+    oracle.noise.write_text(json.dumps(data))
+    code, result, _ = check(capsys, '--summary', 'artifacts/loop/canary-1/summary.json', '--noise', str(oracle.noise))
+    assert code == 2 and result['verdict'] == 'invalid'
+
+
+def test_a_name_whose_round_failed_is_scored_afresh(oracle, capsys):
+    # The first attempt loses both trials, so its round fails and no verdict is given.
+    oracle.plan.extend([{'case-a': None, 'case-b': None}, STEADY])
+    code, result, _ = check(capsys, '--name', 'canary-1', '--noise', str(oracle.noise))
+    assert code == 2 and result['verdict'] == 'invalid'
+    code, result, _ = check(capsys, '--name', 'canary-1', '--noise', str(oracle.noise))
+    assert code == 0 and result['verdict'] == 'stable' and len(oracle.calls) == 2
