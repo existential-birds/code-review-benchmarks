@@ -311,3 +311,12 @@ def test_an_out_folder_made_meanwhile_is_not_replaced(baseline, tmp_path, monkey
     (tmp_path / 'other').mkdir()
     with pytest.raises(FileExistsError, match='Refusing to replace'):
         evidence.build(baseline, tmp_path / 'other')
+
+
+def test_a_scored_trial_without_a_run_record_keeps_its_rulings_but_gets_no_labels(baseline, tmp_path):
+    record = first_record(tmp_path)
+    run_id = json.loads(record.read_text())['run_id']
+    record.unlink()
+    index = evidence.build(baseline, tmp_path / 'pack')
+    labels = [json.loads(line) for line in (tmp_path / 'pack/labels.jsonl').read_text().splitlines()]
+    assert labels and run_id not in {label['run_id'] for label in labels} and index['totals']['trials'] == 6
