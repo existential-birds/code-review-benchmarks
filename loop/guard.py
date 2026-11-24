@@ -71,8 +71,8 @@ HUNK = re.compile(r'^@@ -\d+(?:,\d+)? \+(\d+)')
 DIFF = ('--no-renames', '--no-ext-diff', '--no-textconv', '--no-color')
 
 
-def git(repository: Path, *arguments: str) -> str:
-    result = subprocess.run([GIT, *GIT_OPTIONS, '-C', str(repository), *arguments], capture_output=True,
+def git(repository: Path, *arguments: str, input: str | None = None) -> str:
+    result = subprocess.run([GIT, *GIT_OPTIONS, '-C', str(repository), *arguments], capture_output=True, input=input,
                             encoding='utf-8', errors='surrogateescape', env=os.environ | {'GIT_ATTR_NOSYSTEM': '1'})
     if result.returncode:
         raise RuntimeError(f'git {" ".join(arguments)} failed: {result.stderr.strip()}')
@@ -196,10 +196,19 @@ def run_gate(checkout: Path, scratch: Path, timeout: int) -> dict:
     # uv works offline from the operator's cache, so the gate needs no proxy or credentials.
     environment = ({name: os.environ[name] for name in GATE_ENVIRONMENT if name in os.environ}
                    | uv_directories() | {'UV_OFFLINE': '1', 'HOME': str(home)})
+    returncode, seconds = run_bounded(GATE, checkout, environment, log, timeout)
+    return dict(command=' '.join(GATE), returncode=returncode, timed_out=returncode is None,
+                seconds=round(seconds, 1), output_tail=log.read_text(encoding='utf-8', errors='replace')[-4000:])
+
+
+def run_bounded(command, directory: Path, environment: dict[str, str], log: Path, timeout: float,
+                stdin: Path | None = None) -> tuple[int | None, float]:
+    """Run a command in a session of its own, output to log and input from stdin, and kill whatever it
+    leaves behind. Return its exit code, None if it ran past the timeout, and its seconds."""
     started, timed_out = time.monotonic(), False
-    # A file, not a pipe: a descendant that leaves the process group can't hold it open.
-    with log.open('wb') as output:
-        process = subprocess.Popen(GATE, cwd=checkout, env=environment, stdin=subprocess.DEVNULL,
+    # Files, not pipes: a descendant that leaves the process group can't hold them open.
+    with log.open('wb') as output, (stdin.open('rb') if stdin else open(os.devnull, 'rb')) as source:
+        process = subprocess.Popen(command, cwd=directory, env=environment, stdin=source,
                                    stdout=output, stderr=subprocess.STDOUT, start_new_session=True)
     try:
         process.wait(timeout=timeout)
@@ -209,10 +218,7 @@ def run_gate(checkout: Path, scratch: Path, timeout: int) -> dict:
         with contextlib.suppress(ProcessLookupError):
             os.killpg(process.pid, signal.SIGKILL)
         process.wait()
-    seconds = time.monotonic() - started
-    return dict(command=' '.join(GATE), returncode=None if timed_out else process.returncode,
-                timed_out=timed_out, seconds=round(seconds, 1),
-                output_tail=log.read_text(encoding='utf-8', errors='replace')[-4000:])
+    return None if timed_out else process.returncode, time.monotonic() - started
 
 
 def check(worktree: Path, base: str, commit: str, loaded: settings.Settings, names: set[str]) -> dict:

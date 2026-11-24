@@ -120,6 +120,14 @@ the judge is stable, 1 when it drifted and 2 when there is nothing to compare wi
 `--summary` compares a round already scored; `--record` makes a round the new
 reference, only after a person decides the judge changed.
 
+On the test set, [`loop/confirm.py`](../../loop/confirm.py) alone scores a kept change
+against the baseline, with AACR's held-out cases, and gives one word: `confirmed`,
+`not-confirmed` or `regressed`. Its rule, storage and use count are in its help.
+
+```sh
+.venv/bin/python -m loop.confirm --baseline pinned --candidate <commit>
+```
+
 **1. Build the candidate and generate one catalog per build.**
 
 ```sh
