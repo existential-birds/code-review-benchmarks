@@ -42,7 +42,7 @@ original would rotate it out from under each other.
 
 ```sh
 export REVIEWER_CODEX_AUTH_DIR=~/.codex   # Daydream reviewer
-export JUDGE_PI_AUTH_DIR=~/.pi/agent      # Judge; use Pi's /login for OpenAI Codex
+export JUDGE_PI_AUTH_DIR=~/.pi/agent      # Judge; Pi's /login, Sign in with ChatGPT
 ```
 
 Neither container sees the rest of these folders, and logins stay out of task
@@ -54,12 +54,19 @@ assets and results:
   access while it holds your Codex session, so a hostile review case could try to
   send that session elsewhere.
 - **Judge:** nothing is mounted. Before scoring, the verifier refreshes Pi's
-  `openai-codex` login on your machine with the pinned SDK, under Pi's own lock, when
+  `openai` (ChatGPT subscription) login on your machine with the pinned SDK, under Pi's own lock, when
   less than 30 minutes remain. It then uploads a copy holding only that login's
   access token, without the refresh token. If the refresh fails, the trial stops
   before scoring. If you raise the verifier timeout past about 20 minutes, set
   `min_judge_validity_sec` under `verifier.kwargs` to the new timeout plus 10
   minutes; otherwise the judge's token can expire mid-scoring and the trial fails.
+  That login's tokens last about an hour and the verifier accepts at most 50 minutes
+  here, so a verifier timeout can't go past 40 minutes. The login shares Pi's `openai` slot with an OpenAI API key, which it
+  replaces.
+
+Catalogs generated before the judge moved to this login (November 2026) still name
+the deprecated `openai-codex` login, and their trials fail at scoring: generate them
+again.
 
 ## Generate a catalog
 
@@ -216,7 +223,7 @@ For each block, `rounds` holds every round's result from [`metric.py`](metric.py
 `file_semantic_recall_rate`, `balanced_score` and their pooled counts, where
 `generated_notes` is the findings sent. As in the job's own metric, an unscored trial
 leaves the denominators rather than withholding the round, so read the scores with
-`missing_instances`. A round with no scored trial defines no rate. `summary` holds each
+`missing_instances`. A round with no scored trial defines no rate; one whose scored reviews sent no finding has a match rate of 0, as in AACR's own summary. `summary` holds each
 rate's mean and sample standard deviation (n-1) over the rounds that define it, as
 `loop/rounds.py` reports them; ReviewBench's report uses ReviewBench's own population
 deviation. The report adds no score, weight or threshold, and doesn't rank the sides.

@@ -93,9 +93,9 @@ def side_rounds(summary: dict, cases: list[str]) -> list[dict]:
             unfinished=entry['failed'] + entry['incomplete'] + entry['missing'],
             # The summary keeps cost and time as round totals only, so per case is the total
             # over the trials it covers: cost_usd over cost_trials, the trials that reported a
-            # cost, and elapsed_seconds over the scored trials.
+            # cost, and elapsed_seconds, summed over every trial in the job, over those trials.
             cost_per_case=_per(entry['cost_usd'], entry['cost_trials']),
-            seconds_per_case=_per(entry['elapsed_seconds'], entry['evaluated'])))
+            seconds_per_case=_per(entry['elapsed_seconds'], entry['expected'] - entry['missing'])))
     return result
 
 
@@ -123,7 +123,8 @@ def decide(baseline: dict, candidate: dict, stage: str, limits: settings.Setting
                          f'not {len(baseline["rounds"])} and {done}')
     total, least = len(baseline['cases']), limits['min_matched_fraction']
     result = dict(stage=stage, rounds=dict(planned=planned, baseline=planned, candidate=done),
-                  matched=dict(cases=len(matched), of=total, fraction=len(matched) / total, min_fraction=least))
+                  matched=dict(cases=len(matched), of=total, fraction=len(matched) / total if total else 0,
+                                min_fraction=least))
 
     def verdict(word: str, *reasons: str) -> dict:
         return dict(verdict=word, reasons=list(reasons), **result)
@@ -135,6 +136,12 @@ def decide(baseline: dict, candidate: dict, stage: str, limits: settings.Setting
     for name, entries in sides.items():
         result[name] = dict(rounds=entries, mean=means(entries))
     base, cand = result['baseline']['mean'], result['candidate']['mean']
+    # A candidate that matched no finding on the matched cases in some round has no precision,
+    # and so no F1, where the baseline has them: a worse review, not a failed comparison.
+    unmatched = sorted(key for key in METRICS if base[key] is not None and cand[key] is None)
+    if unmatched:
+        return verdict('reject', f'The candidate matched no findings in some round, leaving undefined: '
+                                 f'{", ".join(unmatched)}')
     undefined = sorted(key for key in base if base[key] is None or cand[key] is None)
     if undefined:
         return verdict('invalid', f'Undefined in some round on the matched cases: {", ".join(undefined)}')
@@ -193,14 +200,17 @@ def self_check(summary: dict, limits: settings.Settings) -> dict:
     size = count // 2
     if not size:
         raise ValueError('A self-check needs at least two rounds')
-    verdicts = Counter()
+    verdicts, on_gain = Counter(), 0
     for first in combinations(range(count), size):
         rest = tuple(number for number in range(count) if number not in first)
         for second in combinations(rest, size):
-            verdicts[decide(_pick(summary, first), _pick(summary, second), 'climb', limits,
-                            rounds=size)['verdict']] += 1
+            result = decide(_pick(summary, first), _pick(summary, second), 'climb', limits, rounds=size)
+            verdicts[result['verdict']] += 1
+            # The guards' margins are set for the planned rounds, tighter than these groups need,
+            # so also count the splits whose gain alone would pass.
+            on_gain += 'gain' in result and result['gain']['grounded_f1'] > result['needed_gain']
     return dict(group_rounds=size, decisions=verdicts.total(), verdicts=dict(verdicts),
-                beats_itself=verdicts['accept'])
+                beats_itself=verdicts['accept'], beats_itself_on_gain=on_gain)
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -30,6 +30,12 @@ split, and keeps those rounds' folders and jobs under ``confirmations/``. Review
 the default and the only benchmark the loop scores. ``--benchmark aacr`` scores AACR dev
 cases, to check its report and a build. A case that fails to convert leaves no catalog
 behind: drop it and run again.
+
+``--build oracle`` scores ReviewBench's own true findings with
+``experiments/reviewbench-oracle.yaml`` instead of a Daydream review, so any spread
+between its rounds is the judge's alone (#45). It still needs both login folders, since
+the tasks mount both, but its trials record no build, and a trial counts as failed when it
+left no score.
 """
 from __future__ import annotations
 
@@ -45,7 +51,7 @@ import sys
 from types import SimpleNamespace
 
 from benchmarks.aacr import convert as aacr_convert, metric as aacr_metric, report as aacr_report
-from benchmarks.daydream import rounds as shared
+from benchmarks.daydream import build, rounds as shared
 from benchmarks.reviewbench import convert, report
 from benchmarks.reviewbench.metric import compute
 from benchmarks.reviewbench.upstream.metric import read_counts
@@ -61,6 +67,7 @@ COUNTS = ('expected', 'missing', 'evaluated', 'failed', 'incomplete', 'completed
 TOKENS = ('n_input_tokens', 'n_cache_tokens', 'n_output_tokens')
 CATALOG = ('reviewbench_revision', 'split', 'judge', 'daydream')
 # The task containers read the logins from these; the Makefile sets them, harbor run alone doesn't.
+ORACLE_CONFIG = Path('experiments/reviewbench-oracle.yaml')
 LOGINS = ('REVIEWER_CODEX_AUTH_DIR', 'JUDGE_PI_AUTH_DIR')
 # A round with more unscored trials than this is failed, not finished: a lost login or a
 # Docker outage, not noise (the stop rule of #45). The command stops; a rerun scores it afresh.
@@ -118,14 +125,23 @@ BENCHMARKS = {
 }
 
 
-def summarise(catalog: Path, jobs: list[str], benchmark: str = 'reviewbench', jobs_dir: Path | None = None) -> dict:
+def summarise(catalog: Path, jobs: list[str], benchmark: str = 'reviewbench', jobs_dir: Path | None = None,
+              oracle: bool = False) -> dict:
     """The catalog, side, every round's counts and pooled scores, their spread, and each case's counts."""
     bench = BENCHMARKS[benchmark]
     listing, expected = bench.report.read_catalog(catalog)
     entries = [bench.report.read_round((jobs_dir or JOBS) / job, expected) for job in jobs]
     # Rounds that all failed before any review started record no build.
     sides = shared.builds(entries)
-    if len(sides) > 1 or None in sides:
+    if oracle:
+        # The oracle runs no review, so it leaves no review record: no build, and no status but its score.
+        if sides - {None}:
+            raise ValueError(f'An oracle summary records no build, not {sorted(map(str, sides))}')
+        sides = set()
+        for entry in entries:
+            entry.update(produced=entry['evaluated'], completed_empty=0, incomplete=0,
+                         failed=entry['expected'] - entry['missing'] - entry['evaluated'])
+    elif len(sides) > 1 or None in sides:
         raise ValueError(f'One build per summary, not {sorted(map(str, sides))}')
     rounds, cases = [], {case: [None] * len(jobs) for case in expected}
     for number, entry in enumerate(entries, 1):
@@ -156,6 +172,13 @@ def _write(path: Path, state: dict) -> None:
     os.replace(temporary, path)
 
 
+def check_logins() -> None:
+    """Refuse to start without the login folders, since every trial would fail at once."""
+    missing = [name for name in LOGINS if not os.environ.get(name) or not Path(os.environ[name]).is_dir()]
+    if missing:
+        raise ValueError(f'Set {" and ".join(missing)} to the reviewer and judge login folders, as the Makefile does')
+
+
 def run(build: str, cases_file: Path, rounds: int, name: str, *, benchmark: str = 'reviewbench',
         limit: int | None = None, concurrency: int | None = None, upstream: Path | None = None) -> dict:
     """Score ``build`` over ``rounds`` rounds of the benchmark's dev cases in ``cases_file``."""
@@ -179,12 +202,12 @@ def score(build: str, cases: list[str] | None, rounds: int, folder: Path, name: 
     bench = BENCHMARKS[benchmark]
     if rounds < 1 or (concurrency is not None and concurrency < 1):
         raise ValueError('Rounds, --limit-cases and --concurrency must be positive')
-    missing = [name for name in LOGINS if not os.environ.get(name) or not Path(os.environ[name]).is_dir()]
-    if missing:
-        raise ValueError(f'Set {" and ".join(missing)} to the reviewer and judge login folders, as the Makefile does')
+    check_logins()
     concurrency = concurrency or settings.load()['concurrency']
     path, catalog = folder / 'summary.json', folder / 'catalog'
-    build = build if build == 'pinned' else str(Path(build).resolve())
+    if build == 'oracle' and (benchmark != 'reviewbench' or split != 'dev'):
+        raise ValueError('The oracle scores ReviewBench dev cases only')
+    build = build if build in ('pinned', 'oracle') else str(Path(build).resolve())
     request = dict(build=build, cases=cases)
     if benchmark != 'reviewbench':
         # A ReviewBench summary written before AACR rounds existed still resumes.
@@ -208,9 +231,12 @@ def _generate(bench, upstream: Path, catalog: Path, request: dict, split: str) -
     case that failed (its upstream commit gone) is left out, and catalog.json records it.
     """
     existed = catalog.exists()
+    build_file = None if request['build'] in ('pinned', 'oracle') else Path(request['build'])
+    if bench is BENCHMARKS['aacr']:
+        # AACR prepares each case's repository before it bakes in the build: fail first, as its converter does.
+        build.built_wheel(build_file)
     try:
-        bench.generate(upstream, catalog, request['cases'],
-                       None if request['build'] == 'pinned' else Path(request['build']), split)
+        bench.generate(upstream, catalog, request['cases'], build_file, split)
     except Exception as error:
         if existed:
             raise
@@ -238,7 +264,7 @@ def _rounds(benchmark, request, rounds, name, path, catalog, concurrency, upstre
         _write(path, state)
         done = [entry['job'] for entry in state['jobs'] if entry['state'] == 'finished']
         if done:
-            state.update(summarise(catalog, done, benchmark, jobs_dir))
+            state.update(summarise(catalog, done, benchmark, jobs_dir, oracle=request['build'] == 'oracle'))
             _write(path, state)
 
     if path.exists():
@@ -262,7 +288,8 @@ def _rounds(benchmark, request, rounds, name, path, catalog, concurrency, upstre
             raise FileExistsError(f'Refusing to reopen Harbor job {jobs_dir / job}; choose a new name')
         state['jobs'].append(entry := dict(round=number, job=job, state='started'))
         save()
-        subprocess.run([str(HARBOR), 'run', '-c', str(bench.config), '-p', str(catalog), '-o', str(jobs_dir),
+        config = ORACLE_CONFIG if request['build'] == 'oracle' else bench.config
+        subprocess.run([str(HARBOR), 'run', '-c', str(config), '-p', str(catalog), '-o', str(jobs_dir),
                         '-k', '1', '-r', '0', '-n', str(concurrency), '--job-name', job], check=False)
         entry['state'] = outcome(job, catalog, benchmark, jobs_dir)
         save()
@@ -274,7 +301,8 @@ def _rounds(benchmark, request, rounds, name, path, catalog, concurrency, upstre
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('--build', required=True, help="'pinned', or a candidate's build.json")
+    parser.add_argument('--build', required=True,
+                        help="'pinned', a candidate's build.json, or 'oracle' for ReviewBench's own true findings")
     parser.add_argument('--cases', required=True, type=Path, help='loop/climb.txt, loop/check.txt or another dev list')
     parser.add_argument('--benchmark', choices=sorted(BENCHMARKS), default='reviewbench',
                         help="ReviewBench, the loop's own scorer, or AACR's dev cases, to check its report and a build")
