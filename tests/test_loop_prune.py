@@ -13,14 +13,21 @@ def image(case, job):
     return f'{case}__{job}__env-main'
 
 
+class Calls(list):
+    """The docker calls made, and the Compose projects another container still holds."""
+
+
 @pytest.fixture
 def docker(monkeypatch):
     """Docker with a few images: one an accepted iteration's, one the baseline's and one never the loop's."""
-    calls, images = [], {image('case-a', 'run-a-1-climb-round-1-attempt-1'): 1000,
+    calls, images = Calls(), {image('case-a', 'run-a-1-climb-round-1-attempt-1'): 1000,
                          image('case-b', 'run-a-1-climb-round-1-attempt-1'): 2000,
                          image('case-b', 'run-a-4-climb-round-1-attempt-1'): 3000,
                          image('case-a', 'run-a-2-climb-round-1-attempt-1'): 4000,
                          image('case-a', 'base-round-1-attempt-1'): 5000, 'node': 6000}
+
+    held = set()
+    calls.held = held
 
     def run(*arguments):
         calls.append(list(arguments))
@@ -28,8 +35,16 @@ def docker(monkeypatch):
             out = ''.join(f'{name}\n' for name in images) + '<none>\n'
         elif arguments[:2] == ('image', 'inspect'):
             out = ''.join(f'{images[name]}\n' for name in arguments[4:])
+        elif arguments[0] == 'compose':
+            # A trial whose Harbor died leaves its containers holding the image; taking the project down frees it.
+            project = arguments[arguments.index('--project-name') + 1]
+            if project not in held:
+                images.pop(f'{project}-main', None)
+            out = ''
         else:
             assert arguments[:2] == ('image', 'rm')
+            if arguments[2].removesuffix('-main') in held:
+                return subprocess.CompletedProcess(['docker', *arguments], 1, '', 'image is in use by container c1')
             del images[arguments[2]]
             out = ''
         return subprocess.CompletedProcess(['docker', *arguments], 0, out, '')
@@ -84,7 +99,9 @@ def test_a_rejected_or_invalid_iterations_files_go_and_everything_else_stays(loo
     docker.clear()
     removed = prune.prune('run-a', loaded, root=loop.root)
     assert removed['items'] == listed['items'] and removed['bytes_freed'] == listed['bytes']
-    assert docker == look + [['image', 'rm', name] for name in images]
+    down = ['down', '--rmi', 'local', '--volumes', '--remove-orphans']
+    assert docker == look + [call for name in images for call in (
+        ['compose', '--project-name', name.removesuffix('-main'), *down], look[0])]
     assert files(loop.root) == before - gone
     # The branch stays in the clone, and the summaries stay beside the catalogs that went.
     assert git(loop.clone, 'rev-parse', 'loop/run-a/1') == first['candidate']['commit']
@@ -108,13 +125,9 @@ def test_a_rejected_or_invalid_iterations_files_go_and_everything_else_stays(loo
 
 def test_an_image_docker_wont_remove_is_reported_and_the_rest_still_goes(loop, docker, monkeypatch, capsys):  # noqa: F811
     loop.run(['base'])
-    stand_in = prune.docker
-
-    def refuse(*arguments):
-        if arguments[:2] == ('image', 'rm') and 'case-a' in arguments[2]:
-            return subprocess.CompletedProcess(['docker', *arguments], 1, '', 'image is in use by container c1')
-        return stand_in(*arguments)
-    monkeypatch.setattr(prune, 'docker', refuse)
+    # A container of another project still holds case-a's image, so neither taking its project down nor
+    # removing the image frees it.
+    docker.held.add(image('case-a', 'run-a-1-climb-round-1-attempt-1').removesuffix('-main'))
     monkeypatch.setattr(prune, 'ROOT', loop.root)
     assert prune.main(['--run', 'run-a']) == 1
     result = json.loads(capsys.readouterr().out)
@@ -141,3 +154,14 @@ def test_it_refuses_while_an_iteration_is_in_progress_unless_the_loop_calls_betw
     result = prune.prune('run-a', settings.load(**LIMITS), between_iterations=True, root=loop.root)
     assert result['bytes_freed'] > 0 and not (loop.root / 'artifacts/loop/run-a-1-climb/catalog').exists()
     assert [entry['kind'] for entry in ledger.read(loop.root / 'loop-runs/run-a')] == ['run-start', 'iteration']
+
+
+def test_docker_failing_to_list_images_leaves_one_error_and_the_rest_still_goes(loop, docker, monkeypatch):  # noqa: F811
+    loop.run(['base'])
+    def broken(*arguments):
+        return subprocess.CompletedProcess(['docker', *arguments], 1, '', 'Cannot connect to the Docker daemon')
+    monkeypatch.setattr(prune, 'docker', broken)
+    result = prune.prune('run-a', settings.load(**LIMITS), root=loop.root)
+    assert [item['error'] for item in result['items'] if 'error' in item] == [
+        'docker image ls failed: Cannot connect to the Docker daemon']
+    assert not (loop.root / 'artifacts/loop/run-a-1-climb/catalog').exists()

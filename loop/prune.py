@@ -104,9 +104,14 @@ def _images(wanted: list[tuple[int, str]]) -> list[dict]:
 
 def _remove(item: dict, root: Path) -> None:
     if item['kind'] == 'image':
-        result = docker('image', 'rm', item['image'])
-        if result.returncode:
-            raise RuntimeError(f'docker image rm failed: {result.stderr.strip()}')
+        # Harbor removes a trial's image when the trial stops; one left behind belongs to a trial whose Harbor
+        # died, and its Compose project's containers still hold it. Take the project down, then the image.
+        project = item['image'].removesuffix('-main')
+        docker('compose', '--project-name', project, 'down', '--rmi', 'local', '--volumes', '--remove-orphans')
+        if item['image'] in docker('image', 'ls', '--format', '{{.Repository}}').stdout.split():
+            result = docker('image', 'rm', item['image'])
+            if result.returncode:
+                raise RuntimeError(f'docker image rm failed: {result.stderr.strip()}')
     elif item['kind'] == 'worktree':
         guard.git(root / iterate.CLONE, 'worktree', 'remove', '--force', item['path'])
     else:
@@ -142,10 +147,17 @@ def prune(run: str, loaded: settings.Settings, *, dry_run: bool = False, between
             paths += [(n, 'job', job) for job in jobs]
     items = [dict(iteration=n, kind=kind, path=str(path), bytes=size(path))
              for n, kind, path in paths if path.exists() or path.is_symlink()]
-    # The images first, since their names come from the jobs' trial folders.
-    items = _images(wanted) + items
+    # The images first, since their names come from the jobs' trial folders. Docker failing to list them
+    # leaves one error behind, not every other item.
+    try:
+        images = _images(wanted)
+    except RuntimeError as error:
+        images = [dict(iteration=None, kind='image', image=None, bytes=0, error=str(error))]
+    items = images + items
     if not dry_run:
         for item in items:
+            if 'error' in item:
+                continue
             try:
                 _remove(item, root)
             except (OSError, RuntimeError) as error:
