@@ -8,21 +8,22 @@ remote has it. The iteration is the next one in ``loop-runs/<run>/ledger.jsonl``
 worktree is ``.cache/loop/worktrees/<run>-<n>`` on the branch ``loop/<run>/<n>``, cut
 from the baseline commit.
 
-The proposer never touches that worktree or any Git folder. It runs ``proposer_command``
-from ``loop/settings.toml`` in a container of its own, with the prompt on stdin, for at
-most ``--timeout`` seconds an attempt (two hours by default). The container holds only:
+The proposer never touches that worktree or any Git folder. It runs the ``[proposer]``
+slot's CLI from ``loop/settings.toml`` (#81), through its adapter in ``loop.proposers``, in
+a container of its own and never on the host, with the prompt on stdin, for at most
+``--timeout`` seconds an attempt (two hours by default). The container holds only:
 
 - ``/work``: an export of the baseline commit, no Git folder, for it to edit;
 - ``/pack``: a read-only copy of the evidence pack;
 - ``/analysis``, for the trace-analysis skill's files, and ``/out``, for ``proposal.json``;
-- a Codex home holding only a config and the reviewer's Codex login, as the review tasks
-  mount it.
+- the CLI's login, as its adapter mounts it, or its provider's key, passed by name.
 
 So this repository's ``jobs/``, ``artifacts/``, ``loop-runs/`` and ``confirmations/``, and
-anything held out, are out of its reach: Codex's own sandbox limits only what it writes.
-The container reaches the network, for Codex's model; a hostile proposer could send the
-Codex login elsewhere, as a hostile review case could. Its image, built on first use from
-the reviewer's pinned Node image, Python and Codex CLI, holds no Daydream.
+anything held out, are out of its reach: the CLIs' own sandboxes limit only what they write.
+The container reaches the network, for the CLI's model; a hostile proposer could send its
+login elsewhere, as a hostile review case could. Its image, built on first use from the
+reviewer's pinned Node image and Python with the CLI at a pinned version, holds no Daydream.
+The result records the slot.
 
 The loop then copies the edited files into the worktree, refusing a link or special file
 that the baseline doesn't have, a ``.git`` entry, and a path that leaves the worktree,
@@ -46,7 +47,6 @@ Prints JSON for the ledger and exits 0 with a proposal, 1 without one, or 2 with
 from __future__ import annotations
 
 import argparse
-import hashlib
 import io
 import json
 import os
@@ -59,8 +59,7 @@ import sys
 import tarfile
 import tempfile
 
-from benchmarks.daydream import build
-from loop import evidence, guard, ledger, settings
+from loop import evidence, guard, ledger, proposers, settings
 
 ROOT = Path(__file__).resolve().parents[1]
 CLONE_URL = 'https://github.com/existential-birds/daydream'
@@ -71,17 +70,6 @@ TIMEOUT_SECONDS = 2 * 60 * 60
 ENVIRONMENT = ('HTTPS_PROXY', 'https_proxy', 'HTTP_PROXY', 'http_proxy', 'NO_PROXY', 'no_proxy')
 # Where the container sees each folder, and the variables naming them.
 PATHS = dict(WORK='/work', PACK='/pack', ANALYSIS='/analysis', PROPOSAL='/out/proposal.json')
-CODEX_CONFIG = 'model_provider = "openai"\ncli_auth_credentials_store = "file"\n'
-DOCKERFILE = f'''FROM {build.NODE_IMAGE}
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates git ripgrep \\
-    && rm -rf /var/lib/apt/lists/*
-COPY --from={build.UV_IMAGE} /uv /usr/local/bin/uv
-ENV UV_PYTHON_INSTALL_DIR=/opt/python UV_LINK_MODE=copy UV_NO_CACHE=1
-RUN uv python install {build.PYTHON} && ln -s "$(uv python find {build.PYTHON})" /usr/local/bin/python3
-RUN npm install --global --ignore-scripts @openai/codex@{build.BUILD['codex_cli']}
-RUN python3 --version && codex --version
-'''
-IMAGE = 'daydream-loop-proposer:' + hashlib.sha256(DOCKERFILE.encode()).hexdigest()[:16]
 # Larger than any source file the harness holds; reading it whole stays cheap.
 MAX_FILE_BYTES = 5 * 1024 * 1024
 # A Conventional Commit's first line.
@@ -253,37 +241,31 @@ def clone(root: Path, url: str, baseline: str) -> tuple[Path, str]:
     raise ValueError(f'No commit, remote branch or tag {baseline!r} in {url}')
 
 
-def image() -> str:
-    """The proposer's image, built from DOCKERFILE when absent."""
-    if subprocess.run(['docker', 'image', 'inspect', IMAGE], capture_output=True).returncode:
-        subprocess.run(['docker', 'build', '--quiet', '--tag', IMAGE, '-'], input=DOCKERFILE.encode(), check=True,
-                       capture_output=True)
-    return IMAGE
+def image(chosen: proposers.Adapter) -> str:
+    """The adapter's image, built from its Dockerfile when absent."""
+    if subprocess.run(['docker', 'image', 'inspect', chosen.image], capture_output=True).returncode:
+        subprocess.run(['docker', 'build', '--quiet', '--tag', chosen.image, '-'], input=chosen.dockerfile.encode(),
+                       check=True, capture_output=True)
+    return chosen.image
 
 
-def codex_login() -> Path:
-    """The reviewer's Codex login file, as the review tasks mount it."""
-    folder = os.environ.get('REVIEWER_CODEX_AUTH_DIR') or os.environ.get('CODEX_HOME') or str(Path.home() / '.codex')
-    login = Path(folder) / 'auth.json'
-    if not login.is_file():
-        raise ValueError(f'No Codex login at {login}; sign in with codex login, or set REVIEWER_CODEX_AUTH_DIR')
-    return login
-
-
-def container(argv: list[str], scratch: Path, name: str) -> list[str]:
-    """The docker command running the proposer with only its folders and the Codex login mounted."""
+def container(slot: dict, scratch: Path, name: str) -> list[str]:
+    """The docker command running the slot's CLI with only its folders and its login mounted."""
+    chosen = proposers.adapter(slot)
+    access = chosen.login(slot, scratch / 'login')
     mounts = [(scratch / 'work', PATHS['WORK'], 'rw'), (scratch / 'evidence', PATHS['PACK'], 'ro'),
               (scratch / 'analysis', PATHS['ANALYSIS'], 'rw'), (scratch / 'out', '/out', 'rw'),
-              (scratch / 'codex', '/codex', 'rw'), (codex_login(), '/codex/auth.json', 'rw')]
+              *[(mount.source, mount.target, mount.mode) for mount in access.mounts]]
     variables = {name: os.environ[name] for name in ENVIRONMENT if name in os.environ} | dict(
-        CODEX_HOME='/codex', HOME='/tmp', **PATHS)
+        HOME='/tmp', **PATHS) | dict(access.variables)
     return ['docker', 'run', '--rm', '--interactive', '--init', '--name', name, '--workdir', PATHS['WORK'],
             # As the operator, so every file it leaves can be removed; with no privileges to gain.
             '--user', f'{os.getuid()}:{os.getgid()}', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges',
             '--pids-limit', '1024', '--memory', '8g',
             *[part for source, target, mode in mounts for part in ('--volume', f'{source}:{target}:{mode}')],
             *[part for key, value in variables.items() for part in ('--env', f'{key}={value}')],
-            image(), *argv]
+            *[part for key in access.passed for part in ('--env', key)],
+            image(chosen), *chosen.command(slot)]
 
 
 def stop(name: str) -> None:
@@ -389,6 +371,8 @@ def propose(run: str, baseline: str, pack: Path, loaded: settings.Settings, *, r
     runs = sorted(path.parent for path in (root / 'loop-runs').glob('*/ledger.jsonl'))
     earlier = earlier_iterations(runs)
     n = 1 + max((entry['iteration'] for name, entry in earlier if name == run), default=0)
+    slot = loaded['proposer']
+    proposers.adapter(slot)
     repository, base = clone(root, url, baseline)
     branch, worktree = f'loop/{run}/{n}', root / '.cache/loop/worktrees' / f'{run}-{n}'
     guard.git(repository, 'worktree', 'prune')
@@ -403,21 +387,21 @@ def propose(run: str, baseline: str, pack: Path, loaded: settings.Settings, *, r
         made = True
         logs.mkdir(parents=True, exist_ok=True)
         ideas = ledger.ideas(runs)
-        result = dict(run=run, iteration=n, baseline=base, branch=branch, worktree=str(worktree), logs=str(logs),
+        result = dict(run=run, iteration=n, proposer=slot, baseline=base, branch=branch, worktree=str(worktree),
+                      logs=str(logs),
                       proposal=None, commit=None, patch_id=None, diff=None, attempts=0, refusals=[])
         for attempt in range(1, loaded['max_proposal_attempts'] + 1):
             result['attempts'] = attempt
-            for folder in ('work', 'analysis', 'out', 'codex'):
+            for folder in ('work', 'analysis', 'out', 'login'):
                 _remove(scratch / folder)
             export(repository, base, scratch / 'work')
-            for folder in ('analysis', 'out', 'codex'):
+            for folder in ('analysis', 'out', 'login'):
                 (scratch / folder).mkdir()
-            (scratch / 'codex/config.toml').write_text(CODEX_CONFIG)
             stdin = logs / f'attempt-{attempt}.prompt.md'
             stdin.write_text(prompt(branch, base, ideas, loaded) + refusal_text(result['refusals']))
             name = f'loop-propose-{run}-{n}-{attempt}'
             try:
-                returncode, _ = guard.run_bounded(launch(loaded['proposer_command'], scratch, name), scratch,
+                returncode, _ = guard.run_bounded(launch(slot, scratch, name), scratch,
                                                   dict(os.environ), logs / f'attempt-{attempt}.log', timeout,
                                                   stdin=stdin)
             finally:

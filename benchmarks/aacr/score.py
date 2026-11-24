@@ -133,7 +133,7 @@ class _VerdictGuard:
 
 async def score_case(instance_path: Path, findings_path: Path, output_dir: Path, *, client=None,
                      daydream_proof: Path | None = None, comparison_path: Path | None = None,
-                     host_receipt_path: Path | None = None) -> dict:
+                     host_receipt_path: Path | None = None, judge_slot: dict | None = None) -> dict:
     """Grade exactly one completed review, publishing rewards only on success."""
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -160,7 +160,7 @@ async def score_case(instance_path: Path, findings_path: Path, output_dir: Path,
         _write_json(config.result_path(results_dir, instance.instance_id), findings)
         if client is None:
             from benchmarks.aacr.transport import PiJudgeClient
-            client = PiJudgeClient(output_dir / 'judge')
+            client = PiJudgeClient(output_dir / 'judge', judge_slot)
         guard = _VerdictGuard(client, output_dir)
         diagnostic['stage'] = 'judge'
         _write_json(output_dir / 'diagnostic.json', diagnostic)
@@ -170,7 +170,7 @@ async def score_case(instance_path: Path, findings_path: Path, output_dir: Path,
         # install the Pi judge explicitly.
         judge.USE_MOCK_LLM = False
         judge._llm_client = guard
-        os.environ[config.JUDGE_MODEL_VAR] = 'gpt-6.1-sol'
+        os.environ[config.JUDGE_MODEL_VAR] = (judge_slot or {}).get('model', 'gpt-6.1-sol')
         try:
             result = await evaluate.evaluate(instances, results_dir, 'codex', output_dir / 'upstream')
         finally:
@@ -213,11 +213,13 @@ def main() -> int:
     parser.add_argument('--daydream-proof', type=Path)
     parser.add_argument('--comparison', type=Path)
     parser.add_argument('--host-receipt', type=Path)
+    parser.add_argument('--judge', type=Path, help="The task's judge slot; without it, gpt-6.1-sol on Pi's ChatGPT login")
     args = parser.parse_args()
     try:
         asyncio.run(score_case(args.instance, args.findings, args.output,
                     daydream_proof=args.daydream_proof, comparison_path=args.comparison,
-                    host_receipt_path=args.host_receipt))
+                    host_receipt_path=args.host_receipt,
+                    judge_slot=json.loads(args.judge.read_text()) if args.judge else None))
     except VerificationError:
         print('AACR verification failed; inspect verifier/diagnostic.json and judge evidence.')
         return 1

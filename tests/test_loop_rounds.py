@@ -16,7 +16,7 @@ from harbor.models.trial.result import AgentInfo, ExceptionInfo, TrialResult
 from harbor.models.verifier.result import VerifierResult
 
 from benchmarks.reviewbench import convert
-from loop import rounds
+from loop import rounds, settings, slots
 from test_reviewbench import exported_task
 
 BUILD = 'p' * 40
@@ -73,8 +73,9 @@ def test_summary_scores_each_round_pools_its_trials_and_keeps_every_cases_counts
     write_job(tmp_path / 'jobs/r2', catalog, {'case-a': second, 'case-b': None})
     summary = rounds.summarise(catalog, ['r1', 'r2'])
     assert summary['side'] == BUILD
+    # A catalog from before slots (#81) records no reviewer: it ran Daydream's defaults on Codex.
     assert summary['catalog_identity'] == {'reviewbench_revision': 'r', 'split': 'dev', 'judge': 'j',
-                                           'daydream': {'version': 'v'}}
+                                           'daydream': {'version': 'v'}, 'reviewer': dict(slots.LEGACY_REVIEWER)}
     one, two = summary['rounds']
     # Round 1 pools both cases' counts: 3 of 6 matched are true, 3 of 10 golden covered, 4 of 10 sent valid.
     assert (one['grounded_precision'], one['grounded_recall'], one['grounded_f1']) == pytest.approx((.5, .3, .375))
@@ -104,7 +105,7 @@ def workspace(tmp_path, monkeypatch, pinned_wheel):
     """A repository root with a stand-in ReviewBench exporter whose test set is case-t."""
     monkeypatch.chdir(tmp_path)
     exported = {'full': ['case-a', 'case-b', 'case-t'], 'test': ['case-t']}
-    def export(upstream, destination, split):
+    def export(upstream, destination, split, reviewer, judge):
         for name in exported[split]:
             exported_task(destination / name, name)
             (destination / name / 'tests/task.json').write_text(
@@ -116,6 +117,8 @@ def workspace(tmp_path, monkeypatch, pinned_wheel):
     for name in rounds.LOGINS:
         (tmp_path / name).mkdir()
         monkeypatch.setenv(name, str(tmp_path / name))
+    # The default reviewer's key: only its presence is checked.
+    monkeypatch.setenv('OPENROUTER_API_KEY', 'stand-in')
     (tmp_path / 'cases.txt').write_text('# header\ncase-a\ncase-b\n')
     return tmp_path
 
@@ -210,8 +213,8 @@ def aacr_workspace(workspace, monkeypatch):
                 'source_commit': 'a' * 40, 'target_commit': 'b' * 40,
                 'comments': [{'path': 'main.go', 'note': 'verifier only reference', 'from_line': 1, 'to_line': 1}]}
                for number in (1, 2, 3)]
-    def write_task(record, output, daydream, build_file):
-        assert daydream and build_file is None
+    def write_task(record, output, daydream, build_file, reviewer, judge):
+        assert daydream and build_file is None and reviewer == settings.load()['reviewer']
         task = output / aacr_convert.task_name(record)
         (task / 'tests').mkdir(parents=True)
         (task / 'tests/build.json').write_text(json.dumps({'source_commit': BUILD}))
@@ -245,6 +248,7 @@ def test_aacr_rounds_give_a_summary_of_the_same_shape_from_aacrs_report(aacr_wor
                                   'benchmark': 'aacr'}
     assert summary['catalog_identity'] == {'aacr_revision': rounds.aacr_convert.AACR_REVISION,
                                            'dataset_sha256': rounds.aacr_convert.DATASET_SHA256, 'split': 'dev',
+                                           'judge': 'openai/gpt-6.1-sol', 'reviewer': settings.load()['reviewer'],
                                            'daydream': {'source_commit': BUILD}}
     assert summary['side'] == BUILD
     one, two = summary['rounds']
@@ -276,10 +280,10 @@ def test_aacr_rounds_refuse_a_held_out_case_and_a_failed_conversion_leaves_no_ca
 
     # A case whose commit is gone fails to convert; the catalog it half wrote is removed, so the name runs again.
     write_task = aacr_convert.write_task
-    def unavailable(record, output, daydream, build_file):
+    def unavailable(record, output, daydream, build_file, reviewer, judge):
         if aacr_convert.task_name(record) == 'owner-project-2':
             raise RuntimeError('commit unavailable')
-        return write_task(record, output, daydream, build_file)
+        return write_task(record, output, daydream, build_file, reviewer, judge)
     monkeypatch.setattr(aacr_convert, 'write_task', unavailable)
     cases = aacr_workspace / 'aacr-cases.txt'
     with pytest.raises(ValueError, match=r"failed to convert: \{'owner-project-2': 'RuntimeError: commit unavailable'"
@@ -329,10 +333,16 @@ def test_the_oracle_records_no_build_and_counts_unscored_trials_as_failed(worksp
     write_job(Path('jobs/daydream'), workspace / 'artifacts/loop/oracle/catalog', SCORED)
     with pytest.raises(ValueError, match='An oracle summary records no build'):
         rounds.summarise(workspace / 'artifacts/loop/oracle/catalog', ['daydream'], oracle=True)
-    # The tasks mount both login folders, so the oracle needs the reviewer's too.
+    # The oracle runs no reviewer, so it needs no reviewer key; a Codex reviewer's tasks mount its
+    # login, so the oracle then needs that folder too.
+    monkeypatch.delenv('OPENROUTER_API_KEY')
+    codex = dict(harness='daydream', backend='codex', provider='openai', model='default', effort='default')
+    rounds.check_logins(settings.load()['reviewer'], oracle=True)
+    with pytest.raises(ValueError, match='Set OPENROUTER_API_KEY'):
+        rounds.check_logins(settings.load()['reviewer'])
     monkeypatch.delenv('REVIEWER_CODEX_AUTH_DIR')
     with pytest.raises(ValueError, match='Set REVIEWER_CODEX_AUTH_DIR'):
-        rounds.run('oracle', workspace / 'cases.txt', 1, 'oracle-2')
+        rounds.check_logins(codex, oracle=True)
 
 
 def test_aacr_rounds_check_the_build_before_converting_any_case(aacr_workspace, monkeypatch):

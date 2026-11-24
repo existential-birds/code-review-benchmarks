@@ -3,11 +3,12 @@ import json
 
 import pytest
 
-from loop import decide, settings
+from loop import decide, settings, slots
 from test_loop_rounds import counts
 
 LIMITS = settings.load(sigma=0.02, rounds=3, precision_margin=0.03, wrong_findings_margin=0.2,
                        incomplete_margin=0.5)
+JUDGE = slots.judge_name(LIMITS['judge'])
 # Every case of the baseline: 1 of 2 matched findings true, 1 of 2 reference findings covered, and one
 # unmatched finding judged valid. A winner covers both reference findings with the same findings.
 BASE, WIN = counts(3, 2, 1, 1, 2, 1), counts(3, 2, 1, 1, 2, 2)
@@ -15,7 +16,7 @@ BASE, WIN = counts(3, 2, 1, 1, 2, 1), counts(3, 2, 1, 1, 2, 2)
 HARD = counts(3, 2, 0, 0, 2, 0)
 
 
-def summary(per_case: list, rounds: int = 3, judge: str = 'j', cost: float | None = 2.5, seconds: float = 60,
+def summary(per_case: list, rounds: int = 3, judge: str = JUDGE, cost: float | None = 2.5, seconds: float = 60,
             missing: int = 0) -> dict:
     """A summary over case-0, case-1, ...: each item is a case's counts in every round, or a list per round.
     A null is a trial that left no score (failed, or missing from the job when ``missing`` says so);
@@ -30,7 +31,8 @@ def summary(per_case: list, rounds: int = 3, judge: str = 'j', cost: float | Non
                             evaluated=scored,
                             cost_usd=None if cost is None else cost * scored, cost_trials=scored,
                             elapsed_seconds=seconds * scored))
-    return dict(catalog_identity=dict(reviewbench_revision='r', split='dev', judge=judge, daydream={'version': 'v'}),
+    return dict(catalog_identity=dict(reviewbench_revision='r', split='dev', judge=judge, daydream={'version': 'v'},
+                                      reviewer=LIMITS['reviewer']),
                 side='s' * 40, rounds=entries, cases=cases)
 
 
@@ -145,6 +147,22 @@ def test_summaries_that_cannot_be_compared_are_refused():
         other['catalog_identity'][key] = 'other'
         with pytest.raises(ValueError, match=f'Refusing to compare summaries of different {key}'):
             decide.decide(baseline, other, 'climb', LIMITS)
+    other = summary([WIN] * 10)
+    other['catalog_identity']['reviewer'] = dict(LIMITS['reviewer'], model='deepseek/deepseek-v4-flash-0731')
+    with pytest.raises(ValueError, match='Refusing to compare summaries of different reviewer'):
+        decide.decide(baseline, other, 'climb', LIMITS)
+    # Two summaries from before slots ran Codex alike, but not the configured reviewer, nor its noise.
+    legacy = [summary(per_case) for per_case in ([BASE] * 10, [WIN] * 10)]
+    for side in legacy:
+        del side['catalog_identity']['reviewer']
+    with pytest.raises(ValueError, match=r"The baseline was made under the reviewer slot .*'codex'"):
+        decide.decide(*legacy, 'climb', LIMITS)
+    for side in legacy:
+        side['catalog_identity']['judge'] = 'openai/gpt-6.1-sol'
+    with pytest.raises(ValueError, match=r'The baseline was judged by .* not the configured'):
+        decide.decide(*legacy, 'climb', settings.load(reviewer=dict(slots.LEGACY_REVIEWER), judge=dict(
+            LIMITS['judge'], model='gpt-7'), sigma=.02, rounds=3, precision_margin=.03, wrong_findings_margin=.2,
+            incomplete_margin=.5))
     with pytest.raises(ValueError, match='different review cases'):
         decide.decide(baseline, summary([WIN] * 11), 'climb', LIMITS)
     with pytest.raises(ValueError, match='baseline needs 3 rounds and the candidate at most 3, not 3 and 4'):

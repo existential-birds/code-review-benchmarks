@@ -10,9 +10,10 @@ Like is compared with like. Only the review cases every round of both sides scor
 count, and each side's scores are pooled again per round over those cases alone, from
 the summary's per-case counts. A build can't raise its score by failing on hard cases:
 too few matched cases is ``invalid``, and failed or incomplete reviews are a guard.
-Two summaries of another benchmark revision, split, judge or dataset, or of other cases,
-are refused; the Daydream build differs by design. A held-out summary is refused too:
-held-out rounds belong to ``loop.confirm`` alone.
+Two summaries of another benchmark revision, split, judge, dataset or reviewer slot, or of
+other cases, are refused, and so is a pair made under other reviewer or judge slots than
+those in ``loop/settings.toml`` (#81); the Daydream build differs by design. A held-out
+summary is refused too: held-out rounds belong to ``loop.confirm`` alone.
 
 The gain is the candidate's mean pooled grounded F1 minus the baseline's. The climb
 stage accepts only a gain above ``accept_threshold``; the check stage, above zero.
@@ -45,18 +46,23 @@ import statistics
 import sys
 
 from benchmarks.reviewbench.metric import compute
-from loop import settings
+from loop import settings, slots
 from loop.rounds import METRICS
 
 STAGES = ('climb', 'check')
+
+
+def _identity(summary: dict) -> dict:
+    """A summary's catalog identity, with the reviewer slot a catalog from before slots ran."""
+    return {**summary['catalog_identity'], 'reviewer': slots.recorded_reviewer(summary['catalog_identity'])}
 
 
 def matched_cases(baseline: dict, candidate: dict) -> list[str]:
     """The review cases every round of both sides scored, once the two are known comparable.
 
     Comparable means every part of the catalog identity but the Daydream build: ReviewBench's
-    revision, split and judge, or AACR's revision, dataset and split."""
-    identities = baseline['catalog_identity'], candidate['catalog_identity']
+    revision, split and judge, or AACR's revision, dataset and split, and the reviewer slot."""
+    identities = _identity(baseline), _identity(candidate)
     for key in sorted((identities[0].keys() | identities[1].keys()) - {'daydream'}):
         if identities[0].get(key) != identities[1].get(key):
             raise ValueError(f'Refusing to compare summaries of different {key}: '
@@ -117,6 +123,7 @@ def decide(baseline: dict, candidate: dict, stage: str, limits: settings.Setting
     matched = matched_cases(baseline, candidate)
     if baseline['catalog_identity']['split'] != 'dev':
         raise ValueError('loop.decide compares dev rounds only; held-out rounds belong to loop.confirm')
+    slots.check_measured(baseline['catalog_identity'], limits['reviewer'], limits['judge'], 'The baseline')
     done = len(candidate['rounds'])
     if len(baseline['rounds']) != planned or done > planned:
         raise ValueError(f'The baseline needs {planned} rounds and the candidate at most {planned}, '
