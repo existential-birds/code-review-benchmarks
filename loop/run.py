@@ -20,7 +20,7 @@ gap beyond the noise between its baseline and the last merged winner's dev score
 
 Repeat: before each iteration, the stop rules below; every ``canary_every`` iterations,
 the canary again; then one iteration with ``loop.iterate``, and ``loop.prune`` between
-iterations once it exists (#56). After ``accepted-on-dev``, ``loop.confirm`` runs as a
+iterations. After ``accepted-on-dev``, ``loop.confirm`` runs as a
 separate process against the run's baseline, and the loop reads only its word, from its
 ``verdict.json``, into a confirmation entry: ``confirmed`` is a winner, which ``loop.land``
 lands: its draft pull request opens when ``auto_open_pr`` is on, and otherwise its branch
@@ -154,15 +154,17 @@ def confirm(baseline: str, candidate: str, loaded: settings.Settings) -> tuple[s
 def prune(run: str, loaded: settings.Settings) -> dict | None:
     """``loop.prune`` between iterations: ``prune(run, loaded, between_iterations=True)``. A failed prune is
     reported and the run goes on."""
+    pruning = importlib.import_module('loop.prune')
     try:
-        pruning = importlib.import_module('loop.prune')
-    except ImportError:
-        return None
-    try:
-        return pruning.prune(run, loaded, between_iterations=True, root=ROOT)
+        result = pruning.prune(run, loaded, between_iterations=True, root=ROOT)
     except (OSError, RuntimeError, ValueError) as error:
         print(f'loop.prune failed, and the run goes on: {error}', file=sys.stderr)
         return None
+    for item in result.get('items', []):
+        if 'error' in item:
+            print(f"loop.prune could not remove {item.get('path') or item.get('image')}: {item['error']}",
+                  file=sys.stderr)
+    return result
 
 
 def land(run: str, n: int, loaded: settings.Settings) -> dict | None:
@@ -406,7 +408,6 @@ def drive(run: str, loaded: settings.Settings, state: dict, resumed: bool) -> tu
             if result['verdict'] == 'drifted':
                 raise Stop('judge-drift', f'The canary {result["job"]} moved {", ".join(result["moved"])}')
         entry = iterate(run, loaded)
-        prune(run, loaded)
         n = entry['iteration']
         print(f'#{n} {entry["verdict"]["verdict"]}: {"; ".join(entry["verdict"]["reasons"])}', file=sys.stderr)
         if entry['verdict']['verdict'] == 'invalid' and limited(
@@ -415,6 +416,8 @@ def drive(run: str, loaded: settings.Settings, state: dict, resumed: bool) -> tu
             _wait(state, loaded, f'#{n}')
         else:
             state['waited'] = False
+        # After the limit check, which reads the iteration's trial logs that pruning may remove.
+        prune(run, loaded)
 
 
 def finish(run: str, loaded: settings.Settings, resumed: bool) -> int:
