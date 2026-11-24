@@ -16,10 +16,10 @@ Nothing here ranks the sides or adds a score.
 from __future__ import annotations
 
 import argparse
-from collections import Counter
 import json
 from pathlib import Path
 
+from benchmarks.daydream import rounds as shared
 from benchmarks.reviewbench.upstream.metric import compute_rounds, ratios, read_counts
 
 # The review cases each scored block covers; the report repeats this beside their names.
@@ -30,53 +30,14 @@ BLOCKS = {
 }
 
 
-def read_trial(trial: Path) -> dict:
-    """One trial's outcome: Harbor's result and reward, and the review's own record."""
-    result = json.loads((trial / 'result.json').read_text())
-    try:
-        execution = json.loads((trial / 'agent/execution.json').read_text())
-    except (OSError, ValueError):
-        # A trial that left no record never reached the review.
-        execution = {}
-    exception = (result.get('exception_info') or {}).get('exception_type')
-    # ReviewBench's own rule for a failed trial (``rb_failed`` in its reviewbench_plugin.py), which
-    # is not scored whatever reward it left: it raised, never finished, was verified outside a
-    # separate environment, or a step failed.
-    failed = (exception or not result.get('finished_at') or result.get('verifier_environment_mode') != 'separate'
-              or any(step.get('exception_info') for step in result.get('step_results') or []))
-    reward = None if failed else (result.get('verifier_result') or {}).get('rewards')
-    return dict(
-        task=Path(result['task_id']['path']).name, trial=result['trial_name'],
-        status=execution.get('status', 'failed'), exception=exception, reward=reward,
-        ratios=None if reward is None else ratios(read_counts(reward)['overall']),
-        omitted_findings=execution.get('omitted_findings', 0), elapsed_seconds=execution.get('elapsed_seconds'),
-        usage=execution.get('usage') or {},
-        side=execution['build'].get('source_commit') if execution.get('build') else None)
+def trial_ratios(reward: dict) -> dict:
+    """A scored trial's ratios, from ReviewBench's overall counts."""
+    return ratios(read_counts(reward)['overall'])
 
 
 def read_round(job: Path, expected: dict[str, dict]) -> dict:
-    """One job as a round: its trials and their counts, and Harbor's own totals as it wrote them."""
-    stats = json.loads((job / 'result.json').read_text())['stats']
-    trials = sorted((read_trial(path.parent) for path in job.glob('*/result.json')), key=lambda trial: trial['task'])
-    tasks = [trial['task'] for trial in trials]
-    if len(set(tasks)) != len(tasks) or not set(tasks) <= set(expected):
-        raise ValueError(f'{job} is not one pass (-k 1) over the catalog')
-    status = Counter(trial['status'] for trial in trials)
-    costs = [trial['usage']['cost_usd'] for trial in trials if 'cost_usd' in trial['usage']]
-    return dict(
-        job=job.name, expected=len(expected), missing=len(expected) - len(trials), produced=status['complete'],
-        completed_empty=status['completed_empty'], incomplete=status['incomplete'],
-        failed=len(trials) - status['complete'] - status['completed_empty'] - status['incomplete'],
-        evaluated=sum(trial['reward'] is not None for trial in trials),
-        conversion_limited=sum(trial['omitted_findings'] > 0 for trial in trials),
-        omitted_findings=sum(trial['omitted_findings'] for trial in trials),
-        elapsed_seconds=sum(trial['elapsed_seconds'] or 0 for trial in trials),
-        # An API-equivalent estimate, not a charge, summed over the trials that reported one.
-        cost_usd=sum(costs) if costs else None, cost_trials=len(costs),
-        harbor={**{key: stats[key] for key in ('n_completed_trials', 'n_errored_trials', 'n_cancelled_trials',
-                                               'n_input_tokens', 'n_cache_tokens', 'n_output_tokens')},
-                'metrics': [metric for group in stats['evals'].values() for metric in group['metrics']]},
-        trials=trials)
+    """One job as a round, read as every benchmark's round report reads it."""
+    return shared.read_round(job, expected, trial_ratios)
 
 
 def score(rounds: list[dict], expected: dict[str, dict], tasks: set[str]) -> dict:
@@ -95,30 +56,11 @@ def read_catalog(catalog: Path) -> tuple[dict, dict[str, dict]]:
     return listing, {name: json.loads((catalog / name / 'tests/task.json').read_text()) for name in listing['tasks']}
 
 
-def builds(entries: list[dict]) -> set:
-    """The Daydream builds a side's trials recorded. A trial without a review record names none:
-    it may fail in any side, but a scored one adds None, which no side may hold."""
-    return {trial['side'] for entry in entries for trial in entry['trials']
-            if trial['side'] is not None or trial['reward'] is not None}
-
-
 def report(catalog: Path, sides: list[list[Path]]) -> dict:
     """Every side's rounds, and ReviewBench's round metric for each block of review cases."""
     listing, expected = read_catalog(catalog)
-    paths = [job.resolve() for jobs in sides for job in jobs]
-    if len(set(paths)) != len(paths):
-        raise ValueError('A job is one round of one side, but one is listed more than once')
-    rounds = {}
-    for jobs in sides:
-        entries = [read_round(job, expected) for job in jobs]
-        identity = builds(entries)
-        if len(identity) != 1 or None in identity or identity & rounds.keys():
-            raise ValueError(f'Each side needs one Daydream build of its own, not {sorted(map(str, identity))}')
-        rounds[identity.pop()] = entries
-    jobs = [entry['trials'] for entries in rounds.values() for entry in entries]
-    matched = set(expected).intersection(*({trial['task'] for trial in job if trial['reward'] is not None}
-                                           for job in jobs))
-    tasks = {'all': set(expected), 'matched': matched}
+    rounds = shared.read_sides(sides, expected, trial_ratios)
+    tasks = {'all': set(expected), 'matched': shared.matched(rounds, expected)}
     return dict(
         catalog={key: listing[key] for key in ('reviewbench_revision', 'split', 'judge')},
         blocks={name: dict(meaning=meaning, tasks=sorted(tasks[name])) for name, meaning in BLOCKS.items()},
