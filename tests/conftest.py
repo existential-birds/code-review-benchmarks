@@ -1,15 +1,16 @@
 """Tests never run Git through PATH. A ``git`` that always fails comes first on PATH,
 so any call that slips past the fakes in ``fake_git.py`` fails the test instead of
-reaching the real Git and the operator's configuration. The exception is the ``git``
-fixture, for the guard's and the proposer step's tests, whose checks depend on what
-Git itself reports: it calls the real binary by absolute path with the operator's
-configuration shut out."""
+reaching the real Git and the operator's configuration. The exceptions are checks that
+depend on what Git itself reports: the ``git`` fixture, for the guard's and the proposer
+step's tests, calls the real binary by absolute path with the operator's configuration
+shut out, and ``real_git`` hands the binary to the frozen-comparison test, which runs
+Daydream's own Git reads on a real checkout."""
 import os
 import subprocess
 
 import pytest
 
-from real_git import real_git
+from real_git import real_git as find_real_git
 
 
 @pytest.fixture(autouse=True, scope='session')
@@ -25,12 +26,18 @@ def no_real_git(tmp_path_factory):
 
 
 @pytest.fixture
+def real_git():
+    """The installed Git binary, past the failing one."""
+    return find_real_git()
+
+
+@pytest.fixture
 def git(tmp_path, monkeypatch):
     """The real Git, for the loop's own Git calls too, with a temporary HOME, no system or
     global configuration, no other GIT_ variables, and a fixed author and committer.
     Returns a function running it in a repository."""
     from loop import guard
-    binary = real_git()
+    binary = find_real_git()
     for name in [name for name in os.environ if name.startswith('GIT_')]:
         monkeypatch.delenv(name)
     (tmp_path / 'home').mkdir()

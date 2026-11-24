@@ -3,7 +3,7 @@
 Pi coordinates refreshes through an ``auth.json.lock`` directory beside
 ``auth.json``, which only works when every process shares that folder. So the
 host refreshes under Pi's own lock, and the judge's container gets a copy that
-holds only the ``openai-codex`` access token, with enough validity left that it
+holds only the ``openai`` access token (Pi's ChatGPT subscription login), with enough validity left that it
 never refreshes. The copy has no refresh token: a refresh there would rotate the
 token without saving the new one to the host, which would end the host login, so
 it fails instead.
@@ -21,13 +21,18 @@ import time
 from harbor.verifier.verifier import Verifier
 
 PACKAGE = Path(__file__).resolve().parent
-PROVIDER = 'openai-codex'
+# Pi's ChatGPT subscription login, which sends its token straight to api.openai.com.
+# It replaced the deprecated openai-codex login; the model is the same.
+PROVIDER = 'openai'
 MODEL = 'gpt-6.1-sol'
 JUDGE_AUTH_DIR = '/run/judge-pi'
 # Above AACR's 300-second verifier timeout plus Pi's 5-minute refresh threshold,
 # with room for a --verifier-timeout-multiplier up to about 4. Benchmarks with a
 # longer verifier timeout raise it in their experiment configuration.
 DEFAULT_MIN_VALIDITY_SEC = 30 * 60
+# The ChatGPT login's tokens last about 57 minutes and Pi stores them with 3 minutes'
+# margin, so a fresh one has about 54 left; the cap keeps a few minutes in hand.
+MAX_VALIDITY_SEC = 50 * 60
 
 
 class JudgeLoginError(RuntimeError):
@@ -53,7 +58,7 @@ async def refresh_host_login(auth_path: Path, min_validity_ms: int) -> None:
 
 
 def read_login(auth_path: Path):
-    """Read the openai-codex entry, waiting out another process's in-place rewrite."""
+    """Read the openai entry, waiting out another process's in-place rewrite."""
     deadline = time.monotonic() + 1
     while True:
         try:
@@ -73,6 +78,11 @@ class PiJudgeVerifier(Verifier):
         self.min_judge_validity_sec = int(min_judge_validity_sec)
         if self.min_judge_validity_sec <= 0:
             raise ValueError('min_judge_validity_sec must be a positive number of seconds')
+        if self.min_judge_validity_sec > MAX_VALIDITY_SEC:
+            # Near or past a fresh token's life, every verification would refresh, and could
+            # still get a token too short to use.
+            raise ValueError(f'min_judge_validity_sec can be at most {MAX_VALIDITY_SEC}: '
+                             'the ChatGPT login\'s tokens last about an hour')
 
     async def upload_judge_login(self) -> None:
         directory = os.environ.get('JUDGE_PI_AUTH_DIR')
@@ -87,10 +97,10 @@ class PiJudgeVerifier(Verifier):
         await refresh_host_login(auth_path, min_validity_ms)
         credential = read_login(auth_path)
         if (not isinstance(credential, dict) or credential.get('type') != 'oauth'
-                or type(credential.get('expires')) not in (int, float)):
-            raise JudgeLoginError('Pi has no openai-codex subscription login')
+                or type(credential.get('expires')) not in (int, float) or not isinstance(credential.get('access'), str)):
+            raise JudgeLoginError('Pi has no openai (ChatGPT subscription) login; run /login in pi')
         if credential['expires'] - time.time() * 1000 < min_validity_ms:
-            raise JudgeLoginError('Pi openai-codex login has too little validity left to score')
+            raise JudgeLoginError('Pi openai login has too little validity left to score')
         # No -p: the folder already existing means a task generated before the
         # mount was removed still mounts the host login there, and the upload
         # would overwrite it.

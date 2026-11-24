@@ -30,9 +30,9 @@ class PiJudgeClientTests(unittest.IsolatedAsyncioTestCase):
             "ok": True,
             "text": text,
             "metadata": {
-                "provider": "openai-codex", "model": "gpt-6.1-sol",
-                "subscription": True, "sdk_version": "1.5.0",
-                "pi_ai_version": "1.5.0", "stop_reason": "stop",
+                "provider": "openai", "model": "gpt-6.1-sol",
+                "subscription": True, "sdk_version": "1.6.0",
+                "pi_ai_version": "1.6.0", "stop_reason": "stop",
                 "usage": {"input": 20, "output": 5},
             },
         }

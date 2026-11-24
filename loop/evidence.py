@@ -33,6 +33,7 @@ import argparse
 from collections import Counter
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import sys
@@ -42,6 +43,7 @@ from benchmarks.daydream.entrypoint import _line
 from benchmarks.reviewbench import report
 from loop import rounds, sets
 
+RUN_ID = re.compile(r'[A-Za-z0-9._-]+')
 RUN_SCHEMA = 'daydream.run.v5'
 # The trace-analysis skill refuses label text longer than this (cohort.py's MAX_LABEL_TEXT).
 MAX_LABEL_TEXT = 2000
@@ -93,9 +95,16 @@ def _record(trial: Path) -> tuple[Path, str, set[str]] | None:
     if record.get('schema_version') != RUN_SCHEMA:
         raise ValueError(f'{trial}: its run record is not {RUN_SCHEMA}; the trace-analysis skill reads only '
                          'records of Daydream 0.37.0 or later')
+    run_id = record['run_id']
+    # The run record is written inside the reviewer's sandbox: its run_id names one folder, never a path.
+    if not isinstance(run_id, str) or not RUN_ID.fullmatch(run_id) or run_id in ('.', '..'):
+        raise ValueError(f'{trial}: refusing a run_id that is not a plain folder name: {run_id!r}')
     findings = record.get('findings') or {}
-    items = (findings.get('value') or {}).get('items') or [] if findings.get('status') == 'available' else []
-    return path, record['run_id'], {item.get('item_uid') for item in items}
+    if findings.get('status') != 'available':
+        # Withheld, failed or unavailable: the skill would refuse any label for this run, so it gets none.
+        return path, run_id, None
+    items = (findings.get('value') or {}).get('items') or []
+    return path, run_id, {item.get('item_uid') for item in items}
 
 
 def _rulings(trial: Path, execution: dict, uids: set[str] | None) -> list[tuple[dict, str]]:
@@ -123,6 +132,10 @@ def _trial(trial: Path, outcome: dict, number: int, golden: list[dict], source: 
     found = _record(trial)
     run_id = found[1] if found else None
     deep = trial / 'agent/daydream/runs' / str(run_id) / 'deep'
+    for path in ([found[0], deep] if found else []):
+        # A linked folder could point at another trial's evidence, held out or check-set.
+        if not path.resolve().is_relative_to(trial.resolve()):
+            raise ValueError(f'{trial}: refusing evidence from outside the trial: {path}')
     summary = _json(deep / 'review-summary.json') if found and (deep / 'review-summary.json').is_file() else None
     terminal = execution.get('terminal_result') or {}
     entry = dict(round=number, run_id=run_id, status=outcome['status'], scored=outcome['reward'] is not None,
@@ -135,7 +148,7 @@ def _trial(trial: Path, outcome: dict, number: int, golden: list[dict], source: 
     entry['missed'] = [index for index, reference in enumerate(golden)
                        if entry['scored'] and reference['tp_fp'] == 'tp' and index not in covered]
     labels = []
-    if run_id is not None:
+    if found and found[2] is not None:
         labels = [dict(run_id=run_id, item_uid=uid, label=LABELS[finding['status']], source=source)
                   for finding, uid in entry['rulings']]
         issues = {_issue(golden[index]['message']) for index in entry['missed']} - {''}
@@ -258,10 +271,17 @@ def _set_mode(folder: Path, files: int, folders: int) -> None:
 def build(summary_path: Path, out: Path) -> dict:
     """Write the pack to ``out``, which must not exist, and return its index."""
     out = Path(out).absolute()
-    if out.exists():
-        raise FileExistsError(f'Refusing to replace {out}')
-    index, cases, labels, copies = collect(summary_path)
     out.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        # Claimed now, so nothing made after this check is replaced; the finished pack replaces it.
+        out.mkdir()
+    except FileExistsError:
+        raise FileExistsError(f'Refusing to replace {out}') from None
+    try:
+        index, cases, labels, copies = collect(summary_path)
+    except BaseException:
+        out.rmdir()
+        raise
     staged = Path(tempfile.mkdtemp(prefix='.evidence-', dir=out.parent))
     try:
         (staged / 'README.md').write_text(README)
@@ -279,6 +299,8 @@ def build(summary_path: Path, out: Path) -> dict:
     except BaseException:
         _set_mode(staged, 0o644, 0o755)
         shutil.rmtree(staged)
+        if out.is_dir() and not any(out.iterdir()):
+            out.rmdir()
         raise
     return index
 
@@ -290,8 +312,9 @@ def main(argv: list[str] | None = None) -> int:
     arguments = parser.parse_args(argv)
     try:
         index = build(arguments.summary, arguments.out)
-    except (ValueError, FileExistsError) as error:
-        print(error, file=sys.stderr)
+    except (ValueError, OSError, KeyError) as error:
+        # A refused or unreadable trial; nothing was written.
+        print(f'{type(error).__name__}: {error}', file=sys.stderr)
         return 1
     print(json.dumps(index['totals'], indent=2))
     return 0
