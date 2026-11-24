@@ -127,9 +127,10 @@ def reviewer_image(build_file: Path | None = None, *, entrypoint: bool = True) -
         '-r /opt/reviewer-runtime.lock\n'
         f'RUN uv pip install --no-cache --no-deps --python /opt/daydream/bin/python /opt/{wheel.name} '
         '&& uv pip check --python /opt/daydream/bin/python\n'
-        # Pi's find tool runs fd (Debian's fdfind) and, offline, never downloads it; grep uses
-        # the ripgrep both task images already install.
-        'RUN apt-get update && apt-get install -y --no-install-recommends fd-find && rm -rf /var/lib/apt/lists/*\n'
+        # Pi's find and grep tools run fd (Debian's fdfind) and ripgrep and, offline, never download
+        # them. Installed here, since AACR's verifier image takes these lines too and has neither.
+        'RUN apt-get update && apt-get install -y --no-install-recommends fd-find ripgrep '
+        '&& rm -rf /var/lib/apt/lists/*\n'
         # Both reviewer backends' CLIs, so one image serves either reviewer slot.
         f'RUN npm install --global --ignore-scripts @openai/codex@{identity["codex_cli"]} '
         f'@earendil-works/pi-coding-agent@{identity["pi_cli"]}\n'

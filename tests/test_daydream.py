@@ -446,6 +446,13 @@ def test_a_pi_review_without_its_key_never_starts(review_case, monkeypatch):
     assert run_case(case) == 1
     record = json.loads((case.artifacts / 'daydream/execution.json').read_text())
     assert any('needs OPENROUTER_API_KEY' in line for line in record['diagnostics'])
+    (case.artifacts / 'daydream/execution.json').unlink()
+    (case.inputs / 'case.json').write_text(json.dumps({'format': 'aacr', 'repository': str(case.repo),
+        'findings': str(case.artifacts / 'findings.json'), 'reviewer': PI, 'reviewer_credential': None}))
+    monkeypatch.setenv('OPENROUTER_API_KEY', 'synthetic-openrouter-key')
+    assert run_case(case) == 1
+    record = json.loads((case.artifacts / 'daydream/execution.json').read_text())
+    assert any('names no key variable for the Pi reviewer' in line for line in record['diagnostics'])
 
 
 @pytest.mark.parametrize('mismatch', ['stale', 'head', 'patch', 'request'])

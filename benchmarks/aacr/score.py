@@ -133,7 +133,7 @@ class _VerdictGuard:
 
 async def score_case(instance_path: Path, findings_path: Path, output_dir: Path, *, client=None,
                      daydream_proof: Path | None = None, comparison_path: Path | None = None,
-                     host_receipt_path: Path | None = None, judge_slot: dict | None = None) -> dict:
+                     host_receipt_path: Path | None = None, judge_slot: dict | Path | None = None) -> dict:
     """Grade exactly one completed review, publishing rewards only on success."""
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -143,6 +143,13 @@ async def score_case(instance_path: Path, findings_path: Path, output_dir: Path,
     _write_json(output_dir / 'diagnostic.json', diagnostic)
     guard = None
     try:
+        if isinstance(judge_slot, Path):
+            diagnostic['stage'] = 'judge_slot'
+            try:
+                judge_slot = json.loads(judge_slot.read_text())
+            except (OSError, ValueError) as error:
+                raise VerificationError(f'Unreadable judge slot: {type(error).__name__}') from None
+            diagnostic['stage'] = 'inputs'
         instances = schema.load_instances(instance_path)
         if len(instances) != 1:
             raise VerificationError('Exactly one review case is required')
@@ -219,7 +226,7 @@ def main() -> int:
         asyncio.run(score_case(args.instance, args.findings, args.output,
                     daydream_proof=args.daydream_proof, comparison_path=args.comparison,
                     host_receipt_path=args.host_receipt,
-                    judge_slot=json.loads(args.judge.read_text()) if args.judge else None))
+                    judge_slot=args.judge))
     except VerificationError:
         print('AACR verification failed; inspect verifier/diagnostic.json and judge evidence.')
         return 1

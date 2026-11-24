@@ -64,6 +64,9 @@ def test_daydream_task_freezes_runtime_comparison_and_keeps_oracle_separate(tmp_
     # Only the reviewer image gets the entrypoint; the verifier installs the whole suite itself.
     assert (task / 'environment/daydream-suite/benchmarks/daydream/entrypoint.py').is_file()
     assert 'daydream-suite' not in (task / 'tests/Dockerfile').read_text()
+    # The verifier image takes the reviewer's shared lines, which check ripgrep and fd: it installs both.
+    verifier = (task / 'tests/Dockerfile').read_text()
+    assert 'fd-find ripgrep' in verifier and verifier.index('fd-find ripgrep') < verifier.index('rg --version')
 
 
 def test_a_pi_reviewer_task_mounts_no_codex_login(tmp_path, monkeypatch, pinned_wheel):

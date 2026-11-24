@@ -572,3 +572,18 @@ def test_verifier_trusts_host_receipt_over_forged_sandbox_logs(tmp_path, monkeyp
         assert set(environment.judge_login) == {'openai'}
         assert result.rewards['balanced_score'] == (0.667 if findings else 0.0)
         assert trial.reward_json_path.is_file()
+
+
+@pytest.mark.parametrize('written', [None, '{not json'])
+def test_an_unreadable_judge_slot_fails_through_the_diagnostic_before_judging(tmp_path, written):
+    paths = fixture(tmp_path, [finding()])
+    slot = tmp_path / 'judge.json'
+    if written is not None:
+        slot.write_text(written)
+    client = JudgeTransport()
+    with pytest.raises(score.VerificationError):
+        asyncio.run(score.score_case(*paths, client=client, judge_slot=slot))
+    assert not client.requests
+    diagnostic = json.loads((paths[2] / 'diagnostic.json').read_text())
+    assert diagnostic['status'] == 'failed' and diagnostic['stage'] == 'judge_slot'
+    assert not (paths[2] / 'reward.json').exists()
