@@ -316,6 +316,11 @@ def _rounds(benchmark, request, rounds, name, path, catalog, concurrency, upstre
         state = json.loads(path.read_text())
         if state['request'] != request:
             raise ValueError(f'{name} already scored {state["request"]}; choose a new name')
+        # Its catalog keeps the reviewer slot it was made with; the logins checked are the configured slot's.
+        made = slots.recorded_reviewer(json.loads((catalog / 'catalog.json').read_text()))
+        if request['build'] != 'oracle' and made != settings.load()['reviewer']:
+            raise ValueError(f'{name} was scored under the reviewer slot {made}, not the configured one; '
+                             'choose a new name')
     else:
         # The converter refuses any case outside the split asked for.
         _generate(bench, upstream, catalog, request, split)

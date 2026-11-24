@@ -7,7 +7,8 @@ export const PROVIDER = 'openai';
 export const MODEL = 'gpt-6.1-sol';
 // The judge slot (#81) a task asks for; without one, the judge every catalog used before slots.
 export const DEFAULT_JUDGE = { harness: 'pi', provider: PROVIDER, model: MODEL, effort: 'default' };
-const EFFORTS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
+// What the openai-responses API takes as reasoningEffort; it has no 'off'.
+const EFFORTS = ['minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
 const SDK_VERSION = '1.6.0';
 
 export function judgeSlot(value = DEFAULT_JUDGE) {

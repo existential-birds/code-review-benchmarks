@@ -2,7 +2,7 @@ import math
 
 import pytest
 
-from loop import noise, sets, settings
+from loop import noise, sets, settings, slots
 
 
 def counts(matched, matched_tp, covered, golden=10, unmatched_tp=0, unmatched_fp=0):
@@ -55,6 +55,8 @@ def test_settings_follow_from_the_rounds_spread_and_the_target_gain():
     assert derived['rounds'] == 1 and derived['climb_set_size'] == 25
     assert derived['accept_threshold']['2'] == pytest.approx(loaded['accept_z'] * derived['sigma'])
     assert result['judge']['cases_scored_differently'] == [names[0]]
+    # A summary from before slots names no reviewer: it measured Daydream's defaults on Codex.
+    assert result['measured'] == {'reviewer': dict(slots.LEGACY_REVIEWER), 'judge': 'j'}
     assert result['canary']['cases'] == names[:3] and result['canary']['judge'] == 'j'
     assert result['canary']['reference'][names[0]]['golden_covered_count'] == pytest.approx(9.8)
     # The first case moved by 1 in one round: 0.8 from its mean, times accept_z.
