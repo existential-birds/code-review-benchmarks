@@ -38,7 +38,8 @@ def loop(tmp_path, monkeypatch):
     monkeypatch.setattr(looprun, 'ROOT', tmp_path)
     monkeypatch.setattr(looprun, 'LOCK', tmp_path / 'loop.lock')
     derived = tmp_path / 'settings.toml'
-    derived.write_text(settings.FILE.read_text() + ''.join(f'{key} = {value}\n' for key, value in DERIVED.items()))
+    derived.write_text(settings.FILE.read_text().split('[derived]')[0] + '[derived]\n'
+                       + ''.join(f'{key} = {value}\n' for key, value in DERIVED.items()))
     monkeypatch.setattr(settings, 'load', partial(settings.load, derived))
     done = SimpleNamespace(iterations=[], confirms=[], canaries=[], canary_names=[], sleeps=[], prereqs=0,
                            confirmed=[], landed=[], root=tmp_path, clock=None,
@@ -327,8 +328,10 @@ def test_what_keeps_a_run_from_starting_or_resuming(loop, monkeypatch, capsys):
     monkeypatch.setattr(looprun, 'repository', dirty)
     assert loop.run('--run', 'run-b') == 2
     assert 'Commit or remove these changes first' in capsys.readouterr().err
-    # Before the noise measurement, the derived settings are unset.
-    monkeypatch.setattr(settings, 'load', partial(settings.load.func, settings.FILE))
+    # Without the noise measurement's derived settings, no run starts.
+    unmeasured = loop.root / 'unmeasured.toml'
+    unmeasured.write_text(settings.FILE.read_text().split('[derived]')[0] + '[derived]\n')
+    monkeypatch.setattr(settings, 'load', partial(settings.load.func, unmeasured))
     assert loop.run('--run', 'run-b') == 2
     assert 'unset until the noise measurement derives it' in capsys.readouterr().err
     assert not (loop.root / 'loop-runs/run-b').exists()
