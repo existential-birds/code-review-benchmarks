@@ -6,7 +6,7 @@
 climb_benchmark = "reviewbench"
 # Rests on matches with reference findings, not on the judge's opinion of unmatched ones.
 primary_metric = "grounded_f1"
-# Provisional until #45: twice the test set, whose complete rounds varied by about 0.01.
+# #45 measured noise on these 50: 25 would need a gain of 0.037 to show at five rounds, 50 one of 0.0205.
 climb_set_size = 50
 # The same size as the climb set, so the same noise figures apply; change the two together.
 check_set_size = 50
@@ -29,14 +29,15 @@ max_diff_lines = 500
 gate_timeout_seconds = 300
 # The documented -n; recorded runs used 2 or 3.
 concurrency = 2
-# A full iteration with its check-set rounds, at the provisional sizes.
-iteration_max_wall_hours = 24
+# A full iteration: five climb and five check rounds of 50, at the 2 to 4 hours and about $126 a round
+# that #45 measured.
+iteration_max_wall_hours = 40
 # The same, with headroom.
-iteration_max_cost_usd_equiv = 1000
+iteration_max_cost_usd_equiv = 1500
 # One run is a few days, short enough to review.
 run_max_iterations = 10
-# About ten climb-only iterations.
-run_max_cost_usd_equiv = 4000
+# About ten climb-only iterations of five rounds.
+run_max_cost_usd_equiv = 6500
 # Five days.
 run_max_wall_hours = 120
 # Half a run without a kept change.
@@ -71,8 +72,18 @@ aacr_in_climb = false
 # The Codex login is already required; non-interactive, writes only to the worktree, no network.
 proposer_command = ["codex", "exec", "--sandbox", "workspace-write"]
 
-# Derived from the noise measurement in #45, and unset until it lands:
-# sigma (upper-bound SD of pooled grounded F1 between rounds), rounds, and the guard
-# margins precision_margin, wrong_findings_margin and incomplete_margin.
-# accept_threshold(R) = accept_z * sigma * sqrt(2 / R) follows from sigma.
+# Derived by the noise measurement of #45 (docs/loop-noise.md, loop/noise.json): five rounds of
+# Daydream 0.37.0 on the 50 climb cases. accept_threshold(R) = accept_z * sigma * sqrt(2 / R)
+# follows from sigma. Even at rounds_max the threshold, 0.0205, sits just above target_gain:
+# the loop detects a grounded F1 gain of 0.0205 or more, and the 25-case set reaches only 0.037.
 [derived]
+# The one-sided 80% upper bound of the SD of pooled grounded F1 between rounds.
+sigma = 0.01620729443009426
+# No R up to rounds_max reaches target_gain, so the most the loop allows.
+rounds = 5
+# accept_z times the upper-bound SD of a difference of two 5-round means, for the wider of the
+# two pooled precisions; for unmatched findings judged wrong per scored case; and for unfinished
+# reviews per round. The last two held almost still, so they take Poisson's spread instead.
+precision_margin = 0.024083429458845364
+wrong_findings_margin = 0.026352313834736494
+incomplete_margin = 1.788854381999832

@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pytest
@@ -55,8 +56,10 @@ def test_loader_rejects_unknown_missing_and_mistyped_settings(tmp_path):
             settings.load(path, **overrides)
 
 
-def test_derived_values_are_refused_until_measured():
-    loaded = settings.load()
+def test_derived_values_are_refused_until_measured(tmp_path):
+    unmeasured = tmp_path / 'settings.toml'
+    unmeasured.write_text(settings.FILE.read_text().split('[derived]')[0] + '[derived]\n')
+    loaded = settings.load(unmeasured)
     for name in settings.DERIVED:
         with pytest.raises(LookupError, match=f'{name} is unset .*/issues/45'):
             loaded[name]
@@ -66,3 +69,12 @@ def test_derived_values_are_refused_until_measured():
     measured = settings.load(sigma=0.01, rounds=2)
     assert measured.accept_threshold() == measured['accept_threshold'] == pytest.approx(0.02)
     assert measured.accept_threshold(8) == pytest.approx(0.01)
+
+
+def test_the_committed_derived_values_are_the_noise_measurements():
+    derived = json.loads((ROOT / 'loop/noise.json').read_text())['derived']
+    loaded = settings.load()
+    for name in settings.DERIVED:
+        assert loaded[name] == derived[name]
+    for rounds, threshold in derived['accept_threshold'].items():
+        assert loaded.accept_threshold(int(rounds)) == pytest.approx(threshold)
