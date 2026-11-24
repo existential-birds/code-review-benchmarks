@@ -143,7 +143,7 @@ def test_rerun_skips_finished_rounds_and_never_reopens_an_unfinished_or_failed_j
     def harbor(command, check):
         job, catalog = command[command.index('--job-name') + 1], Path(command[command.index('-p') + 1])
         calls.append(job)
-        assert command[command.index('-k') + 1] == '1' and command[command.index('-r') + 1] == '1'
+        assert command[command.index('-k') + 1] == '1' and command[command.index('-r') + 1] == '0'
         outcome = outcomes.pop(0)
         rewards = {'case-a': None, 'case-b': None} if outcome == 'fail' else SCORED
         write_job(Path('jobs') / job, catalog, rewards, finished=outcome in ('finish', 'fail', 'finish-then-crash'))
@@ -307,7 +307,7 @@ def test_a_reviewbench_summary_from_before_aacr_rounds_still_resumes(workspace, 
     first = rounds.run('pinned', workspace / 'cases.txt', 1, 'noise', concurrency=2)
     assert first['request'] == {'build': 'pinned', 'cases': ['case-a', 'case-b']}
     assert calls[0][1:] == ['run', '-c', 'experiments/reviewbench.yaml', '-p', 'artifacts/loop/noise/catalog',
-                            '-k', '1', '-r', '1', '-n', '2', '--job-name', 'noise-round-1-attempt-1']
+                            '-k', '1', '-r', '0', '-n', '2', '--job-name', 'noise-round-1-attempt-1']
     resumed = rounds.run('pinned', workspace / 'cases.txt', 2, 'noise', concurrency=2)
     assert len(calls) == 2 and [entry['round'] for entry in resumed['rounds']] == [1, 2]
 
