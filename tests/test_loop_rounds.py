@@ -353,3 +353,14 @@ def test_aacr_rounds_check_the_build_before_converting_any_case(aacr_workspace, 
     monkeypatch.setattr(aacr_convert, 'write_task', lambda *arguments: pytest.fail('converted before the check'))
     with pytest.raises(FileNotFoundError, match='make setup'):
         rounds.run('pinned', aacr_workspace / 'aacr-cases.txt', 1, 'unbuilt', benchmark='aacr')
+
+
+def test_a_name_scored_under_another_reviewer_slot_is_not_resumed(workspace, monkeypatch):
+    monkeypatch.setattr(rounds, 'subprocess', SimpleNamespace(run=lambda command, check: None))
+    with pytest.raises(RuntimeError, match='Round 1 abandoned'):
+        rounds.run('pinned', workspace / 'cases.txt', 1, 'switched', upstream=workspace)
+    codex = dict(slots.LEGACY_REVIEWER)
+    real_load = settings.load
+    monkeypatch.setattr(settings, 'load', lambda *args, **kwargs: real_load(*args, **{'reviewer': codex, **kwargs}))
+    with pytest.raises(ValueError, match="switched was scored under the reviewer slot .*'pi'.* choose a new name"):
+        rounds.run('pinned', workspace / 'cases.txt', 1, 'switched', upstream=workspace)

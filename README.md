@@ -48,8 +48,8 @@ case and runs it: Daydream reviews the pull request in a container, the judge sc
 its findings, and Harbor prints the scores. `make view` opens the viewer on the
 result, and `make help` lists the other commands.
 
-Harbor hands `OPENROUTER_API_KEY` to the reviewer's commands only, from the
-experiments' agent `env`, and saves `${OPENROUTER_API_KEY}` in a job's configuration in
+Harbor hands `OPENROUTER_API_KEY` to the reviewer agent's commands only, never the
+judge's, from the experiments' agent `env`, and saves `${OPENROUTER_API_KEY}` in a job's configuration in
 place of its value. The containers use the logins Codex and Pi already keep, in `~/.codex` and
 `~/.pi/agent` unless `CODEX_HOME` or `PI_CODING_AGENT_DIR` says otherwise. To point
 elsewhere, set `REVIEWER_CODEX_AUTH_DIR` and `JUDGE_PI_AUTH_DIR` to the real folders,

@@ -99,8 +99,8 @@ effort = "default"
 # Who proposes, in loop.propose's container, which holds only a copy of the baseline, the
 # evidence pack and this CLI's login: the container is the sandbox. agy 1.5.16 has a Linux arm64
 # build, but its login lives in the macOS Keychain and doesn't reach the container, so Codex runs
-# until an agy login folder exists (docs/loop.md). agy: cli "agy", model "gemini-4-neon-xhigh",
-# effort "xhigh".
+# until an agy login folder exists (AGY_LOGIN_DIR; loop/proposers.py says how to make one).
+# agy: cli "agy", model "gemini-4-neon-xhigh", effort "xhigh".
 [proposer]
 cli = "codex"
 model = "gpt-6.2-sol"

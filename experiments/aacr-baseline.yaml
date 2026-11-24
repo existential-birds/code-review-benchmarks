@@ -8,9 +8,10 @@ agents:
   - import_path: benchmarks.daydream.agent:DaydreamAgent
     kwargs:
       capture_data: true
-    # A Pi reviewer's provider key, read from where harbor run starts. Harbor sets it on the agent
-    # phase's commands only and saves the job's configuration with ${OPENROUTER_API_KEY} in its
-    # place, never the value. Unset, it is empty, which a Codex reviewer ignores.
+    # A Pi reviewer's provider key, read from where harbor run starts. Harbor sets it on the agent's
+    # setup and run commands only, never the verifier's, and saves the job's configuration with
+    # ${OPENROUTER_API_KEY} in its place, never the value. Unset, it is empty, which a Codex reviewer
+    # ignores; set, a Codex reviewer's entrypoint drops it before Codex starts.
     env:
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
 verifier:

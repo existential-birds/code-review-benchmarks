@@ -7,12 +7,18 @@ mounts or which key it passes:
 
 - ``codex``: ``codex exec -m <model> -c model_reasoning_effort=<effort>``, with a Codex home
   holding a config and the reviewer's Codex login (``REVIEWER_CODEX_AUTH_DIR``).
-- ``agy``: ``agy -p --model <model> --effort <effort> --dangerously-skip-permissions``. Its
-  model names carry an effort (``gemini-4-neon-xhigh``), and a slot whose effort disagrees is
-  refused. agy keeps its macOS login in the Keychain, so the container gets a login folder of
-  its own, ``AGY_LOGIN_DIR``, mounted as its ``~/.gemini`` (HOME is /tmp); sign in there once (docs/loop.md).
-- ``claude``: ``claude -p --model <model>``, with ``CLAUDE_LOGIN_DIR``'s ``.credentials.json``.
-  Claude Code takes no effort here, so the slot's effort must be ``default``.
+- ``agy``: ``agy --prompt=<prompt> --add-dir "$PWD" --model <model> [--effort <effort>]``, as
+  Harbor's own agy agent runs it (``--add-dir`` keeps headless agy's writes in the working
+  folder). A model name that carries an effort (``gemini-4-neon-xhigh``) is passed alone, and a
+  slot whose effort disagrees is refused; a base name gets ``--effort``. agy keeps its macOS
+  login in the Keychain, which no container reads, so the container gets a login folder of its
+  own, ``AGY_LOGIN_DIR``, mounted as its ``~/.gemini`` (HOME is /tmp). Sign in there once from
+  a Linux agy, for example ``docker run -it -v "$AGY_LOGIN_DIR:/tmp/.gemini" -e HOME=/tmp`` on
+  the adapter's image, then ``agy``.
+- ``claude``: ``claude -p --model <model>``, with ``CLAUDE_LOGIN_DIR`` as its config folder.
+  On macOS Claude Code keeps its login in the Keychain too, so sign in once with that folder
+  as ``CLAUDE_CONFIG_DIR`` in the adapter's image. Claude Code takes no effort here, so the
+  slot's effort must be ``default``.
 - ``pi``: ``pi -p --provider <provider> --model <model> --thinking <effort>``, where the slot's
   model is ``<provider>/<model id>`` and the provider's key comes from the environment by name.
 
@@ -134,8 +140,13 @@ def _agy_command(slot: dict) -> list[str]:
     if slot['model'] == DEFAULT:
         raise ValueError('[proposer] agy needs an explicit model')
     effort = agy_effort(slot)
-    return ['agy', '-p', '--model', slot['model'], *(['--effort', effort] if effort else []),
-            '--dangerously-skip-permissions']
+    # An effort-suffixed model takes no --effort; a base name needs one to pick its tier.
+    named = slot['model'].endswith(f'-{effort}') if effort else False
+    flags = f"--model {slot['model']}" + (f' --effort {effort}' if effort and not named else '')
+    # The prompt arrives on stdin; agy takes it as --prompt. Headless agy stops a --prompt run
+    # after 5 minutes unless --print-timeout says otherwise; the loop's own timeout bounds it.
+    return ['sh', '-c', 'exec agy --dangerously-skip-permissions --print-timeout 24h --add-dir "$PWD" '
+            f'{flags} --prompt="$(cat)"']
 
 
 def _agy_login(slot: dict, scratch: Path) -> Launch:
@@ -151,13 +162,11 @@ def _claude_command(slot: dict) -> list[str]:
 
 
 def _claude_login(slot: dict, scratch: Path) -> Launch:
-    credentials = _folder('CLAUDE_LOGIN_DIR', Path.home() / '.claude', 'Claude Code login') / '.credentials.json'
-    if not credentials.is_file():
-        raise ValueError(f'No Claude Code login at {credentials}; set CLAUDE_LOGIN_DIR')
-    home = scratch / 'claude'
-    home.mkdir(exist_ok=True)
-    return Launch(mounts=(Mount(home, '/claude'), Mount(credentials, '/claude/.credentials.json')),
-                  variables=(('CLAUDE_CONFIG_DIR', '/claude'),))
+    # The whole folder, so a refresh that replaces the credentials file by renaming works.
+    folder = _folder('CLAUDE_LOGIN_DIR', None, "Claude Code login (macOS keeps it in the Keychain)")
+    if not (folder / '.credentials.json').is_file():
+        raise ValueError(f'No Claude Code login in {folder}; sign in with CLAUDE_CONFIG_DIR set to it')
+    return Launch(mounts=(Mount(folder, '/claude'),), variables=(('CLAUDE_CONFIG_DIR', '/claude'),))
 
 
 def _pi_parts(slot: dict) -> tuple[str, str]:

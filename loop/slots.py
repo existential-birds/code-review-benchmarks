@@ -23,6 +23,8 @@ from types import MappingProxyType
 DEFAULT = 'default'
 # The levels Daydream forwards to Codex's model_reasoning_effort and Pi's --thinking.
 EFFORTS = ('off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max')
+# What the judge's openai-responses API takes as reasoningEffort (Pi SDK 1.6.0); it has no 'off'.
+JUDGE_EFFORTS = ('minimal', 'low', 'medium', 'high', 'xhigh', 'max')
 REVIEWER_FIELDS = ('harness', 'backend', 'provider', 'model', 'effort')
 JUDGE_FIELDS = ('harness', 'provider', 'model', 'effort')
 PROPOSER_FIELDS = ('cli', 'model', 'effort')
@@ -82,6 +84,8 @@ def judge(value: object) -> dict[str, str]:
                          'ChatGPT subscription login, and no other is handed to the verifier')
     if slot['model'] == DEFAULT:
         raise ValueError('[judge] needs an explicit model')
+    if slot['effort'] != DEFAULT and slot['effort'] not in JUDGE_EFFORTS:
+        raise ValueError(f"[judge] effort must be {DEFAULT!r} or one of {list(JUDGE_EFFORTS)}")
     return slot
 
 

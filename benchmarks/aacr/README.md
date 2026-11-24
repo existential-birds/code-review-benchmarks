@@ -49,8 +49,8 @@ export JUDGE_PI_AUTH_DIR=~/.pi/agent      # Judge; Pi's /login, Sign in with Cha
 Neither container sees the rest of these folders, and logins stay out of task
 assets and results:
 
-- **Pi reviewer:** nothing is mounted. Harbor sets `OPENROUTER_API_KEY` on the agent
-  phase's commands only, from `env` in the experiment, and the entrypoint hands it to
+- **Pi reviewer:** nothing is mounted. Harbor sets `OPENROUTER_API_KEY` on the agent's
+  setup and run commands only, from `env` in the experiment, and the entrypoint hands it to
   Pi alone, with an empty Pi agent folder and no update checks or telemetry. A job's
   saved configuration holds `${OPENROUTER_API_KEY}`, not the key. The review
   container reaches only `openrouter.ai` on ReviewBench, and the public network on

@@ -53,7 +53,10 @@ def test_loader_rejects_unknown_missing_and_mistyped_settings(tmp_path):
             (text, {'concurrency': True}, r'wrong type: \[.concurrency.\]'),
             (text.replace('[judge]\n', '[judges]\n'), {}, r'Unknown loop settings in settings: \[.judges.\]'),
             (text, {'reviewer': {'harness': 'daydream'}}, r'\[reviewer\] lacks'),
-            (text, {'proposer': {'cli': 'agy', 'model': 'm', 'effort': 'extreme'}}, r'\[proposer\] effort must be')):
+            (text, {'proposer': {'cli': 'agy', 'model': 'm', 'effort': 'extreme'}}, r'\[proposer\] effort must be'),
+            # The judge's API has no 'off'; Pi's --thinking does.
+            (text, {'judge': {'harness': 'pi', 'provider': 'openai', 'model': 'gpt-6.1-sol', 'effort': 'off'}},
+             r'\[judge\] effort must be')):
         path = tmp_path / 'settings.toml'
         path.write_text(written)
         with pytest.raises(ValueError, match=message):

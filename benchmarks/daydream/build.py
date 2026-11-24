@@ -127,11 +127,15 @@ def reviewer_image(build_file: Path | None = None, *, entrypoint: bool = True) -
         '-r /opt/reviewer-runtime.lock\n'
         f'RUN uv pip install --no-cache --no-deps --python /opt/daydream/bin/python /opt/{wheel.name} '
         '&& uv pip check --python /opt/daydream/bin/python\n'
+        # Pi's find tool runs fd (Debian's fdfind) and, offline, never downloads it; grep uses
+        # the ripgrep both task images already install.
+        'RUN apt-get update && apt-get install -y --no-install-recommends fd-find && rm -rf /var/lib/apt/lists/*\n'
         # Both reviewer backends' CLIs, so one image serves either reviewer slot.
         f'RUN npm install --global --ignore-scripts @openai/codex@{identity["codex_cli"]} '
         f'@earendil-works/pi-coding-agent@{identity["pi_cli"]}\n'
         'ENV PATH="/opt/daydream/bin:${PATH}"\n'
-        'RUN python --version && codex --version && pi --version && python -c "import daydream"\n'
+        'RUN python --version && codex --version && pi --version && fdfind --version && rg --version '
+        '&& python -c "import daydream"\n'
     )
     if entrypoint:
         for name in ('benchmarks/__init__.py', 'benchmarks/daydream/__init__.py', 'benchmarks/daydream/entrypoint.py'):

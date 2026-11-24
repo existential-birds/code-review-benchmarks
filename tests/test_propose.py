@@ -305,8 +305,13 @@ def test_each_proposer_adapter_builds_its_command_and_container(tmp_path, monkey
     (tmp_path / 'agy').mkdir()
     monkeypatch.setenv('AGY_LOGIN_DIR', str(tmp_path / 'agy'))
     command = propose.container(agy, scratch, 'x')
+    # Harbor's tested invocation: the prompt as --prompt, the working folder as agy's workspace, and an
+    # effort-suffixed model without --effort.
     assert command[command.index('image-agy'):] == [
-        'image-agy', 'agy', '-p', '--model', 'gemini-4-neon-xhigh', '--effort', 'xhigh', '--dangerously-skip-permissions']
+        'image-agy', 'sh', '-c', 'exec agy --dangerously-skip-permissions --print-timeout 24h --add-dir "$PWD" '
+        '--model gemini-4-neon-xhigh --prompt="$(cat)"']
+    assert proposers.ADAPTERS['agy'].command(dict(agy, model='gemini-4-neon'))[-1].endswith(
+        '--model gemini-4-neon --effort xhigh --prompt="$(cat)"')
     assert volumes(command)[-1] == f'{tmp_path}/agy:/tmp/.gemini:rw'
     install = proposers.ADAPTERS['agy'].dockerfile
     for url, digest in proposers.AGY_BUILDS.values():
@@ -315,12 +320,14 @@ def test_each_proposer_adapter_builds_its_command_and_container(tmp_path, monkey
     # claude: its credentials file only.
     claude = dict(cli='claude', model='claude-opus-5-5', effort='default')
     (tmp_path / 'claude').mkdir()
-    (tmp_path / 'claude/.credentials.json').write_text('{}')
     monkeypatch.setenv('CLAUDE_LOGIN_DIR', str(tmp_path / 'claude'))
+    with pytest.raises(ValueError, match='No Claude Code login in'):
+        propose.container(claude, scratch, 'x')
+    (tmp_path / 'claude/.credentials.json').write_text('{}')
     command = propose.container(claude, scratch, 'x')
     assert command[command.index('image-claude'):] == [
         'image-claude', 'claude', '-p', '--dangerously-skip-permissions', '--model', 'claude-opus-5-5']
-    assert f'{tmp_path}/claude/.credentials.json:/claude/.credentials.json:rw' in volumes(command)
+    assert volumes(command)[-1] == f'{tmp_path}/claude:/claude:rw'
     assert 'CLAUDE_CONFIG_DIR=/claude' in command
     assert f'@anthropic-ai/claude-code@{proposers.CLAUDE_VERSION}' in proposers.ADAPTERS['claude'].dockerfile
     # pi: the provider's key passed by name, never by value.
