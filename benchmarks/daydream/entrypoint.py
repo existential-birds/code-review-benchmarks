@@ -257,8 +257,10 @@ def _reviewer_controls(reviewer: dict, credential: str | None, login: Path, priv
         with _codex_home(login, private) as home:
             yield {'CODEX_HOME': str(home)}
         return
-    if reviewer['backend'] != 'pi' or not credential:
+    if reviewer['backend'] != 'pi':
         raise ValueError(f"Unsupported reviewer slot {reviewer['backend']}/{reviewer['provider']}")
+    if not credential:
+        raise ValueError('The task names no key variable for the Pi reviewer; regenerate it')
     key = source.get(credential)
     if not key:
         raise ValueError(f'The Pi reviewer needs {credential} from the agent environment')

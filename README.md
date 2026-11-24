@@ -22,7 +22,8 @@ without changing the pin, build it with `--candidate <commit>` and pass the
 
 Who reviews, who judges and who proposes changes for the [loop](loop/) are three
 **slots** in [`loop/settings.toml`](loop/settings.toml): `[reviewer]`, `[judge]` and
-`[proposer]`, each a harness, provider, model and effort. By default Daydream reviews on
+`[proposer]`. The reviewer is a harness, backend, provider, model and effort; the judge a
+harness, provider, model and effort; the proposer a CLI, model and effort. By default Daydream reviews on
 its Pi backend through OpenRouter with `deepseek/deepseek-v4.1-flash-1017`, `gpt-6.1-sol`
 judges through Pi on a ChatGPT subscription, and Codex with `gpt-6.2-sol` proposes. The
 converters bake the reviewer and judge slots into each catalog, so regenerate a catalog
@@ -50,9 +51,9 @@ result, and `make help` lists the other commands.
 
 Harbor hands `OPENROUTER_API_KEY` to the reviewer agent's commands only, never the
 judge's, from the experiments' agent `env`, and saves `${OPENROUTER_API_KEY}` in a job's configuration in
-place of its value. The containers use the logins Codex and Pi already keep, in `~/.codex` and
-`~/.pi/agent` unless `CODEX_HOME` or `PI_CODING_AGENT_DIR` says otherwise. To point
-elsewhere, set `REVIEWER_CODEX_AUTH_DIR` and `JUDGE_PI_AUTH_DIR` to the real folders,
+place of its value. The judge uses the login Pi already keeps, in `~/.pi/agent` unless
+`PI_CODING_AGENT_DIR` says otherwise; a Codex reviewer slot uses Codex's, in `~/.codex` unless
+`CODEX_HOME` does. To point elsewhere, set `JUDGE_PI_AUTH_DIR` and `REVIEWER_CODEX_AUTH_DIR` to the real folders,
 not copies ([what each container sees](benchmarks/aacr/README.md#logins)). Add
 `CASE=<name>` to review a different AACR case.
 

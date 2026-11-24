@@ -102,7 +102,7 @@ def test_a_pi_reviewer_task_mounts_no_login_and_reaches_only_its_provider(tmp_pa
     dockerfile = (task / 'environment/Dockerfile').read_text()
     assert f"@openai/codex@{BUILD['codex_cli']} @earendil-works/pi-coding-agent@{BUILD['pi_cli']}" in dockerfile
     # Pi's find tool needs fd, which it can't download offline.
-    assert 'install -y --no-install-recommends fd-find' in dockerfile and 'fdfind --version' in dockerfile
+    assert 'install -y --no-install-recommends fd-find ripgrep' in dockerfile and 'fdfind --version' in dockerfile
     calls = []
     monkeypatch.setattr(convert.subprocess, 'run', lambda command, **kwargs: calls.append(command))
     convert.export(tmp_path, tmp_path / 'out', 'test', PI, dict(JUDGE, model='gpt-7'))
