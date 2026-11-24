@@ -16,8 +16,13 @@ class JudgeTransportError(RuntimeError):
     """A judge request failed; upstream may catch it, so also retain a sticky flag."""
 
 
+# The judge slot every catalog made before slots existed asked for (#81).
+DEFAULT_JUDGE = {"harness": "pi", "provider": "openai", "model": "gpt-6.1-sol", "effort": "default"}
+
+
 class PiJudgeClient:
-    def __init__(self, evidence_dir: Path):
+    def __init__(self, evidence_dir: Path, judge: dict | None = None):
+        self.judge = dict(DEFAULT_JUDGE if judge is None else judge)
         self.evidence_dir = Path(evidence_dir)
         self.evidence_dir.mkdir(parents=True, exist_ok=True)
         self.failures: list[dict] = []
@@ -41,7 +46,7 @@ class PiJudgeClient:
         details = {}
         try:
             process = await asyncio.create_subprocess_exec(
-                "node", str(Path(__file__).parents[1] / "pi" / "pi_judge.mjs"),
+                "node", str(Path(__file__).parents[1] / "pi" / "pi_judge.mjs"), json.dumps(self.judge),
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
@@ -75,8 +80,8 @@ class PiJudgeClient:
             metadata = result.get("metadata", {})
             if (
                 not isinstance(text, str) or not text.strip()
-                or metadata.get("provider") != "openai"
-                or metadata.get("model") != "gpt-6.1-sol"
+                or metadata.get("provider") != self.judge["provider"]
+                or metadata.get("model") != self.judge["model"]
                 or metadata.get("subscription") is not True
                 or metadata.get("sdk_version") != "1.6.0"
                 or metadata.get("pi_ai_version") != "1.6.0"

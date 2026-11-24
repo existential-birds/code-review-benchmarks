@@ -5,14 +5,13 @@ from types import SimpleNamespace
 
 import pytest
 
-from benchmarks.reviewbench import convert
 from loop import canary, noise, rounds, sets, settings
 import test_loop_noise
 import test_loop_rounds
 from test_loop_rounds import counts, write_job
 
 workspace = test_loop_rounds.workspace
-JUDGE = f'{convert.PROVIDER}/{convert.MODEL}'
+JUDGE = 'openai/gpt-6.1-sol'
 STEADY = {'case-a': counts(2, 1, 1, 0, 2, 1), 'case-b': counts(2, 2, 1, 0, 2, 1)}
 MOVED = {'case-a': counts(5, 4, 3, 0, 5, 3), 'case-b': STEADY['case-b']}
 

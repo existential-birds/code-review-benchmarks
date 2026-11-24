@@ -19,7 +19,8 @@ The summary's ``side`` and per-round counts come from the benchmark's round repo
 and checks; a summary whose rounds all failed before any review has no side. Each round's scores pool its scored trials with
 the benchmark's own metric; ``mean`` and ``stddev`` (sample, n-1) are over the
 rounds that define a score. ``catalog_identity`` names the benchmark's revision,
-split, judge (ReviewBench) or dataset (AACR) and build, so two summaries can be checked as comparable. ``cases`` keeps every
+split, judge (ReviewBench) or dataset (AACR), build and reviewer slot, so two summaries can be checked as
+comparable; a catalog made before slots (#81) ran Daydream's defaults on Codex. ``cases`` keeps every
 case's counts in every round (ReviewBench's overall counts, AACR's four reward counts), null where unscored, so two
 summaries can be compared on the cases both scored.
 
@@ -33,6 +34,10 @@ build. A case that fails to convert leaves no catalog behind: drop it and run ag
 between its rounds is the judge's alone (#45). It still needs both login folders, since
 the tasks mount both, but its trials record no build, and a trial counts as failed when it
 left no score.
+
+The catalog is generated under the reviewer and judge slots in ``loop/settings.toml``. A
+Codex reviewer needs ``REVIEWER_CODEX_AUTH_DIR``; a keyed provider needs its key, such as
+``OPENROUTER_API_KEY``, where this runs, and ``harbor run`` hands it to the agent phase.
 """
 from __future__ import annotations
 
@@ -51,7 +56,7 @@ from benchmarks.daydream import build, rounds as shared
 from benchmarks.reviewbench import convert, report
 from benchmarks.reviewbench.metric import compute
 from benchmarks.reviewbench.upstream.metric import read_counts
-from loop import sets, settings
+from loop import sets, settings, slots
 
 ARTIFACTS = Path('artifacts/loop')
 JOBS = Path('jobs')
@@ -63,8 +68,9 @@ COUNTS = ('expected', 'missing', 'evaluated', 'failed', 'incomplete', 'completed
           'elapsed_seconds', 'cost_usd', 'cost_trials')
 TOKENS = ('n_input_tokens', 'n_cache_tokens', 'n_output_tokens')
 CATALOG = ('reviewbench_revision', 'split', 'judge', 'daydream')
-# The task containers read the logins from these; the Makefile sets them, harbor run alone doesn't.
-LOGINS = ('REVIEWER_CODEX_AUTH_DIR', 'JUDGE_PI_AUTH_DIR')
+# The task containers read the logins from these folders; the Makefile sets them, harbor run alone doesn't.
+CODEX_LOGIN, JUDGE_LOGIN = 'REVIEWER_CODEX_AUTH_DIR', 'JUDGE_PI_AUTH_DIR'
+LOGINS = (CODEX_LOGIN, JUDGE_LOGIN)
 # A round with more unscored trials than this is failed, not finished: a lost login or a
 # Docker outage, not noise (the stop rule of #45). The command stops; a rerun scores it afresh.
 MAX_UNSCORED_FRACTION = 0.2
@@ -97,8 +103,14 @@ def _aacr_identity(catalog: Path, listing: dict, expected: dict) -> dict:
     built = {(catalog / task / 'tests/build.json').read_text() for task in expected}
     if len(built) != 1:
         raise ValueError(f'{catalog} holds tasks for {len(built)} Daydream builds, not one')
+    # Catalogs made before slots (#81) record neither; they ran the judge every catalog used then.
     return {**{key: listing[key] for key in ('aacr_revision', 'dataset_sha256', 'split')},
+            'judge': listing.get('judge', 'openai/gpt-6.1-sol'), 'reviewer': slots.recorded_reviewer(listing),
             'daydream': json.loads(built.pop())}
+
+
+def _reviewbench_identity(catalog: Path, listing: dict, expected: dict) -> dict:
+    return {**{key: listing[key] for key in CATALOG}, 'reviewer': slots.recorded_reviewer(listing)}
 
 
 # What differs between the benchmarks; the rounds, resumption and summary are the same.
@@ -107,7 +119,7 @@ BENCHMARKS = {
         report=report, config=Path('experiments/reviewbench.yaml'), upstream=Path('.cache/src/ReviewBench'),
         metrics=METRICS, pool=_reviewbench_pool,
         counts=lambda reward: read_counts(reward)['overall'],
-        identity=lambda catalog, listing, expected: {key: listing[key] for key in CATALOG},
+        identity=_reviewbench_identity,
         generate=lambda upstream, catalog, cases, build_file: convert.generate_catalog(
             upstream, catalog, split='dev', task_names=cases, build_file=build_file)),
     'aacr': SimpleNamespace(
@@ -166,6 +178,22 @@ def _write(path: Path, state: dict) -> None:
     os.replace(temporary, path)
 
 
+def check_logins(reviewer: dict | None = None, oracle: bool = False) -> None:
+    """Refuse to start without the judge's login folder and the reviewer slot's login or key.
+
+    A Codex reviewer's tasks mount its login folder, the oracle's too; the oracle runs no
+    reviewer, so it needs no key. Only a key's presence is checked; it is never read into a
+    file or printed. The reviewer is the configured slot unless given."""
+    reviewer = settings.load()['reviewer'] if reviewer is None else reviewer
+    folders = [JUDGE_LOGIN] + ([CODEX_LOGIN] if reviewer['backend'] == 'codex' else [])
+    missing = [name for name in folders if not os.environ.get(name) or not Path(os.environ[name]).is_dir()]
+    if missing:
+        raise ValueError(f'Set {" and ".join(missing)} to the login folders, as the Makefile does')
+    key = slots.reviewer_access(reviewer)['key']
+    if key and not oracle and not os.environ.get(key):
+        raise ValueError(f'Set {key} for the {reviewer["backend"]} reviewer; harbor run passes it to the agent phase')
+
+
 def run(build: str, cases_file: Path, rounds: int, name: str, *, benchmark: str = 'reviewbench',
         limit: int | None = None, concurrency: int | None = None, upstream: Path | None = None) -> dict:
     """Score ``build`` over ``rounds`` rounds of the benchmark's dev cases in ``cases_file``."""
@@ -174,10 +202,9 @@ def run(build: str, cases_file: Path, rounds: int, name: str, *, benchmark: str 
     bench = BENCHMARKS[benchmark]
     if rounds < 1 or (limit is not None and limit < 1) or (concurrency is not None and concurrency < 1):
         raise ValueError('Rounds, --limit-cases and --concurrency must be positive')
-    missing = [name for name in LOGINS if not os.environ.get(name) or not Path(os.environ[name]).is_dir()]
-    if missing:
-        raise ValueError(f'Set {" and ".join(missing)} to the reviewer and judge login folders, as the Makefile does')
-    concurrency = concurrency or settings.load()['concurrency']
+    loaded = settings.load()
+    check_logins(loaded['reviewer'], oracle=build == 'oracle')
+    concurrency = concurrency or loaded['concurrency']
     folder = ARTIFACTS / name
     path, catalog = folder / 'summary.json', folder / 'catalog'
     if build == 'oracle' and benchmark != 'reviewbench':
@@ -236,6 +263,11 @@ def _rounds(benchmark, request, rounds, name, path, catalog, concurrency, upstre
         state = json.loads(path.read_text())
         if state['request'] != request:
             raise ValueError(f'{name} already scored {state["request"]}; choose a new name')
+        # Its catalog keeps the reviewer slot it was made with; the logins checked are the configured slot's.
+        made = slots.recorded_reviewer(json.loads((catalog / 'catalog.json').read_text()))
+        if request['build'] != 'oracle' and made != settings.load()['reviewer']:
+            raise ValueError(f'{name} was scored under the reviewer slot {made}, not the configured one; '
+                             'choose a new name')
     else:
         # The converter refuses any case outside the dev split, and nothing here asks for another.
         _generate(bench, upstream, catalog, request)

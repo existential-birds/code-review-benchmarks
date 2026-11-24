@@ -11,7 +11,7 @@ import sys
 
 import pytest
 
-from loop import ledger, propose, settings
+from loop import ledger, propose, proposers, settings
 from real_git import commit
 
 DAYDREAM = {'AGENTS.md': '# Agent guidance\n', 'daydream/config.py': 'EFFORT = "medium"\n',
@@ -27,7 +27,7 @@ step = json.loads(plan_path.read_text())[len(calls)]
 work = scratch / 'work'
 calls.append(dict(prompt=prompt, directory=os.getcwd(), files=sorted(
     str(path.relative_to(work)) for path in work.rglob('*') if path.is_file()),
-    config=(scratch / 'codex/config.toml').read_text(), pack=sorted(p.name for p in (scratch / 'evidence').iterdir())))
+    login=sorted(p.name for p in (scratch / 'login').iterdir()), pack=sorted(p.name for p in (scratch / 'evidence').iterdir())))
 record.write_text(json.dumps(calls))
 for files in step.get('edits', []):
     for name, content in files.items():
@@ -90,8 +90,8 @@ def stand_in(folder, plan):
     folder.mkdir()
     (folder / 'plan.json').write_text(json.dumps(plan))
     (folder / 'stand_in.py').write_text(STAND_IN)
-    def launch(argv, scratch, name):
-        assert argv == settings.load()['proposer_command'] and name.startswith('loop-propose-')
+    def launch(slot, scratch, name):
+        assert slot == settings.load()['proposer'] and name.startswith('loop-propose-')
         return [sys.executable, str(folder / 'stand_in.py'), str(folder / 'plan.json'), str(scratch)]
     return launch, lambda: json.loads((folder / 'calls.json').read_text())
 
@@ -139,7 +139,8 @@ def test_the_step_clones_fetches_cuts_a_worktree_and_commits_the_proposers_one_c
     root = tmp_path / 'suite'
     worktree = root / '.cache/loop/worktrees/run-a-1'
     assert result | dict(commit=None, patch_id=None) == dict(
-        run='run-a', iteration=1, baseline=base, branch='loop/run-a/1', worktree=str(worktree),
+        run='run-a', iteration=1, proposer=settings.load()['proposer'], baseline=base, branch='loop/run-a/1',
+        worktree=str(worktree),
         logs=str(root / '.cache/loop/logs/run-a-1'), proposal=proposal(), commit=None, patch_id=None,
         diff=dict(files=1, lines=2), attempts=1, refusals=[])
     assert git(worktree, 'rev-parse', 'HEAD') == result['commit'] == git(worktree, 'rev-parse', 'loop/run-a/1')
@@ -149,11 +150,11 @@ def test_the_step_clones_fetches_cuts_a_worktree_and_commits_the_proposers_one_c
     assert result['patch_id'] == same_patch(git, source, base, EFFORT)
     assert git(root / '.cache/loop/daydream', 'remote', 'get-url', 'origin') == str(bare)
 
-    # The proposer saw a copy of the baseline's files, the pack and a Codex config, outside the suite.
+    # The proposer saw a copy of the baseline's files, the pack and an empty folder for its login, outside the suite.
     call = calls[0]
     scratch = Path(call['directory'])
     assert not scratch.is_relative_to(root) and not scratch.exists()
-    assert call['files'] == sorted(DAYDREAM) and call['config'] == propose.CODEX_CONFIG
+    assert call['files'] == sorted(DAYDREAM) and call['login'] == []
     assert call['pack'] == ['cases', 'index.json', 'labels.jsonl']
     told = call['prompt']
     assert told.startswith(propose.PROMPT.read_text()) and propose.SEEDS.read_text() in told
@@ -215,7 +216,7 @@ def test_after_max_proposal_attempts_refusals_it_reports_no_proposal(tmp_path, r
         'The proposer changed nothing; change one thing in $WORK', 'The proposer exited 3',
         'The proposer ran past 1 seconds']
     assert result | dict(refusals=None) == dict(
-        run='run-a', iteration=1, baseline=remote[2], branch='loop/run-a/1', worktree=result['worktree'],
+        run='run-a', iteration=1, proposer=CODEX, baseline=remote[2], branch='loop/run-a/1', worktree=result['worktree'],
         logs=result['logs'], proposal=None, commit=None, patch_id=None, diff=None, attempts=3, refusals=None,
         reason='No proposal: all 3 attempts were refused')
     assert len(calls) == 3 and git(result['worktree'], 'rev-parse', 'HEAD') == remote[2]
@@ -259,24 +260,111 @@ def test_an_invalid_proposal_is_refused(step, written, reason):
     assert result['proposal'] is None and reason in result['refusals'][0]['reason']
 
 
+CODEX = dict(cli='codex', model='gpt-6.2-sol', effort='high')
+
+
+def volumes(command: list[str]) -> list[str]:
+    return [command[at + 1] for at, part in enumerate(command) if part == '--volume']
+
+
 def test_the_container_mounts_only_the_proposers_folders_and_the_codex_login(tmp_path, monkeypatch):
     login = tmp_path / 'codex-login'
     login.mkdir()
     (login / 'auth.json').write_text('{}')
     monkeypatch.setenv('REVIEWER_CODEX_AUTH_DIR', str(login))
-    monkeypatch.setattr(propose, 'image', lambda: 'proposer-image')
+    monkeypatch.setattr(propose, 'image', lambda chosen: f'image-{chosen.cli}')
     scratch = tmp_path / 'scratch'
-    command = propose.container(['codex', 'exec'], scratch, 'loop-propose-run-a-1-1')
-    volumes = [command[at + 1] for at, part in enumerate(command) if part == '--volume']
-    assert volumes == [f'{scratch}/work:/work:rw', f'{scratch}/evidence:/pack:ro', f'{scratch}/analysis:/analysis:rw',
-                       f'{scratch}/out:/out:rw', f'{scratch}/codex:/codex:rw', f'{login}/auth.json:/codex/auth.json:rw']
-    assert command[-3:] == ['proposer-image', 'codex', 'exec'] and '--rm' in command
-    assert 'CODEX_HOME=/codex' in command and not any('GITHUB' in part for part in command)
-    # The image is the reviewer's pinned Node, Python and Codex CLI, with no Daydream in it.
-    assert propose.build.NODE_IMAGE in propose.DOCKERFILE and propose.build.BUILD['codex_cli'] in propose.DOCKERFILE
+    (scratch / 'login').mkdir(parents=True)
+    command = propose.container(CODEX, scratch, 'loop-propose-run-a-1-1')
+    assert volumes(command) == [
+        f'{scratch}/work:/work:rw', f'{scratch}/evidence:/pack:ro', f'{scratch}/analysis:/analysis:rw',
+        f'{scratch}/out:/out:rw', f'{scratch}/login/codex:/codex:rw', f'{login}/auth.json:/codex/auth.json:rw']
+    assert (scratch / 'login/codex/config.toml').read_text() == proposers.CODEX_CONFIG
+    assert command[command.index('image-codex'):] == [
+        'image-codex', 'codex', 'exec', '--dangerously-bypass-approvals-and-sandbox', '--skip-git-repo-check',
+        '-m', 'gpt-6.2-sol', '-c', 'model_reasoning_effort=high']
+    assert '--rm' in command and 'CODEX_HOME=/codex' in command and not any('GITHUB' in part for part in command)
+    # The image is the reviewer's pinned Node and Python with the pinned Codex CLI, and no Daydream.
+    dockerfile = proposers.ADAPTERS['codex'].dockerfile
+    assert proposers.build.NODE_IMAGE in dockerfile and f"@openai/codex@{proposers.build.BUILD['codex_cli']}" in dockerfile
+    # Defaults pass no model or effort, so the CLI's own apply.
+    assert proposers.ADAPTERS['codex'].command(dict(CODEX, model='default', effort='default'))[-1] == '--skip-git-repo-check'
     (login / 'auth.json').unlink()
     with pytest.raises(ValueError, match='No Codex login'):
-        propose.container(['codex', 'exec'], scratch, 'x')
+        propose.container(CODEX, scratch, 'x')
+
+
+def test_each_proposer_adapter_builds_its_command_and_container(tmp_path, monkeypatch):
+    monkeypatch.setattr(propose, 'image', lambda chosen: f'image-{chosen.cli}')
+    scratch = tmp_path / 'scratch'
+    (scratch / 'login').mkdir(parents=True)
+    # agy: its own login folder as ~/.gemini, since the macOS Keychain doesn't reach the container.
+    agy = dict(cli='agy', model='gemini-4-neon-xhigh', effort='xhigh')
+    with pytest.raises(ValueError, match='set AGY_LOGIN_DIR'):
+        propose.container(agy, scratch, 'x')
+    (tmp_path / 'agy').mkdir()
+    monkeypatch.setenv('AGY_LOGIN_DIR', str(tmp_path / 'agy'))
+    command = propose.container(agy, scratch, 'x')
+    # Harbor's tested invocation: the prompt as --prompt, the working folder as agy's workspace, and an
+    # effort-suffixed model without --effort.
+    assert command[command.index('image-agy'):] == [
+        'image-agy', 'sh', '-c', 'exec agy --dangerously-skip-permissions --print-timeout 24h --add-dir "$PWD" '
+        '--model gemini-4-neon-xhigh --prompt="$(cat)"']
+    assert proposers.ADAPTERS['agy'].command(dict(agy, model='gemini-4-neon'))[-1].endswith(
+        '--model gemini-4-neon --effort xhigh --prompt="$(cat)"')
+    assert volumes(command)[-1] == f'{tmp_path}/agy:/tmp/.gemini:rw'
+    install = proposers.ADAPTERS['agy'].dockerfile
+    for url, digest in proposers.AGY_BUILDS.values():
+        assert url in install and digest in install
+    assert 'sha512sum -c' in install and f'= {proposers.AGY_VERSION}' in install
+    # claude: its credentials file only.
+    claude = dict(cli='claude', model='claude-opus-5-5', effort='default')
+    (tmp_path / 'claude').mkdir()
+    monkeypatch.setenv('CLAUDE_LOGIN_DIR', str(tmp_path / 'claude'))
+    with pytest.raises(ValueError, match='No Claude Code login in'):
+        propose.container(claude, scratch, 'x')
+    (tmp_path / 'claude/.credentials.json').write_text('{}')
+    command = propose.container(claude, scratch, 'x')
+    assert command[command.index('image-claude'):] == [
+        'image-claude', 'claude', '-p', '--dangerously-skip-permissions', '--model', 'claude-opus-5-5']
+    assert volumes(command)[-1] == f'{tmp_path}/claude:/claude:rw'
+    assert 'CLAUDE_CONFIG_DIR=/claude' in command
+    assert f'@anthropic-ai/claude-code@{proposers.CLAUDE_VERSION}' in proposers.ADAPTERS['claude'].dockerfile
+    # pi: the provider's key passed by name, never by value.
+    pi = dict(cli='pi', model='openrouter/deepseek/deepseek-v4.1-flash-1017', effort='low')
+    monkeypatch.delenv('OPENROUTER_API_KEY', raising=False)
+    with pytest.raises(ValueError, match='Set OPENROUTER_API_KEY'):
+        propose.container(pi, scratch, 'x')
+    monkeypatch.setenv('OPENROUTER_API_KEY', 'secret-value')
+    command = propose.container(pi, scratch, 'x')
+    assert command[command.index('image-pi'):] == [
+        'image-pi', 'pi', '-p', '--provider', 'openrouter', '--model', 'deepseek/deepseek-v4.1-flash-1017',
+        '--thinking', 'low', '--no-session']
+    assert '--env' in command and 'OPENROUTER_API_KEY' in command and not any('secret-value' in part for part in command)
+    assert f"@earendil-works/pi-coding-agent@{proposers.build.BUILD['pi_cli']}" in proposers.ADAPTERS['pi'].dockerfile
+    # Every CLI's image differs, and none holds Daydream.
+    assert len({adapter.image for adapter in proposers.ADAPTERS.values()}) == len(proposers.ADAPTERS)
+
+
+@pytest.mark.parametrize('slot, message', [
+    (dict(cli='agy', model='gemini-4-neon-xhigh', effort='high'), 'names effort xhigh, but the slot.s effort is high'),
+    (dict(cli='agy', model='default', effort='xhigh'), 'agy needs an explicit model'),
+    (dict(cli='claude', model='claude-opus-5-5', effort='high'), 'passes no effort'),
+    (dict(cli='pi', model='deepseek-v4.1-flash', effort='default'), 'a pi model is <provider>/<model id>'),
+    (dict(cli='cursor', model='m', effort='default'), 'cli must be one of'),
+])
+def test_proposer_settings_an_adapter_cant_take_are_refused(slot, message):
+    with pytest.raises(ValueError, match=message):
+        proposers.adapter(slot)
+    # agy takes an effort its model name agrees with, or the name's own.
+    assert proposers.agy_effort(dict(cli='agy', model='gemini-4-neon-xhigh', effort='default')) == 'xhigh'
+
+
+def test_the_step_refuses_a_proposer_slot_before_touching_the_clone(tmp_path, pack):
+    with pytest.raises(ValueError, match='names effort xhigh'):
+        propose.propose('run-a', 'b' * 40, pack, settings.load(proposer=dict(
+            cli='agy', model='gemini-4-neon-xhigh', effort='low')), root=tmp_path, url='unused')
+    assert not (tmp_path / '.cache').exists()
 
 
 def test_a_folder_of_the_baseline_replaced_by_a_file_is_committed(step, git):

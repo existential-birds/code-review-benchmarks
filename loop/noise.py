@@ -33,7 +33,7 @@ from pathlib import Path
 import statistics
 
 from benchmarks.reviewbench.metric import compute
-from loop import sets, settings
+from loop import sets, settings, slots
 
 METRICS = ('grounded_precision', 'grounded_recall', 'grounded_f1',
            'augmented_precision', 'augmented_recall', 'augmented_f1')
@@ -165,6 +165,9 @@ def derive(reviewer: dict, oracle: dict, loaded: settings.Settings) -> dict:
                   for case in canary for entry in oracle_cases[case] if entry is not None for key in CANARY_COUNTS]
     return dict(
         build=reviewer['side'], catalog=reviewer['catalog_identity'], cases=len(climb),
+        # The slots these figures measured, as loop/settings.toml's [derived] records them (#81).
+        measured=dict(reviewer=slots.recorded_reviewer(reviewer['catalog_identity']),
+                      judge=reviewer['catalog_identity']['judge']),
         reviewer=dict(rounds=rounds, blocks=blocks),
         judge=dict(rounds=[{key: entry[key] for key in (*METRICS, 'evaluated', 'expected')} for entry in oracle['rounds']],
                    block=block(oracle['rounds']), cases_scored_differently=moved),
