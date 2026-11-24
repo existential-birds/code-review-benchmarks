@@ -132,7 +132,7 @@ def test_it_refuses_while_an_iteration_is_in_progress_unless_the_loop_calls_betw
     loop.run(['base'])
     (loop.root / marker).mkdir(parents=True)
     # Another run's iteration and the run's own finished ones don't count.
-    (loop.root / '.cache/loop/logs/run-a-1').mkdir(parents=True)
+    (loop.root / '.cache/loop/logs/run-a-1').mkdir(parents=True, exist_ok=True)
     (loop.root / '.cache/loop/logs/run-b-7').mkdir()
     monkeypatch.setattr(prune, 'ROOT', loop.root)
     assert prune.main(['--run', 'run-a', '--dry-run']) == 2

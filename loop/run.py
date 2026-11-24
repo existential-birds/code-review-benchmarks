@@ -150,11 +150,8 @@ def confirm(baseline: str, candidate: str, loaded: settings.Settings) -> tuple[s
 
 
 def prune(run: str, loaded: settings.Settings) -> dict | None:
-    """A hook for ``loop.prune`` (#56): ``prune(run, loaded, between_iterations=True)`` once it exists.
-
-    #56 isn't on this branch yet, so the hook does nothing until it lands. A failed prune is
-    reported and the run goes on.
-    """
+    """``loop.prune`` between iterations: ``prune(run, loaded, between_iterations=True)``. A failed prune is
+    reported and the run goes on."""
     try:
         pruning = importlib.import_module('loop.prune')
     except ImportError:

@@ -346,7 +346,7 @@ def test_confirmation_runs_as_its_own_process_and_only_its_word_is_read(loop, mo
     assert confirm(PIN, 'b' * 40, loaded) == (None, WORN)
 
 
-def test_prune_is_a_hook_until_loop_prune_lands(loop, monkeypatch):
+def test_the_run_prunes_between_iterations_through_loop_prune(loop, monkeypatch):
     loaded = settings.load()
     calls = []
     module = SimpleNamespace(prune=lambda run, loaded, **options: calls.append((run, options)) or {})
