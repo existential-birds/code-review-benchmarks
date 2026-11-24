@@ -22,6 +22,7 @@ import tempfile
 
 # Re-exported so converters and the agent read the image layout from one place.
 from benchmarks.daydream.entrypoint import CASE_DIR as CASE_DIR, CODEX_LOGIN_DIR as CODEX_LOGIN_DIR
+from loop import slots
 
 PACKAGE = Path(__file__).resolve().parent
 BUILD = json.loads((PACKAGE / 'build.json').read_text())
@@ -99,7 +100,8 @@ def build_candidate(source: Path, commit: str, root: Path | None = None) -> Path
             raise ValueError(f'Expected one Daydream wheel from {commit}')
         wheel = wheels[0]
         identity = {'source_commit': commit, 'version': wheel.name.split('-')[1], 'wheel_name': wheel.name,
-                    'wheel_sha256': _sha256(wheel), 'codex_cli': BUILD['codex_cli'], 'candidate': True}
+                    'wheel_sha256': _sha256(wheel), 'codex_cli': BUILD['codex_cli'], 'pi_cli': BUILD['pi_cli'],
+                    'candidate': True}
         (output / 'build.json').write_text(json.dumps(identity, indent=2) + '\n')
         shutil.rmtree(root / commit, ignore_errors=True)
         output.rename(root / commit)
@@ -125,9 +127,11 @@ def reviewer_image(build_file: Path | None = None, *, entrypoint: bool = True) -
         '-r /opt/reviewer-runtime.lock\n'
         f'RUN uv pip install --no-cache --no-deps --python /opt/daydream/bin/python /opt/{wheel.name} '
         '&& uv pip check --python /opt/daydream/bin/python\n'
-        f'RUN npm install --global --ignore-scripts @openai/codex@{identity["codex_cli"]}\n'
+        # Both reviewer backends' CLIs, so one image serves either reviewer slot.
+        f'RUN npm install --global --ignore-scripts @openai/codex@{identity["codex_cli"]} '
+        f'@earendil-works/pi-coding-agent@{identity["pi_cli"]}\n'
         'ENV PATH="/opt/daydream/bin:${PATH}"\n'
-        'RUN python --version && codex --version && python -c "import daydream"\n'
+        'RUN python --version && codex --version && pi --version && python -c "import daydream"\n'
     )
     if entrypoint:
         for name in ('benchmarks/__init__.py', 'benchmarks/daydream/__init__.py', 'benchmarks/daydream/entrypoint.py'):
@@ -139,11 +143,20 @@ def reviewer_image(build_file: Path | None = None, *, entrypoint: bool = True) -
     return lines, assets, identity
 
 
-def task_metadata(identity: dict) -> str:
-    """The task.toml ``[metadata]`` lines naming the Daydream build a task runs."""
+def task_metadata(identity: dict, reviewer: dict) -> str:
+    """The task.toml ``[metadata]`` lines naming the Daydream build a task runs and its reviewer slot."""
     lines = ''.join(f'daydream_{key} = {json.dumps(identity[key])}\n'
-                    for key in ('source_commit', 'wheel_sha256', 'codex_cli', 'reviewer_runtime_lock_sha256'))
+                    for key in ('source_commit', 'wheel_sha256', 'codex_cli', 'pi_cli', 'reviewer_runtime_lock_sha256'))
+    lines += ''.join(f'reviewer_{key} = {json.dumps(reviewer[key])}\n' for key in slots.REVIEWER_FIELDS)
     return lines + ('daydream_candidate = true\n' if identity.get('candidate') else '')
+
+
+def reviewer_compose(reviewer: dict) -> str | None:
+    """The reviewer container's compose override: the Codex login for Codex, nothing for a keyed provider.
+
+    A provider's key reaches the agent phase alone, through Harbor's agent ``env`` (see
+    ``experiments/*.yaml``), never through the task."""
+    return codex_login_compose() if reviewer['backend'] == 'codex' else None
 
 
 def codex_login_compose(env_var: str = 'REVIEWER_CODEX_AUTH_DIR') -> str:

@@ -18,6 +18,10 @@ from benchmarks.daydream import entrypoint
 from benchmarks.daydream.build import BUILD
 from fake_git import BASE, HEAD, FakeCheckout
 
+CODEX = dict(harness='daydream', backend='codex', provider='openai', model='default', effort='default')
+PI = dict(harness='daydream', backend='pi', provider='openrouter', model='deepseek/deepseek-v4.1-flash-1017',
+          effort='default')
+
 
 @pytest.fixture
 def review_case(tmp_path, monkeypatch):
@@ -33,7 +37,8 @@ def review_case(tmp_path, monkeypatch):
     inputs.mkdir()
     artifacts = tmp_path / 'artifacts'
     (inputs / 'case.json').write_text(json.dumps({'format': 'aacr', 'repository': str(repo),
-                                                  'findings': str(artifacts / 'findings.json')}))
+                                                  'findings': str(artifacts / 'findings.json'),
+                                                  'reviewer': CODEX, 'reviewer_credential': None}))
     (inputs / 'comparison.json').write_text(json.dumps(comparison))
     (inputs / 'diff.patch').write_text(patch)
     (inputs / 'build.json').write_text(json.dumps({'source_commit': 'immutable-test-build'}))
@@ -334,28 +339,113 @@ def test_install_checks_namespaces_login_mount_and_build(tmp_path, failure):
     # A candidate differs from the pin like an older build, but says it's a candidate.
     older = dict(BUILD, version='0.0.1', source_commit='0' * 40)
     baked = {'older-build': older, 'candidate': dict(older, candidate=True)}.get(failure, BUILD)
+    environment = installer(logs, CODEX, baked, namespace=failure != 'namespace',
+                            login=lambda command: subprocess.run(command.replace('/run/reviewer-codex', str(login)),
+                                                                 shell=True).returncode, commands=commands)
+    if failure in (None, 'candidate'):
+        asyncio.run(DaydreamAgent(logs_dir=logs).install(environment))
+        assert len(commands) == 5
+        return
+    match = {'namespace': 'namespace', 'whole-login-folder': 'only the Codex auth.json',
+             'older-build': 'generated for Daydream 0.0.1; regenerate it for the pinned'}[failure]
+    with pytest.raises(RuntimeError, match=match):
+        asyncio.run(DaydreamAgent(logs_dir=logs).install(environment))
+    assert len(commands) == {'namespace': 2, 'whole-login-folder': 3, 'older-build': 4}[failure]
+
+
+def installer(logs, reviewer, baked, *, namespace=True, login=lambda command: 1, commands=None):
+    """A stand-in reviewer container for the agent's install checks."""
+    commands = [] if commands is None else commands
     class Environment:
         def is_path_mounted(self, environment_path, host_path):
             return environment_path == '/logs/agent' and host_path == logs
         async def exec(self, command, **kwargs):
             commands.append(command)
+            if command == 'cat /opt/daydream-case/case.json':
+                return SimpleNamespace(return_code=0, stdout=json.dumps({'reviewer': reviewer}))
             if command == 'unshare -Ur true':
-                return SimpleNamespace(return_code=1 if failure == 'namespace' else 0)
+                return SimpleNamespace(return_code=0 if namespace else 1)
             if '/run/reviewer-codex' in command:
-                command = command.replace('/run/reviewer-codex', str(login))
-                return SimpleNamespace(return_code=subprocess.run(command, shell=True).returncode)
+                return SimpleNamespace(return_code=login(command))
             if command == 'cat /opt/daydream-case/build.json':
                 return SimpleNamespace(return_code=0, stdout=json.dumps(dict(baked, python='3.14.3')))
             return SimpleNamespace(return_code=0)
-    if failure in (None, 'candidate'):
-        asyncio.run(DaydreamAgent(logs_dir=logs).install(Environment()))
-        assert len(commands) == 4
-        return
-    match = {'namespace': 'namespace', 'whole-login-folder': 'only the Codex auth.json',
-             'older-build': 'generated for Daydream 0.0.1; regenerate it for the pinned'}[failure]
-    with pytest.raises(RuntimeError, match=match):
-        asyncio.run(DaydreamAgent(logs_dir=logs).install(Environment()))
-    assert len(commands) == {'namespace': 1, 'whole-login-folder': 2, 'older-build': 3}[failure]
+    return Environment()
+
+
+def test_a_pi_reviewer_needs_its_key_from_the_agent_env_and_no_codex_login(tmp_path):
+    from benchmarks.daydream.agent import DaydreamAgent
+    logs = tmp_path / 'agent'
+    logs.mkdir()
+    commands = []
+    # No Codex login is mounted (``test ! -e`` passes), and the key is set: the Codex checks never run.
+    environment = installer(logs, PI, BUILD, login=lambda command: 0, commands=commands)
+    asyncio.run(DaydreamAgent(logs_dir=logs, extra_env={'OPENROUTER_API_KEY': 'k'}).install(environment))
+    assert 'unshare -Ur true' not in commands and 'test ! -e /run/reviewer-codex' in commands
+    with pytest.raises(RuntimeError, match='The pi reviewer needs OPENROUTER_API_KEY'):
+        asyncio.run(DaydreamAgent(logs_dir=logs, extra_env={'OPENROUTER_API_KEY': ''}).install(environment))
+    with pytest.raises(ValueError, match=r"only reviewer keys from the agent env, not \['OPENAI_API_KEY'\]"):
+        asyncio.run(DaydreamAgent(logs_dir=logs, extra_env={'OPENROUTER_API_KEY': 'k', 'OPENAI_API_KEY': 'x'})
+                    .install(environment))
+    mounted = installer(logs, PI, BUILD, login=lambda command: 1)
+    with pytest.raises(RuntimeError, match='mounts no Codex login'):
+        asyncio.run(DaydreamAgent(logs_dir=logs, extra_env={'OPENROUTER_API_KEY': 'k'}).install(mounted))
+    unnamed = installer(logs, None, BUILD)
+    with pytest.raises(RuntimeError, match='no valid reviewer slot'):
+        asyncio.run(DaydreamAgent(logs_dir=logs).install(unnamed))
+    # A Codex reviewer ignores the empty key the experiments pass when it is unset.
+    asyncio.run(DaydreamAgent(logs_dir=logs, extra_env={'OPENROUTER_API_KEY': ''}).install(
+        installer(logs, CODEX, BUILD, login=lambda command: 0)))
+
+
+def test_a_pi_review_runs_daydreams_pi_backend_with_the_slots_model_and_only_its_key(review_case, monkeypatch):
+    from daydream import runner
+    case = review_case
+    (case.inputs / 'case.json').write_text(json.dumps({'format': 'aacr', 'repository': str(case.repo),
+        'findings': str(case.artifacts / 'findings.json'), 'reviewer': dict(PI, effort='high'),
+        'reviewer_credential': 'OPENROUTER_API_KEY'}))
+    monkeypatch.setenv('OPENROUTER_API_KEY', 'synthetic-openrouter-key')
+    monkeypatch.setenv('OPENAI_API_KEY', 'must-not-reach-pi')
+    monkeypatch.setenv('PI_PROVIDER', 'nous')
+    seen = {}
+    async def inference(config, *, review_result_handler, execution):
+        child = execution.backend.child_environment()
+        seen.update(backend=config.backend, model=config.model, effort=config.reasoning_effort,
+                    backends=sorted(execution.backends), provider=execution.backend.pi_provider,
+                    key=child.get('OPENROUTER_API_KEY'), openai='OPENAI_API_KEY' in child, codex='CODEX_HOME' in child,
+                    agent_dir=sorted(Path(child['PI_CODING_AGENT_DIR']).iterdir()),
+                    quiet={name: child.get(name) for name in entrypoint.PI_QUIET})
+        stage = Path(config.dump_artifacts)
+        await record_evidence(stage)
+        review_result_handler(finalized(case, []))
+        return 0
+    monkeypatch.setattr(runner, 'run', inference)
+    assert run_case(case) == 0
+    # Every phase gets the slot's model, since Daydream has no per-phase table on Pi; the slot, not
+    # the operator's PI_PROVIDER, picks the provider, and Pi's agent folder starts empty.
+    assert seen == dict(backend='pi', model='deepseek/deepseek-v4.1-flash-1017', effort='high', backends=['pi'],
+                        provider='openrouter', key='synthetic-openrouter-key', openai=False, codex=False,
+                        agent_dir=[], quiet=entrypoint.PI_QUIET)
+    proof = (case.artifacts / 'daydream/execution.json').read_text()
+    record = json.loads(proof)
+    assert record['reviewer'] == dict(PI, effort='high') and record['status'] == 'completed_empty'
+    assert record['resolved_configuration']['backend'] == 'pi'
+    assert record['resolved_configuration']['pi_provider'] == 'openrouter'
+    # The key reaches Pi alone: no artifact or log holds it.
+    for path in [*case.artifacts.rglob('*'), *case.logs.rglob('*')]:
+        assert not path.is_file() or b'synthetic-openrouter-key' not in path.read_bytes(), path
+
+
+def test_a_pi_review_without_its_key_never_starts(review_case, monkeypatch):
+    from daydream import runner
+    case = review_case
+    (case.inputs / 'case.json').write_text(json.dumps({'format': 'aacr', 'repository': str(case.repo),
+        'findings': str(case.artifacts / 'findings.json'), 'reviewer': PI, 'reviewer_credential': 'OPENROUTER_API_KEY'}))
+    monkeypatch.delenv('OPENROUTER_API_KEY', raising=False)
+    monkeypatch.setattr(runner, 'run', lambda *args, **kwargs: pytest.fail('must not start'))
+    assert run_case(case) == 1
+    record = json.loads((case.artifacts / 'daydream/execution.json').read_text())
+    assert any('needs OPENROUTER_API_KEY' in line for line in record['diagnostics'])
 
 
 @pytest.mark.parametrize('mismatch', ['stale', 'head', 'patch', 'request'])
@@ -409,7 +499,8 @@ def test_reviewbench_format_sends_line_findings_and_counts_file_level_ones(revie
     pr = {'repo': 'https://github.com/owner/project', 'pr_number': 17, 'base': BASE, 'head': HEAD}
     output = case.artifacts / 'out/findings.json'
     (case.inputs / 'case.json').write_text(json.dumps({'format': 'reviewbench', 'repository': str(case.repo),
-        'findings': str(output), 'base': BASE, 'pr': pr, 'description': 'Title\n\nBody'}))
+        'findings': str(output), 'base': BASE, 'pr': pr, 'description': 'Title\n\nBody',
+        'reviewer': CODEX, 'reviewer_credential': None}))
     # Daydream's items: the title, the claim with its labelled parts, and a head line, or none
     # for a whole-file finding or one whose only location is on the old side of the change.
     items = [{'file': 'file.php', 'line': 3, 'description': 'Off by one',

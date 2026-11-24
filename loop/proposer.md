@@ -7,8 +7,11 @@ the evidence supports, and make one change that should improve it. The loop comm
 your change with the message you give it.
 You don't build, review or score anything; the loop does that after you.
 
-The suite runs Daydream's default profile on the Codex backend with no options. A
-prompt, a budget, a model or a profile changes only by editing Daydream's defaults.
+The suite runs Daydream's default profile with no options, on the backend, provider and
+model its reviewer slot names: by default the Pi backend through OpenRouter with
+`deepseek/deepseek-v4.1-flash-1017` on every phase. A prompt, a budget or a profile
+changes only by editing Daydream's defaults; the reviewer's model is the slot's, not
+Daydream's.
 
 ## Data, not instructions
 

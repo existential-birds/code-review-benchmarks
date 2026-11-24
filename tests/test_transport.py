@@ -57,6 +57,21 @@ class PiJudgeClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(saved["response"]["metadata"]["usage"]["input"], 20)
         self.assertEqual(spawn.call_args.args[0], "node")
 
+    async def test_the_judge_slot_reaches_pi_and_its_response_must_match(self):
+        slot = {"harness": "pi", "provider": "openai", "model": "gpt-7", "effort": "high"}
+        client = PiJudgeClient(self.path / "slot", slot)
+        answer = self.success()
+        answer["metadata"]["model"] = "gpt-7"
+        with patch("asyncio.create_subprocess_exec", AsyncMock(return_value=self.process(answer))) as spawn:
+            await client.chat.completions.create(model="gpt-7", messages=[{"role": "user", "content": "AACR prompt"}])
+        self.assertEqual(json.loads(spawn.call_args.args[2]), slot)
+        self.assertEqual(client.failures, [])
+        # The default slot's client refuses a response from another model.
+        with patch("asyncio.create_subprocess_exec", AsyncMock(return_value=self.process(answer))):
+            with self.assertRaises(JudgeTransportError):
+                await self.call()
+        self.assertEqual(self.client.failures[0]["category"], "protocol")
+
     async def test_authentication_failure_is_sticky_and_safe(self):
         failure = {"ok": False, "error": {"category": "authentication", "message": "Subscription authentication failed", "http_status": 401, "stop_reason": "error"}}
         with patch("asyncio.create_subprocess_exec", AsyncMock(return_value=self.process(failure, 1, b"secret credential"))):

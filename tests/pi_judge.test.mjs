@@ -109,3 +109,19 @@ test('host refresh fails without a subscription login or when Pi cannot refresh'
     assert.equal(safeFailure(error).category, 'authentication');
   }
 });
+
+test('asks for the judge slot\'s model and effort, and refuses another judge', async () => {
+  const slot = { harness: 'pi', provider: 'openai', model: 'gpt-7', effort: 'high' };
+  const r = runtime({ ...response, model: 'gpt-7' });
+  const result = await completeJudge(r, request, slot);
+  assert.deepEqual(runtime.lastCall[0], { provider: 'openai', id: 'gpt-7' });
+  assert.equal(runtime.lastCall[2].reasoningEffort, 'high');
+  assert.equal(result.metadata.model, 'gpt-7');
+  assert.equal(result.metadata.effective_options.reasoning, 'high');
+  // The default slot sends no effort and refuses a response from another model.
+  await assert.rejects(completeJudge(runtime({ ...response, model: 'gpt-7' }), request), { category: 'runtime' });
+  assert.equal('reasoningEffort' in runtime.lastCall[2], false);
+  for (const bad of [{ ...slot, provider: 'openrouter' }, { ...slot, effort: 'extreme' }, { ...slot, extra: 1 }]) {
+    await assert.rejects(completeJudge(runtime(), request, bad), { category: 'request' });
+  }
+});
