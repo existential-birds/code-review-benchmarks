@@ -260,3 +260,54 @@ def test_the_trace_analysis_skill_freezes_the_pack_with_its_labels(pack):
     manifest = json.loads(selected.stdout)
     assert manifest['errors'] == [] and len(manifest['runs']) == 6
     assert len(manifest['labels']['items']) == len((pack / 'labels.jsonl').read_text().splitlines()) == 18
+
+
+def first_record(tmp_path: Path) -> Path:
+    trial = next((tmp_path / 'jobs/baseline-round-1-attempt-1').glob(f'{CASE_A}__*'))
+    return next((trial / 'agent/dataset/runs').glob('*.jsonl'))
+
+
+@pytest.mark.parametrize('escape', ['/elsewhere/agent/daydream/runs/secret', '../../../../../elsewhere'])
+def test_a_run_id_that_is_a_path_is_refused(baseline, tmp_path, escape):
+    record = first_record(tmp_path)
+    write(record, {**json.loads(record.read_text()), 'run_id': escape})
+    with pytest.raises(ValueError, match='not a plain folder name'):
+        evidence.build(baseline, tmp_path / 'pack')
+    assert not (tmp_path / 'pack').exists() and not list(tmp_path.glob('.evidence-*'))
+
+
+def test_a_linked_folder_leading_out_of_the_trial_is_refused(baseline, tmp_path):
+    # A check-set or held-out trial's evidence, reached through a link inside a climb trial.
+    outside = tmp_path / 'jobs/check-round-1/x__y/agent/daydream/runs'
+    trial = first_record(tmp_path).parents[3]
+    runs = trial / 'agent/daydream/runs'
+    run = next(runs.iterdir())
+    outside.parent.mkdir(parents=True)
+    run.rename(outside.parent / 'runs-moved')
+    (outside.parent / 'runs-moved').rename(outside)
+    runs.rmdir()
+    runs.symlink_to(outside, target_is_directory=True)
+    with pytest.raises(ValueError, match='outside the trial'):
+        evidence.build(baseline, tmp_path / 'pack')
+
+
+def test_a_run_whose_findings_were_withheld_keeps_its_evidence_but_gets_no_labels(baseline, tmp_path):
+    record = first_record(tmp_path)
+    data = json.loads(record.read_text())
+    write(record, {**data, 'findings': {'status': 'withheld', 'value': None}})
+    index = evidence.build(baseline, tmp_path / 'pack')
+    labels = [json.loads(line) for line in (tmp_path / 'pack/labels.jsonl').read_text().splitlines()]
+    assert labels and data['run_id'] not in {label['run_id'] for label in labels}
+    assert index['totals']['trials'] == 6
+
+
+def test_an_out_folder_made_meanwhile_is_not_replaced(baseline, tmp_path, monkeypatch):
+    real = evidence.collect
+    def collect(summary):
+        assert (tmp_path / 'pack').is_dir() and not any((tmp_path / 'pack').iterdir())
+        return real(summary)
+    monkeypatch.setattr(evidence, 'collect', collect)
+    evidence.build(baseline, tmp_path / 'pack')
+    (tmp_path / 'other').mkdir()
+    with pytest.raises(FileExistsError, match='Refusing to replace'):
+        evidence.build(baseline, tmp_path / 'other')
