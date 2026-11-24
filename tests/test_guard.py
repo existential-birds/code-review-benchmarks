@@ -126,8 +126,9 @@ def test_nothing_in_the_worktree_but_its_commits_reaches_the_checks_or_the_gate(
     ({'daydream/ruff.toml': 'lint.ignore = ["F"]\n'}, 'paths', 'daydream/ruff.toml may not change'),
     ({'docs/.gitattributes': '*.md text\n'}, 'paths', 'docs/.gitattributes may not change'),
     ({'.lfsconfig': '[lfs]\n\turl = https://example.invalid\n'}, 'paths', '.lfsconfig may not change'),
-    # Casefolded, for a disk that ignores case.
-    ({'docs/.GitAttributes': '* -diff\n'}, 'paths', 'docs/.GitAttributes may not change'),
+    # Casefolded, for a disk that ignores case. Its content sets no diff attribute, since on such a disk
+    # Git reads it as the folder's .gitattributes.
+    ({'docs/.GitAttributes': '*.md text\n'}, 'paths', 'docs/.GitAttributes may not change'),
     ({'.gitmodules': '[submodule "x"]\n\tpath = x\n\turl = https://example.invalid/x\n'}, 'paths',
      '.gitmodules may not change'),
     ({'daydream/logo.png': b'\x89PNG\0\0'}, 'shape', 'daydream/logo.png is binary'),
