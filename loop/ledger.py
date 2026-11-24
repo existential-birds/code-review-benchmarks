@@ -65,8 +65,8 @@ VERDICTS = ('accepted-on-dev', 'rejected', 'invalid')
 CONFIRMATIONS = ('confirmed', 'not-confirmed', 'regressed')
 # Why loop.run stopped: no gain lately, a budget spent, a confirmation that regressed, the judge drifting,
 # a winner waiting for a person, held-out cases used up, or broken builds, jobs, logins or limits.
-STOPS = ('plateau', 'budget', 'held-out-regression', 'judge-drift', 'winner-awaiting-merge', 'held-out-worn',
-         'infrastructure')
+STOPS = ('plateau', 'budget', 'held-out-regression', 'judge-drift', 'winner-awaiting-merge', 'winner-merged',
+         'held-out-worn', 'infrastructure')
 
 
 def _sha256(line: bytes) -> str:

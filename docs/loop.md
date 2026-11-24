@@ -47,6 +47,7 @@ Each stop is a `stop` entry in the ledger, with a reason and a detail:
 | `held-out-regression` | a confirmation said `regressed` |
 | `judge-drift` | the canary, run again every `canary_every` iterations, drifted |
 | `winner-awaiting-merge` | `max_unmerged_winners` confirmed winners in the run not yet merged |
+| `winner-merged` | A winner merged into Daydream: the run's baseline is stale, and a new run starts once the pin moves to a release holding it |
 | `held-out-worn` | `loop.confirm` refused: its held-out cases are used up (#58) |
 | `infrastructure` | `invalid_streak_stop` invalid iterations in a row; a subscription limit still there after one wait of `limit_backoff_minutes`; a canary or confirmation that gave no verdict; or an error in the loop |
 

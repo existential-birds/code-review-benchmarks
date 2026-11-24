@@ -65,7 +65,7 @@ import subprocess
 import sys
 
 from benchmarks.daydream import build
-from loop import decide, guard, ledger, rounds, settings
+from loop import decide, guard, ledger, rounds, sets, settings
 from loop.iterate import CLONE, WORKTREES
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -203,9 +203,9 @@ def sign(clone: Path, worktree: Path) -> str:
         person_git(worktree, *identity, 'commit', '--quiet', '--amend', '--no-edit', '--gpg-sign')
     except RuntimeError as error:
         raise Stop(f'Signing the commit failed: {error}\n\n{SIGNING}') from None
-    header = guard.git(worktree, 'cat-file', 'commit', 'HEAD').split('\n\n', 1)[0]
-    if not re.search(r'^gpgsig', header, re.MULTILINE):
-        raise Stop(f'The commit is not signed.\n\n{SIGNING}')
+    # A good signature, as Daydream's pre-push gate requires (%G? is G), not just a signature header.
+    if (status := person_git(worktree, 'log', '-1', '--format=%G?').strip()) != 'G':
+        raise Stop(f'The commit is not signed with a key Git can verify (signature status {status!r}).\n\n{SIGNING}')
     return guard.git(worktree, 'rev-parse', 'HEAD').strip()
 
 
@@ -381,7 +381,12 @@ def land(run: str, n: int, *, dry_run: bool | None = None, root: Path = ROOT) ->
         path = worktree / 'CHANGELOG.md'
         path.write_text(changelog(path.read_text(), line))
         guard.git(worktree, 'add', 'CHANGELOG.md')
-    commit = sign(clone, worktree)
+    if dry_run:
+        # A dry run takes no step that needs the person's key: the changelog goes in unsigned, as the loop.
+        guard.git(worktree, 'commit', '--quiet', '--amend', '--no-edit', environment=LOOP_IDENTITY)
+        commit = guard.git(worktree, 'rev-parse', 'HEAD').strip()
+    else:
+        commit = sign(clone, worktree)
     template = guard.git(clone, 'show', f'origin/main:{TEMPLATE}')
     landed = dict(main=main, commit=commit, moved=moved, files=files, notable=notable,
                   changelog=line.removeprefix('- '), gate=gate)
@@ -436,7 +441,7 @@ def bump(tag: str, root: Path = ROOT) -> dict:
     body_path = root / BUMPS / f'{version}.md'
     checks = ['make setup', 'make test',
               f'.venv/bin/python -m benchmarks.reviewbench.convert --upstream .cache/src/ReviewBench --output {pilot} '
-              '--task simnaut_emdash_2 --task <small-case>',
+              f'--split dev --task {sets.read(sets.CLIMB)[0]}',
               f'.venv/bin/harbor run -c experiments/reviewbench.yaml -p {pilot} -k 1 -n 2 -r 0 '
               f'--job-name pin-{version}-reviewbench-pilot',
               'make quickstart']
@@ -457,8 +462,8 @@ def bump(tag: str, root: Path = ROOT) -> dict:
             '- [ ] For custom code, recorded the Harbor-first evidence required by `CONTRIBUTING.md`, or explained '
             'why it is not applicable. N/A: the pin only, no custom code.', '',
             'Verified revision: [commit SHA]', '', *(f'- `{check}` — [result]' for check in checks))),
-        'Review context': '- `simnaut_emdash_2` is in ReviewBench\'s test split, so its pilot says only that it ran '
-                          'and scored, with no number.',
+        'Review context': '- The ReviewBench pilot is one climb-set case from the dev split; no held-out case is '
+                          'scored for a pin bump.',
     }, {})
     body_path.write_text(text)
     print(f'Prepared {branch} in {worktree}; nothing was run or pushed. Next:\n' + '\n'.join(

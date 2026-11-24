@@ -10,7 +10,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from loop import decide, guard, land, ledger, run as looprun, settings
+from loop import decide, guard, land, ledger, run as looprun, sets, settings
 from real_git import commit
 from test_loop_decide import BASE, WIN, summary
 
@@ -52,8 +52,13 @@ DESCRIPTION = 'The reviewer restates each handoff\'s open questions before it re
 HELD_OUT = dict(reviewbench=dict(grounded_f1=0.6123, cases=['held-out-case-7']))
 # The real step that leaves the machine, kept for the test that pushes to the local bare origin.
 PUSH = land.push
-SIGNER = '#!/bin/sh\ncat >/dev/null\nprintf \'[GNUPG:] SIG_CREATED D 1 8 00 0 K\\n\' >&2\n' \
-         'printf -- \'-----BEGIN PGP SIGNATURE-----\\n\\nc3R1Yg==\\n-----END PGP SIGNATURE-----\\n\'\n'
+# A stand-in gpg: it signs, and when Git asks it to verify, it reports a good signature from a trusted key.
+SIGNER = ('#!/bin/sh\n'
+          'case " $* " in *" --verify "*) cat >/dev/null 2>&1\n'
+          '  printf \'[GNUPG:] GOODSIG K Person\\n[GNUPG:] VALIDSIG K\\n[GNUPG:] TRUST_ULTIMATE 0 pgp\\n\'\n'
+          '  exit 0;; esac\n'
+          'cat >/dev/null\nprintf \'[GNUPG:] SIG_CREATED D 1 8 00 0 K\\n\' >&2\n'
+          'printf -- \'-----BEGIN PGP SIGNATURE-----\\n\\nc3R1Yg==\\n-----END PGP SIGNATURE-----\\n\'\n')
 
 
 def scores():
@@ -134,15 +139,16 @@ def upstream(daydream, files):
     return daydream.git(daydream.work, 'rev-parse', 'HEAD')
 
 
-def test_a_dry_run_writes_a_signed_branch_and_a_body_with_the_dev_numbers_and_no_held_out_one(daydream):
+def test_a_dry_run_writes_an_unsigned_branch_and_a_body_with_the_dev_numbers_and_no_held_out_one(daydream):
     before = (daydream.folder / 'ledger.jsonl').read_bytes()
     result = land.land('run-a', 2, dry_run=True, root=daydream.root)
     git, clone = daydream.git, daydream.clone
     assert result['branch'] == 'loop/restate-open-questions' and result['dry_run'] and result['url'] is None
     assert git(clone, 'rev-parse', result['branch']) == result['commit']
-    # Rebased onto the unmoved main, the changelog line added and signed; nothing pushed or recorded.
+    # Rebased onto the unmoved main and the changelog line added; a dry run uses no key, so nothing is signed,
+    # pushed or recorded.
     assert git(clone, 'rev-parse', f'{result["commit"]}^') == daydream.base
-    assert 'gpgsig ' in git(clone, 'cat-file', 'commit', result['commit'])
+    assert 'gpgsig ' not in git(clone, 'cat-file', 'commit', result['commit'])
     assert git(clone, 'show', f'{result["commit"]}:CHANGELOG.md') == (
         f'# Changelog\n\n## [Unreleased]\n\n### Changed\n\n- {DESCRIPTION}\n\n## [0.37.0] - 2026-11-23\n\n'
         '### Changed\n\n- Earlier.').strip()
@@ -208,7 +214,7 @@ def test_without_a_signing_key_it_stops_and_says_what_to_set_up(daydream, capsys
     daydream.git(daydream.clone, 'config', 'user.signingkey', 'K')
     daydream.git(daydream.clone, 'config', 'gpg.program', '/bin/false')
     with pytest.raises(land.Stop, match='Signing the commit failed'):
-        land.land('run-a', 2, dry_run=True, root=daydream.root)
+        land.sign(daydream.clone, daydream.clone)
 
 
 @pytest.mark.parametrize('n, why', [(1, 'not confirmed on held-out \\(not-confirmed\\)'),
@@ -264,7 +270,8 @@ def test_merged_records_the_merge_and_clears_the_winner(daydream, monkeypatch):
     assert entries[-1] | dict(time=None, prev_sha256=None) == dict(
         schema_version=1, run='run-a', time=None, prev_sha256=None, kind='merge', iteration=2, url=url,
         merge_commit='m' * 40)
-    assert looprun.due(entries, loaded, looprun.now()) is None
+    # Merged, the winner no longer holds the run; the run ends, since its baseline is now stale.
+    assert looprun.due(entries, loaded, looprun.now())[0] == 'winner-merged'
     assert land.main(['--merged', url]) == 2
 
 
@@ -303,7 +310,9 @@ def test_bump_prepares_the_pin_change_on_a_branch_and_runs_nothing(git, tmp_path
         assert heading in body
     assert '- [ ] Ran the relevant documented repository checks' in body and '`make test` — [result]' in body
     err = capsys.readouterr().err
-    for step in ('make setup', 'make test', '--task simnaut_emdash_2', 'make quickstart', 'gh pr create --draft'):
+    # The pilot is a climb-set case on the dev split; no held-out case is scored for a bump.
+    climb = sets.read(sets.CLIMB)[0]
+    for step in ('make setup', 'make test', f'--split dev --task {climb}', 'make quickstart', 'gh pr create --draft'):
         assert step in err
 
 

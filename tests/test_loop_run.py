@@ -170,14 +170,15 @@ def test_a_landing_that_stops_is_reported_and_the_run_goes_on_to_its_stop(loop, 
             'run-a --iteration 1') in capsys.readouterr().err
 
 
-def test_a_merged_winner_no_longer_holds_the_run(loop):
+def test_a_merged_winner_ends_the_run_since_its_baseline_is_stale(loop):
     assert loop.run('--run', 'run-a', iterations=['accepted'], confirms=['confirmed']) == 0
     url = 'https://github.com/existential-birds/daydream/pull/1'
     folder = loop.root / 'loop-runs/run-a'
     ledger.append(folder, 'landing', dict(iteration=1, url=url, branch='loop/x', commit='1' * 40))
     ledger.append(folder, 'merge', dict(iteration=1, url=url, merge_commit='m' * 40))
-    assert loop.run('--resume', 'run-a', '--set', 'plateau_iterations=1', iterations=['rejected']) == 0
-    assert loop.entries()[-1]['reason'] == 'plateau'
+    # No more iterations against the old baseline: the merge reaches the next run through the pin bump.
+    assert loop.run('--resume', 'run-a', iterations=[]) == 0
+    assert loop.entries()[-1]['reason'] == 'winner-merged' and 'loop.land --bump' in loop.entries()[-1]['detail']
 
 
 def test_the_first_run_on_a_new_pin_reports_its_gap_from_the_merged_winner(loop, monkeypatch, capsys):

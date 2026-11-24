@@ -37,6 +37,8 @@ Each stop is a ``stop`` entry, with its reason and a detail:
 - ``judge-drift``: the canary drifted;
 - ``winner-awaiting-merge``: ``max_unmerged_winners`` winners in the run with no ``merge``
   entry (``loop.land --merged``);
+- ``winner-merged``: a winner merged into Daydream, so the run's baseline is stale; the merge
+  becomes the baseline through the pin bump, and a new run measures it;
 - ``held-out-worn``: ``loop.confirm`` refused, since its held-out sets' uses are spent (#58);
 - ``infrastructure``: ``invalid_streak_stop`` invalid iterations in a row, a subscription
   limit still there after one wait of ``limit_backoff_minutes``, a canary or confirmation
@@ -364,6 +366,11 @@ def due(entries: list[dict], loaded: settings.Settings, at: datetime) -> tuple[s
     if (invalid := _streak(recent, lambda verdict: verdict == 'invalid')) >= loaded['invalid_streak_stop']:
         return 'infrastructure', f'{invalid} invalid iterations in a row (invalid_streak_stop)'
     merged = {entry['iteration'] for entry in entries if entry['kind'] == 'merge'}
+    if merged:
+        # Daydream's main now holds a winner, so this run's baseline is stale. The merge becomes the baseline
+        # through the pin bump (python -m loop.land --bump <tag>) after Daydream releases; a new run measures it.
+        return 'winner-merged', (f'#{", #".join(map(str, sorted(merged)))} merged into Daydream; start a new run '
+                                 'once the pin moves to a release holding it (python -m loop.land --bump)')
     winners = [entry['iteration'] for entry in entries
                if entry['kind'] == 'confirmation' and entry['verdict'] == 'confirmed' and entry['iteration'] not in merged]
     if len(winners) >= loaded['max_unmerged_winners']:

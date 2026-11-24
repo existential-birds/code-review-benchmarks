@@ -128,7 +128,10 @@ def name_pattern(names: set[str]) -> re.Pattern:
 
 
 def protected(path: str) -> bool:
-    return PurePosixPath(path).name in SETTINGS_FILES or any(fnmatch.fnmatchcase(path, rule) for rule in PROTECTED)
+    # Casefolded: on a disk that ignores case, as macOS's does by default, .GITATTRIBUTES is .gitattributes.
+    folded = path.casefold()
+    return (PurePosixPath(folded).name in {name.casefold() for name in SETTINGS_FILES}
+            or any(fnmatch.fnmatchcase(folded, rule.casefold()) for rule in PROTECTED))
 
 
 def is_test_file(path: str) -> bool:
