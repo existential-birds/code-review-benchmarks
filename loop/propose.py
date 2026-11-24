@@ -33,7 +33,8 @@ The prompt joins ``loop/proposer.md``, the container's paths, the diff limits an
 guard's protected paths, ``loop.ledger ideas`` for every run in ``loop-runs/``, and
 ``loop/seeds.md``. An attempt is refused when the proposer fails or times out, when it
 changed nothing, when ``proposal.json`` is invalid or doesn't list the commit's files,
-when the commit's ``git patch-id --stable`` equals an earlier iteration's, or when its
+when the commit's ``git patch-id --stable`` equals an earlier iteration's that wasn't
+invalid, or when its
 category and files equal a rejected iteration's that ``differs_from`` doesn't name. A
 refusal resets the worktree and the copy to the baseline and runs the proposer again
 with every refusal so far; after ``max_proposal_attempts`` it gives up. Each attempt's
@@ -178,7 +179,8 @@ def check_attempt(worktree: Path, base: str, commit: str, proposal: dict, pack: 
     files, lines = diff_size(worktree, base, commit)
     patch = patch_id(worktree, base, commit)
     for run, entry in earlier:
-        if (entry.get('candidate') or {}).get('patch_id') == patch:
+        # An invalid iteration said nothing about its idea, which may be tried again.
+        if entry['verdict']['verdict'] != 'invalid' and (entry.get('candidate') or {}).get('patch_id') == patch:
             raise ValueError(f"The change repeats the patch of {run} #{entry['iteration']}")
     if sorted(proposal['files']) != files:
         raise ValueError(f"proposal.json: files must list exactly the files the change touches, {files}")

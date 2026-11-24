@@ -180,8 +180,9 @@ def test_the_step_clones_fetches_cuts_a_worktree_and_commits_the_proposers_one_c
 def test_a_repeated_patch_is_refused_and_the_proposer_retries_from_the_baseline_with_the_reason(
         tmp_path, remote, step, git):
     _, source, base = remote
-    # Any earlier run's patch counts, whatever its verdict.
-    start_run(tmp_path / 'suite', iteration(4, 'invalid', same_patch(git, source, base, EFFORT)), name='run-0')
+    # Any earlier run's patch counts, unless its iteration was invalid: that said nothing about the idea.
+    start_run(tmp_path / 'suite', iteration(4, 'rejected', same_patch(git, source, base, EFFORT)), name='run-0')
+    start_run(tmp_path / 'suite', iteration(1, 'invalid', same_patch(git, source, base, PROMPT)), name='run-1')
     result, calls = step([dict(edits=[EFFORT], proposal=proposal()),
                           dict(edits=[PROMPT], proposal=proposal(files=['daydream/prompts/review.py']))])
     assert result['refusals'] == [dict(attempt=1, reason='The change repeats the patch of run-0 #4')]
