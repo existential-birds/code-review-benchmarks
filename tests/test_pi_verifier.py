@@ -69,7 +69,7 @@ def judge(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize('kwargs,validity_ms', [({}, 30 * 60 * 1000),
                                                ({'min_judge_validity_sec': '2400'}, 40 * 60 * 1000)])
-def test_uploads_only_the_refreshed_openai_codex_access_before_scoring(judge, kwargs, validity_ms):
+def test_uploads_only_the_refreshed_openai_access_before_scoring(judge, kwargs, validity_ms):
     verifier = judge_verifier.PiJudgeVerifier(task=None, trial_paths=None, environment=judge.environment, **kwargs)
     assert asyncio.run(verifier.verify()) == 'scored'
     assert judge.refreshes == [(judge.home / 'auth.json', validity_ms)]
@@ -148,3 +148,8 @@ def test_waits_out_another_process_rewriting_the_login(tmp_path):
         assert judge_verifier.read_login(auth_path) == login(5)['openai']
     finally:
         writer.join()
+
+
+def test_a_validity_longer_than_the_logins_tokens_is_refused():
+    with pytest.raises(ValueError, match='at most 3000'):
+        judge_verifier.PiJudgeVerifier(task=None, trial_paths=None, environment=None, min_judge_validity_sec=3600)

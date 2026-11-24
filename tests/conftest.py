@@ -1,9 +1,11 @@
 """Tests never run Git through PATH. A ``git`` that always fails comes first on PATH,
 so any call that slips past the fakes in ``fake_git.py`` fails the test instead of
-reaching the real Git and the operator's configuration. The one exception is
-``test_guard.py``, whose checks depend on what Git itself reports: it calls the real
-binary by absolute path with the operator's configuration shut out."""
+reaching the real Git and the operator's configuration. The exceptions are checks that
+depend on what Git itself reports, which ask for ``real_git``: ``test_guard.py`` calls it
+by absolute path with the operator's configuration shut out, and the frozen-comparison
+test runs Daydream's own Git reads on a real checkout."""
 import os
+from pathlib import Path
 
 import pytest
 
@@ -18,6 +20,18 @@ def no_real_git(tmp_path_factory):
     os.environ['PATH'] = f'{shim}{os.pathsep}{previous}'
     yield
     os.environ['PATH'] = previous
+
+
+@pytest.fixture
+def real_git():
+    """The installed Git binary, past the failing one."""
+    for directory in os.environ['PATH'].split(os.pathsep):
+        candidate = Path(directory) / 'git'
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            with candidate.open('rb') as file:
+                if b'tests must not run git' not in file.read(200):
+                    return candidate
+    pytest.fail('These tests need Git installed')
 
 
 @pytest.fixture

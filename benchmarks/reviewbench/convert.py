@@ -24,8 +24,9 @@ REVIEWER_HOSTS = ('chatgpt.com', 'auth.openai.com')
 JUDGE_HOSTS = ('api.openai.com',)
 # Exported tasks read this placeholder from the host; the judge folder is fixed instead.
 JUDGE_DIR_VARIABLE = 'RB_HARBOR_PI_AGENT_DIR'
-# Pi 0.75.5, which ReviewBench's judge pins, doesn't list this model itself; this is how
-# Pi 1.6 lists it under the openai provider.
+# Pi 0.75.5, which ReviewBench's judge pins, doesn't list this model itself. The endpoint
+# and API are Pi 1.6's for the openai provider. The context window is kept large on
+# purpose: Pi 0.75.5's compaction sends max_output_tokens, which the ChatGPT login rejects.
 JUDGE_MODELS = {'providers': {PROVIDER: {
     'api': 'openai-responses',
     'baseUrl': 'https://api.openai.com/v1',

@@ -82,7 +82,8 @@ ReviewBench's GitHub mirror when Harbor first builds it.
 settings. It gives each review 5,400 seconds instead of ReviewBench's 900, and
 4 CPUs and 8 GB, as AACR does. Selecting cases, attempts, concurrency, retries,
 reruns and timeouts all work as in [the AACR guide](../aacr/README.md#run), including
-its advice on keeping failed trials.
+its advice on keeping failed trials, except the verifier timeout: it is 2,100 seconds,
+within the judge login's hour-long tokens, so don't multiply it.
 
 To check the judge without running Daydream, score ReviewBench's own true findings
 for one task:
