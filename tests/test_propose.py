@@ -34,6 +34,8 @@ for files in step.get('edits', []):
         if content is None:
             (work / name).unlink()
         else:
+            if (work / name).is_dir():
+                (work / name).rmdir()
             (work / name).parent.mkdir(parents=True, exist_ok=True)
             (work / name).write_text(content)
 for name, target in step.get('links', {}).items():
@@ -222,9 +224,11 @@ def test_after_max_proposal_attempts_refusals_it_reports_no_proposal(tmp_path, r
     (dict(links={'daydream/escape.py': '/etc/passwd'}), 'adds or alters a link: daydream/escape.py'),
     (dict(git=['.git/hooks']), 'adds a .git entry: .git'),
     (dict(git=['daydream/.git']), 'adds a .git entry: daydream/.git'),
+    # On a disk that ignores case, as macOS's does by default, .GIT would be the worktree's .git file.
+    (dict(edits=[{'.GIT': 'gitdir: elsewhere\n'}]), 'adds a .git entry: .GIT'),
 ])
 def test_a_link_or_git_folder_left_in_the_copy_is_refused_and_never_reaches_the_worktree(step, extra, reason):
-    result, _ = step([dict(edits=[EFFORT], proposal=proposal(), **extra)], max_proposal_attempts=1)
+    result, _ = step([dict(dict(edits=[EFFORT], proposal=proposal()), **extra)], max_proposal_attempts=1)
     assert result['proposal'] is None and reason in result['refusals'][0]['reason']
     worktree = Path(result['worktree'])
     assert not (worktree / 'daydream/escape.py').exists() and not (worktree / 'daydream/.git').exists()
@@ -272,3 +276,61 @@ def test_the_container_mounts_only_the_proposers_folders_and_the_codex_login(tmp
     (login / 'auth.json').unlink()
     with pytest.raises(ValueError, match='No Codex login'):
         propose.container(['codex', 'exec'], scratch, 'x')
+
+
+def test_a_folder_of_the_baseline_replaced_by_a_file_is_committed(step, git):
+    result, _ = step([dict(edits=[{'daydream/prompts/review.py': None}, {'daydream/prompts': 'PROMPTS = {}\n'}],
+                           proposal=proposal(files=['daydream/prompts', 'daydream/prompts/review.py']))])
+    assert result['proposal'], result['refusals']
+    assert git(result['worktree'], 'show', '--name-status', '--format=', 'HEAD').split('\n') == [
+        'A\tdaydream/prompts', 'D\tdaydream/prompts/review.py']
+
+
+def test_a_link_in_the_baseline_is_kept_and_a_folder_may_replace_it(tmp_path, git, pack, monkeypatch):
+    source = tmp_path / 'linked'
+    source.mkdir()
+    git(source, 'init', '-q', '-b', 'main')
+    (source / 'docs').mkdir()
+    (source / 'docs/guide.md').write_text('Guide\n')
+    (source / 'CLAUDE.md').symlink_to('AGENTS.md')
+    base = commit(git, source, DAYDREAM)
+    git(tmp_path, 'clone', '-q', '--bare', str(source), str(tmp_path / 'linked.git'))
+    for number, edits, files in ((1, [EFFORT], ['daydream/config.py']),
+                                 (2, [{'CLAUDE.md': None}, {'CLAUDE.md/notes.md': 'Notes\n'}],
+                                  ['CLAUDE.md', 'CLAUDE.md/notes.md'])):
+        launch, _ = stand_in(tmp_path / f'linked-{number}', [dict(edits=edits, proposal=proposal(files=files))])
+        monkeypatch.setattr(propose, 'launch', launch)
+        monkeypatch.setattr(propose, 'stop', lambda name: None)
+        result = propose.propose(f'run-{number}', base, pack, settings.load(), root=tmp_path / 'suite',
+                                 url=str(tmp_path / 'linked.git'), timeout=30)
+        assert result['proposal'] and result['diff']['files'] == len(files)
+    assert git(Path(result['worktree']), 'show', '--name-status', '--format=', 'HEAD').split('\n') == [
+        'D\tCLAUDE.md', 'A\tCLAUDE.md/notes.md']
+
+
+def test_a_failure_to_start_the_proposer_leaves_no_worktree_or_branch_behind(tmp_path, remote, pack, monkeypatch,
+                                                                           capsys, git):
+    monkeypatch.setattr(propose, 'ROOT', tmp_path / 'suite')
+    monkeypatch.setattr(propose, 'CLONE_URL', str(remote[0]))
+    def no_docker(argv, scratch, name):
+        raise FileNotFoundError('docker')
+    monkeypatch.setattr(propose, 'launch', no_docker)
+    monkeypatch.setattr(propose, 'stop', lambda name: None)
+    for _ in range(2):
+        assert propose.main(['--run', 'run-a', '--baseline', remote[2], '--evidence', str(pack)]) == 2
+        assert 'FileNotFoundError' in json.loads(capsys.readouterr().out)['error']
+    assert not (tmp_path / 'suite/.cache/loop/worktrees/run-a-1').exists()
+    assert git(tmp_path / 'suite/.cache/loop/daydream', 'branch', '--list', 'loop/*') == ''
+
+
+def test_the_loops_git_takes_no_driver_from_the_operators_configuration(tmp_path, git, monkeypatch):
+    marker = tmp_path / 'ran'
+    (tmp_path / 'operator.gitconfig').write_text(f'[filter "p"]\n\tclean = touch {marker}; cat\n')
+    monkeypatch.setenv('GIT_CONFIG_GLOBAL', str(tmp_path / 'operator.gitconfig'))
+    repository = tmp_path / 'repository'
+    repository.mkdir()
+    propose.guard.git(repository, 'init', '-q')
+    (repository / '.gitattributes').write_text('* filter=p\n')
+    (repository / 'file.py').write_text('x = 1\n')
+    propose.guard.git(repository, 'add', '--all')
+    assert not marker.exists()

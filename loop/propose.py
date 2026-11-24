@@ -81,6 +81,8 @@ RUN npm install --global --ignore-scripts @openai/codex@{build.BUILD['codex_cli'
 RUN python3 --version && codex --version
 '''
 IMAGE = 'daydream-loop-proposer:' + hashlib.sha256(DOCKERFILE.encode()).hexdigest()[:16]
+# Larger than any source file the harness holds; reading it whole stays cheap.
+MAX_FILE_BYTES = 5 * 1024 * 1024
 # A Conventional Commit's first line.
 MESSAGE = re.compile(r'(build|chore|docs|feat|fix|perf|refactor|style|test)(\([a-z0-9._/-]+\))?!?: \S.*')
 # The trace-analysis skill's categories (scripts/reports.py's CATEGORIES in Daydream 0.37.0).
@@ -274,6 +276,9 @@ def container(argv: list[str], scratch: Path, name: str) -> list[str]:
     variables = {name: os.environ[name] for name in ENVIRONMENT if name in os.environ} | dict(
         CODEX_HOME='/codex', HOME='/tmp', **PATHS)
     return ['docker', 'run', '--rm', '--interactive', '--init', '--name', name, '--workdir', PATHS['WORK'],
+            # As the operator, so every file it leaves can be removed; with no privileges to gain.
+            '--user', f'{os.getuid()}:{os.getgid()}', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges',
+            '--pids-limit', '1024', '--memory', '8g',
             *[part for source, target, mode in mounts for part in ('--volume', f'{source}:{target}:{mode}')],
             *[part for key, value in variables.items() for part in ('--env', f'{key}={value}')],
             image(), *argv]
@@ -287,7 +292,7 @@ def export(repository: Path, base: str, target: Path) -> None:
     """The baseline's tracked files, with no Git folder, for the proposer to edit."""
     target.mkdir()
     archive = subprocess.run([guard.GIT, *guard.GIT_OPTIONS, '-C', str(repository), 'archive', '--format=tar', base],
-                             capture_output=True, check=True).stdout
+                             capture_output=True, check=True, env=os.environ | guard.ISOLATED).stdout
     with tarfile.open(fileobj=io.BytesIO(archive)) as tar:
         tar.extractall(target, filter='tar')
 
@@ -300,7 +305,7 @@ def _entries(folder: Path) -> dict[str, os.stat_result]:
             path = Path(directory) / name
             info = path.lstat()
             # A folder is listed only when it is a Git folder, which a change may never add.
-            if not stat.S_ISDIR(info.st_mode) or stat.S_ISLNK(info.st_mode) or name == '.git':
+            if not stat.S_ISDIR(info.st_mode) or stat.S_ISLNK(info.st_mode) or name.casefold() == '.git':
                 found[path.relative_to(folder).as_posix()] = info
         folders[:] = [name for name in folders if not (Path(directory) / name).is_symlink()]
     return found
@@ -312,8 +317,11 @@ def apply(work: Path, worktree: Path) -> None:
     # The worktree's own .git file is Git's, not part of the change.
     current = {path: info for path, info in current.items() if path != '.git' and not path.startswith('.git/')}
     for path, info in edited.items():
-        if '.git' in PurePosixPath(path).parts:
+        # Casefolded: on a disk that ignores case, as macOS's does by default, .GIT is .git.
+        if '.git' in (part.casefold() for part in PurePosixPath(path).parts):
             raise ValueError(f'The change adds a .git entry: {path}')
+        if info.st_size > MAX_FILE_BYTES:
+            raise ValueError(f'The change holds a file over {MAX_FILE_BYTES} bytes: {path}')
         if stat.S_ISLNK(info.st_mode):
             if path not in current or os.readlink(work / path) != os.readlink(worktree / path):
                 raise ValueError(f'The change adds or alters a link: {path}')
@@ -330,6 +338,11 @@ def apply(work: Path, worktree: Path) -> None:
         target = worktree / path
         if not target.parent.resolve().is_relative_to(worktree.resolve()):
             raise ValueError(f'The change writes outside the worktree: {path}')
+        if target.exists() and os.path.samefile(target, worktree / '.git'):
+            raise ValueError(f'The change writes over the worktree\'s Git file: {path}')
+        if target.is_dir() and not target.is_symlink():
+            # A folder of the baseline replaced by a file; its files were deleted above.
+            shutil.rmtree(target)
         data = (work / path).read_bytes()
         if not target.is_file() or target.read_bytes() != data:
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -381,10 +394,11 @@ def propose(run: str, baseline: str, pack: Path, loaded: settings.Settings, *, r
         raise ValueError(f'{worktree} or the branch {branch} already exists: iteration {n} was proposed '
                          'without a ledger entry. Record it, or remove both')
     logs = root / '.cache/loop/logs' / f'{run}-{n}'
-    scratch = Path(tempfile.mkdtemp(prefix='loop-propose-'))
+    scratch, made = Path(tempfile.mkdtemp(prefix='loop-propose-')), False
     try:
         copy_pack(Path(pack), scratch / 'evidence')
         guard.git(repository, 'worktree', 'add', '--quiet', '-b', branch, str(worktree), base)
+        made = True
         logs.mkdir(parents=True, exist_ok=True)
         ideas = ledger.ideas(runs)
         result = dict(run=run, iteration=n, baseline=base, branch=branch, worktree=str(worktree), logs=str(logs),
@@ -415,11 +429,17 @@ def propose(run: str, baseline: str, pack: Path, loaded: settings.Settings, *, r
                 apply(scratch / 'work', worktree)
                 commit = commit_change(worktree, proposal['message'])
                 return result | check_attempt(worktree, base, commit, proposal, scratch / 'evidence', earlier)
-            except (ValueError, RuntimeError, OSError) as error:
+            except (ValueError, RuntimeError, OSError, MemoryError) as error:
                 result['refusals'].append(dict(attempt=attempt, reason=str(error)))
                 guard.git(worktree, 'checkout', '--quiet', '--force', '-B', branch, base)
                 guard.git(worktree, 'clean', '-ffdxq')
         return result | dict(reason=f'No proposal: all {result["attempts"]} attempts were refused')
+    except BaseException:
+        # Set-up or the container failed, not the proposer: leave nothing that blocks the next try.
+        if made:
+            guard.git(repository, 'worktree', 'remove', '--force', str(worktree))
+            guard.git(repository, 'branch', '--delete', '--force', branch)
+        raise
     finally:
         _remove(scratch)
 
@@ -438,8 +458,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         result = propose(arguments.run, arguments.baseline, arguments.evidence, settings.load(),
                          root=ROOT, url=CLONE_URL, timeout=arguments.timeout)
-    except (OSError, RuntimeError, ValueError) as error:
-        print(json.dumps(dict(error=str(error)), indent=2))
+    except Exception as error:
+        print(json.dumps(dict(error=f'{type(error).__name__}: {error}'), indent=2))
         return 2
     print(json.dumps(result, indent=2))
     return 0 if result['proposal'] else 1
