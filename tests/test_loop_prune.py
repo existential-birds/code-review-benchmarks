@@ -165,3 +165,14 @@ def test_docker_failing_to_list_images_leaves_one_error_and_the_rest_still_goes(
     assert [item['error'] for item in result['items'] if 'error' in item] == [
         'docker image ls failed: Cannot connect to the Docker daemon']
     assert not (loop.root / 'artifacts/loop/run-a-1-climb/catalog').exists()
+
+
+def test_prune_works_on_its_root_from_any_working_directory(loop, docker, tmp_path, monkeypatch):  # noqa: F811
+    loop.run(['base'])
+    elsewhere = tmp_path / 'elsewhere'
+    (elsewhere / 'artifacts/loop/run-a-1-climb/catalog').mkdir(parents=True)
+    monkeypatch.chdir(elsewhere)
+    prune.prune('run-a', settings.load(**LIMITS), root=loop.root)
+    # The run's catalog under its root went; the like-named one under the working directory stayed.
+    assert not (loop.root / 'artifacts/loop/run-a-1-climb/catalog').exists()
+    assert (elsewhere / 'artifacts/loop/run-a-1-climb/catalog').is_dir()
