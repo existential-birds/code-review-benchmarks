@@ -239,7 +239,9 @@ def iterate(run: str, loaded: settings.Settings, *, root: Path = ROOT) -> dict:
         # Nothing recorded: say so, and let an interrupt still end the process as one.
         print(f'Iteration {base["iteration"]} could not be recorded ({type(error).__name__}: {error}); its '
               f'worktree {work["worktree"]} is left for a person', file=sys.stderr)
-        if interrupted is not None:
+        # An interrupt pending since the steps outranks an ordinary error in recording; a stop that came
+        # while recording ends the process itself.
+        if interrupted is not None and isinstance(error, Exception):
             raise interrupted from error
         raise
     if work['worktree'] and verdict != 'accepted-on-dev':
