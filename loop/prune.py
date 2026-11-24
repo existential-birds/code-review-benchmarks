@@ -75,13 +75,13 @@ def image(trial: str) -> str:
 def started(run: str, numbers: set[int], root: Path) -> list[int]:
     """Iterations of the run with a log folder, worktree or rounds but no ledger entry."""
     pattern = re.compile(rf'{re.escape(run)}-(\d+)(-climb|-check)?')
-    found = {int(match[1]) for folder in (root / LOGS, root / WORKTREES, rounds.ARTIFACTS) if folder.is_dir()
+    found = {int(match[1]) for folder in (root / LOGS, root / WORKTREES, root / rounds.ARTIFACTS) if folder.is_dir()
              for path in folder.iterdir() if (match := pattern.fullmatch(path.name))}
     return sorted(found - numbers)
 
 
-def _jobs(name: str) -> list[str]:
-    path = rounds.ARTIFACTS / name / 'summary.json'
+def _jobs(name: str, root: Path) -> list[str]:
+    path = root / rounds.ARTIFACTS / name / 'summary.json'
     return [entry['job'] for entry in json.loads(path.read_text())['jobs']] if path.exists() else []
 
 
@@ -113,9 +113,9 @@ def _remove(item: dict, root: Path) -> None:
             if result.returncode:
                 raise RuntimeError(f'docker image rm failed: {result.stderr.strip()}')
     elif item['kind'] == 'worktree':
-        guard.git(root / iterate.CLONE, 'worktree', 'remove', '--force', item['path'])
+        guard.git(root / iterate.CLONE, 'worktree', 'remove', '--force', str(root / item['path']))
     else:
-        shutil.rmtree(item['path'])
+        shutil.rmtree(root / item['path'])
 
 
 def prune(run: str, loaded: settings.Settings, *, dry_run: bool = False, between_iterations: bool = False,
@@ -135,8 +135,8 @@ def prune(run: str, loaded: settings.Settings, *, dry_run: bool = False, between
         if entry['verdict']['verdict'] == 'accepted-on-dev':
             continue
         names = [f'{run}-{n}-{stage}' for stage in STAGES]
-        jobs = [rounds.JOBS / job for name in names for job in _jobs(name)]
-        paths += [(n, 'catalog', rounds.ARTIFACTS / name / 'catalog') for name in names]
+        jobs = [root / rounds.JOBS / job for name in names for job in _jobs(name, root)]
+        paths += [(n, 'catalog', root / rounds.ARTIFACTS / name / 'catalog') for name in names]
         commit = entry.get('candidate', {}).get('commit')
         if commit and commit != entries[0]['baseline_commit']:
             paths.append((n, 'candidate build', root / CANDIDATES / commit))
@@ -145,7 +145,8 @@ def prune(run: str, loaded: settings.Settings, *, dry_run: bool = False, between
                    if trial.is_dir()]
         if sum(later > n for later in numbers) >= loaded['keep_rejected_jobs']:
             paths += [(n, 'job', job) for job in jobs]
-    items = [dict(iteration=n, kind=kind, path=str(path), bytes=size(path))
+    # Reported relative to the root; removed at root / path, whatever the working directory.
+    items = [dict(iteration=n, kind=kind, path=str(path.relative_to(root)), bytes=size(path))
              for n, kind, path in paths if path.exists() or path.is_symlink()]
     # The images first, since their names come from the jobs' trial folders. Docker failing to list them
     # leaves one error behind, not every other item.
@@ -173,7 +174,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument('--dry-run', action='store_true', help='List what would go and its size; remove nothing')
     arguments = parser.parse_args(argv)
     try:
-        result = prune(arguments.run, settings.load(), dry_run=arguments.dry_run, root=ROOT)
+        # The run's own settings, as it recorded them at its start.
+        entries = ledger.read(ROOT / 'loop-runs' / arguments.run)
+        recorded = (entries[0].get('settings', {}) if entries else {})
+        loaded = settings.load(**{key: value for key, value in recorded.items()
+                                  if key in settings.SETTINGS or key in settings.DERIVED})
+        result = prune(arguments.run, loaded, dry_run=arguments.dry_run, root=ROOT)
     except (OSError, RuntimeError, ValueError) as error:
         print(json.dumps(dict(error=str(error)), indent=2))
         return 2

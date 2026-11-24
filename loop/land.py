@@ -34,7 +34,8 @@ Run it from the repository root. ``--iteration`` lands an iteration whose ledger
    or dependency.
 
 ``--dry-run`` stops after step 3: the branch and the body stay local, and nothing is
-pushed, opened or recorded. It is the default when the run's ``auto_open_pr`` is off.
+pushed, opened or recorded. ``loop.run`` lands a winner this way when the run's
+``auto_open_pr`` is off; a person then runs ``loop.land`` without it to land it.
 
 ``--merged`` reads the pull request with ``gh`` and, once merged, records its merge commit
 as a ``merge`` entry in that run's ledger, so the winner no longer holds the loop back.
@@ -270,6 +271,13 @@ def fill(template: str, sections: dict[str, str], facts: dict) -> str:
     return '\n\n'.join(out) + '\n'
 
 
+def added(landed: dict) -> str:
+    """What landing added to the scored commit: the changelog line when notable, the signature unless a dry run."""
+    parts = [part for part, done in (('the changelog line', landed['notable']), ('the signature', landed['signed']))
+             if done]
+    return f'with {" and ".join(parts)} added' if parts else 'unchanged but for its committer, unsigned for a dry run'
+
+
 def body(template: str, run: str, n: int, start: dict, entry: dict, line_sha256: str, landed: dict) -> str:
     """The pull request's body, from Daydream's template: everything but held-out numbers and cases."""
     proposal, candidate, cost = entry['proposal'], entry['candidate'], entry.get('cost', {})
@@ -281,8 +289,8 @@ def body(template: str, run: str, n: int, start: dict, entry: dict, line_sha256:
     rebased = (f'The scored commit `{scored}` and the proposed commit `{landed["commit"]}` differ by a rebase onto '
                f'`origin/main` at `{landed["main"]}`, which moved since the baseline `{candidate["baseline"]}`; '
                'the guard and the gate passed again on the rebased change.' if landed['moved'] else
-               f'The proposed commit `{landed["commit"]}` is the scored commit `{scored}` with the changelog line and '
-               'the signature added; `main` has not moved since the baseline.')
+               f'The proposed commit `{landed["commit"]}` is the scored commit `{scored}` {added(landed)}; `main` '
+               'has not moved since the baseline.')
     name = f'{run}-{n}-rescore'
     build_file = f'.cache/daydream-candidates/{scored}/build.json'
     planned = climb['rounds']['planned']
@@ -341,7 +349,7 @@ def body(template: str, run: str, n: int, start: dict, entry: dict, line_sha256:
     return fill(template, sections, dict(gate=bool(gate.get('accepted')), tests=tests, notable=landed['notable']))
 
 
-def land(run: str, n: int, *, dry_run: bool | None = None, root: Path = ROOT) -> dict:
+def land(run: str, n: int, *, dry_run: bool = False, root: Path = ROOT) -> dict:
     """Land iteration n of the run: its branch, body and, unless a dry run, its draft pull request."""
     folder = root / 'loop-runs' / run
     entries, lines = ledger._verified(folder)
@@ -350,7 +358,6 @@ def land(run: str, n: int, *, dry_run: bool | None = None, root: Path = ROOT) ->
     entry = winner(entries, n)
     line_sha256 = hashlib.sha256(lines[entries.index(entry)]).hexdigest()
     loaded = settings.load(**entries[0]['settings'])
-    dry_run = not loaded['auto_open_pr'] if dry_run is None else dry_run
     clone = root / CLONE
     if not (clone / '.git').exists():
         raise ValueError(f'No loop clone at {clone}, where the iteration\'s commit is')
@@ -388,7 +395,7 @@ def land(run: str, n: int, *, dry_run: bool | None = None, root: Path = ROOT) ->
     else:
         commit = sign(clone, worktree)
     template = guard.git(clone, 'show', f'origin/main:{TEMPLATE}')
-    landed = dict(main=main, commit=commit, moved=moved, files=files, notable=notable,
+    landed = dict(main=main, commit=commit, moved=moved, files=files, notable=notable, signed=not dry_run,
                   changelog=line.removeprefix('- '), gate=gate)
     text = body(template, run, n, entries[0], entry, line_sha256, landed)
     body_path = folder / 'land' / f'{n}.md'
@@ -433,10 +440,11 @@ def bump(tag: str, root: Path = ROOT) -> dict:
     pin['codex_cli'] = current['codex_cli']
     version = identity['version']
     branch, worktree = f'pin/daydream-{version}', root / BUMPS / version
-    guard.git(root, 'worktree', 'add', '--quiet', '-b', branch, str(worktree), 'HEAD')
+    # The person's commit in this repository: their identity and configuration, and its hooks on.
+    person_git(root, 'worktree', 'add', '--quiet', '-b', branch, str(worktree), 'HEAD')
     (worktree / PIN).write_text(json.dumps(pin, indent=2) + '\n')
-    guard.git(worktree, 'add', str(PIN))
-    guard.git(worktree, 'commit', '--quiet', '-m', f'Pin Daydream {version}')
+    person_git(worktree, 'add', str(PIN))
+    person_git(worktree, 'commit', '--quiet', '-m', f'Pin Daydream {version}')
     pilot = f'artifacts/reviewbench/pin-{version}-pilot'
     body_path = root / BUMPS / f'{version}.md'
     checks = ['make setup', 'make test',
@@ -520,8 +528,8 @@ def main(argv: list[str] | None = None) -> int:
     which.add_argument('--merged', metavar='PR', help="A landed pull request's URL or number, once merged")
     which.add_argument('--bump', metavar='TAG', help='Prepare the pin change to this Daydream release here')
     parser.add_argument('--run', type=ledger._run_name, help='The run, a folder name under loop-runs/')
-    parser.add_argument('--dry-run', action='store_true', default=None,
-                        help="Write the branch and the body locally and push nothing (the default with auto_open_pr off)")
+    parser.add_argument('--dry-run', action='store_true',
+                        help='Write the branch and the body locally and push nothing')
     arguments = parser.parse_args(argv)
     if (arguments.iteration is None) != (arguments.run is None):
         parser.error('--iteration and --run go together')
