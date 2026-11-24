@@ -29,6 +29,9 @@ def summary(case_counts: dict, side='p' * 40):
 
 def test_the_upper_bound_widens_a_five_round_sd_by_the_chi_square_factor():
     assert noise.chi2_lower(0.2, 4) == pytest.approx(1.6488, abs=1e-4)
+    # Published 20% quantiles, including many rounds, where a short series would not converge.
+    for df, quantile in ((1, 0.0642), (10, 6.1791), (22, 16.3140), (50, 41.4492), (200, 183.0028)):
+        assert noise.chi2_lower(0.2, df) == pytest.approx(quantile, abs=1e-3)
     result = noise.spread([0.40, 0.42, 0.41, 0.39, 0.43])
     assert result['sd'] == pytest.approx(0.015811, abs=1e-6)
     assert result['sd_upper'] == pytest.approx(result['sd'] * math.sqrt(4 / 1.648777), rel=1e-5)

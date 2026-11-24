@@ -37,8 +37,8 @@ and the figures on the cases every round scored are the same as on all 50.
 | 5 | 0.917 | 0.176 | 0.295 | 0.958 | 0.328 | 0.489 | 2 | 0 | $125.63 |
 
 Costs are API-equivalent estimates from the trials themselves, not subscription
-charges: $627.96 for the 240 scored reviews, about $2.62 each. A round took two to
-four hours.
+charges: $627.96 for all 250 reviews, the failed ones included, about $2.51 each. A
+round took two to four hours.
 
 ## Spread between rounds
 
@@ -51,10 +51,20 @@ widens it by √(4 / 1.6488) = 1.558. The loop uses the upper bound.
 | All 50 cases, and the 48 every round scored | 0.0104 (0.0162) | 0.0122 (0.0190) | 0.0074 (0.0115) | 0.0065 (0.0102) | 0.0064 (0.0100) | 0.0058 (0.0090) |
 | The first 25 climb cases | 0.0189 (0.0294) | 0.0202 (0.0314) | 0.0132 (0.0206) | 0.0187 (0.0291) | 0.0098 (0.0153) | 0.0157 (0.0245) |
 
-The judge adds almost nothing. Four oracle rounds scored every true finding as found;
-in the fifth, one finding of `konturio_disaster-ninja-fe_1234` was judged not to match.
-Over the five, grounded F1 has a mean of 0.9998 and an SD of 0.0005 (upper bound
-0.0007), against the reviewer's 0.0104. Nearly all the noise is the reviewer's.
+The judge adds almost nothing. Every oracle round scored all 50 cases, with no failed
+or incomplete trial, and every reference finding was covered in every round, so
+recall was 1 throughout. Only one case scored differently between rounds: in round 3,
+one submitted finding of `konturio_disaster-ninja-fe_1234` was matched without counting
+as a true match, 1 of the 477 matched that round.
+
+| Oracle | Grounded P | Grounded R | Grounded F1 | Augmented P | Augmented R | Augmented F1 |
+|---|---|---|---|---|---|---|
+| Rounds 1, 2, 4 and 5 | 1 | 1 | 1 | 1 | 1 | 1 |
+| Round 3 | 0.9979 | 1 | 0.9990 | 0.9979 | 1 | 0.9990 |
+| SD (upper) | 0.0009 (0.0015) | 0 (0) | 0.0005 (0.0007) | 0.0009 (0.0015) | 0 (0) | 0.0005 (0.0007) |
+
+Against the reviewer's grounded F1 SD of 0.0104, the judge's 0.0005 is negligible:
+nearly all the noise is the reviewer's.
 
 ## The settings derived from it
 
@@ -116,5 +126,6 @@ to come from recall, while the precision guards keep a flood of findings from bu
 it.
 
 These five rounds are the loop's first baseline. Their jobs are `noise-45b-round-<N>-attempt-1`
-and their summary is `artifacts/loop/noise-45b/summary.json`. The oracle rounds are
-`oracle-45b`.
+and their summary is `artifacts/loop/noise-45b/summary.json` (SHA-256 `9cfca9e3…cb2a`).
+The oracle rounds are `oracle-45b`, summarised in `artifacts/loop/oracle-45b/summary.json`
+(`71562b4d…4c3e`). `loop/noise.json` is `python -m loop.noise` on the two.

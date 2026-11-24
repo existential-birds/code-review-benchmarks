@@ -18,8 +18,9 @@ and the loop uses that cautious figure:
 - Guard margins, each ``accept_z`` times the upper-bound SD of a difference of two
   R-round means: pooled precision (the wider of grounded and augmented), unmatched
   findings judged wrong per scored case, and unfinished reviews (failed, incomplete or
-  missing) per round. A count that held still over the rounds takes Poisson's SD instead,
-  the square root of its mean count per round and at least one event.
+  missing) per round. A count's SD is never taken below Poisson's, the square root of its
+  mean count per round and at least one event, since five rounds can't show the spread
+  of a rare count.
 - The canary's per-case reference counts from the oracle rounds, and a tolerance from
   how far the judge moved a case's counts between those rounds.
 """
@@ -45,11 +46,15 @@ def chi2_lower(probability: float, df: int) -> float:
         # The regularized lower incomplete gamma P(df/2, x/2), by its power series.
         a, z = df / 2, x / 2
         term = total = 1 / a
-        for n in range(1, 500):
+        n = 0
+        # The terms grow while n < z - a, then shrink geometrically; stop once they no longer count.
+        while n < z or term > total * 1e-17:
+            n += 1
             term *= z / (a + n)
             total += term
-        return total * math.exp(-z + a * math.log(z) - math.lgamma(a))
-    low, high = 1e-12, 100.0 * df
+        return min(1.0, total * math.exp(-z + a * math.log(z) - math.lgamma(a)))
+    # The quantile lies below the mean, df, for any probability under one half.
+    low, high = 1e-12, df + 10 * math.sqrt(2 * df) + 10
     for _ in range(200):
         middle = (low + high) / 2
         low, high = (middle, high) if cdf(middle) < probability else (low, middle)
