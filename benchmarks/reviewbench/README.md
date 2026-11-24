@@ -113,6 +113,14 @@ the judge's spread alone.
 Its `summary.json`, in `artifacts/loop/<name>/`, holds every round's pooled scores
 and counts, their mean and spread, and each case's counts per round.
 
+On the test set, [`loop/confirm.py`](../../loop/confirm.py) alone scores a kept change
+against the baseline, with AACR's held-out cases, and gives one word: `confirmed`,
+`not-confirmed` or `regressed`. Its rule, storage and use count are in its help.
+
+```sh
+.venv/bin/python -m loop.confirm --baseline pinned --candidate <commit>
+```
+
 **1. Build the candidate and generate one catalog per build.**
 
 ```sh

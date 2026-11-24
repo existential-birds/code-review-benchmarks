@@ -10,8 +10,9 @@ Like is compared with like. Only the review cases every round of both sides scor
 count, and each side's scores are pooled again per round over those cases alone, from
 the summary's per-case counts. A build can't raise its score by failing on hard cases:
 too few matched cases is ``invalid``, and failed or incomplete reviews are a guard.
-Two summaries of another ReviewBench revision, split or judge, or of other cases, are
-refused; the Daydream build differs by design.
+Two summaries of another benchmark revision, split, judge or dataset, or of other cases,
+are refused; the Daydream build differs by design. A held-out summary is refused too:
+held-out rounds belong to ``loop.confirm`` alone.
 
 The gain is the candidate's mean pooled grounded F1 minus the baseline's. The climb
 stage accepts only a gain above ``accept_threshold``; the check stage, above zero.
@@ -48,16 +49,18 @@ from loop import settings
 from loop.rounds import METRICS
 
 STAGES = ('climb', 'check')
-# What makes two summaries' scores comparable; the Daydream build is what differs.
-IDENTITY = ('reviewbench_revision', 'split', 'judge')
 
 
 def matched_cases(baseline: dict, candidate: dict) -> list[str]:
-    """The review cases every round of both sides scored, once the two are known comparable."""
-    for key in IDENTITY:
-        if baseline['catalog_identity'][key] != candidate['catalog_identity'][key]:
+    """The review cases every round of both sides scored, once the two are known comparable.
+
+    Comparable means every part of the catalog identity but the Daydream build: ReviewBench's
+    revision, split and judge, or AACR's revision, dataset and split."""
+    identities = baseline['catalog_identity'], candidate['catalog_identity']
+    for key in sorted((identities[0].keys() | identities[1].keys()) - {'daydream'}):
+        if identities[0].get(key) != identities[1].get(key):
             raise ValueError(f'Refusing to compare summaries of different {key}: '
-                             f'{baseline["catalog_identity"][key]!r} and {candidate["catalog_identity"][key]!r}')
+                             f'{identities[0].get(key)!r} and {identities[1].get(key)!r}')
     if set(baseline['cases']) != set(candidate['cases']):
         raise ValueError('Refusing to compare summaries over different review cases')
     for summary in (baseline, candidate):
@@ -112,13 +115,16 @@ def decide(baseline: dict, candidate: dict, stage: str, limits: settings.Setting
         raise ValueError(f'Stage must be one of {STAGES}, not {stage!r}')
     planned = rounds or limits['rounds']
     matched = matched_cases(baseline, candidate)
+    if baseline['catalog_identity']['split'] != 'dev':
+        raise ValueError('loop.decide compares dev rounds only; held-out rounds belong to loop.confirm')
     done = len(candidate['rounds'])
     if len(baseline['rounds']) != planned or done > planned:
         raise ValueError(f'The baseline needs {planned} rounds and the candidate at most {planned}, '
                          f'not {len(baseline["rounds"])} and {done}')
     total, least = len(baseline['cases']), limits['min_matched_fraction']
     result = dict(stage=stage, rounds=dict(planned=planned, baseline=planned, candidate=done),
-                  matched=dict(cases=len(matched), of=total, fraction=len(matched) / total, min_fraction=least))
+                  matched=dict(cases=len(matched), of=total, fraction=len(matched) / total if total else 0,
+                                min_fraction=least))
 
     def verdict(word: str, *reasons: str) -> dict:
         return dict(verdict=word, reasons=list(reasons), **result)
