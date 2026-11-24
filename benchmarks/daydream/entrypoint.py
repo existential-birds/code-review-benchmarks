@@ -61,9 +61,23 @@ def _comparison(repository: Path, base: str) -> tuple[dict, str]:
 
 
 def freeze_comparison(case_dir: Path) -> dict:
-    """Record the comparison a task image holds, for benchmarks that fetch it at build time."""
+    """Record the comparison a task image holds, for benchmarks that fetch it at build time.
+
+    Daydream reviews the working tree's bytes as they are, so the checkout is first made to
+    hold its commit's bytes. Attributes in ``.git/info`` outrank the repository's own, so no
+    end-of-line, ident, filter or encoding conversion applies, and checking every file out
+    again from an empty index rewrites the ones that were converted.
+    """
+    from daydream import git_ops
     case = json.loads((case_dir / 'case.json').read_text())
-    comparison, patch = _comparison(Path(case['repository']), case['base'])
+    repository = Path(case['repository'])
+    (repository / '.git/info').mkdir(exist_ok=True)
+    (repository / '.git/info/attributes').write_text('* -text -ident -filter -working-tree-encoding\n')
+    for command in (['read-tree', '--empty'], ['reset', '--quiet', '--hard']):
+        subprocess.run(['git', '-C', str(repository), *command], check=True)
+    if git_ops.status_porcelain(repository).strip():
+        raise ValueError('Task checkout is not clean')
+    comparison, patch = _comparison(repository, case['base'])
     (case_dir / 'comparison.json').write_text(json.dumps(comparison, indent=2) + '\n')
     (case_dir / 'diff.patch').write_text(patch)
     return comparison
