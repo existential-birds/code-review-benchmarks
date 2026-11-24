@@ -9,7 +9,7 @@ const request = {
   extra_body: { chat_template_kwargs: { enable_thinking: false } },
 };
 const response = {
-  provider: 'openai-codex', model: 'gpt-6.1-sol',
+  provider: 'openai', model: 'gpt-6.1-sol',
   content: [{ type: 'thinking', thinking: 'private reasoning' }, { type: 'text', text: 'Rationale\n[1]' }],
   stopReason: 'stop', usage: { input: 1, output: 2 },
 };
@@ -25,7 +25,7 @@ function runtime(result = response) {
 test('preserves AACR prompt while omitting subscription-rejected sampling options', async () => {
   const result = await completeJudge(runtime(), request);
   assert.equal(result.text, 'Rationale\n[1]');
-  assert.deepEqual(runtime.lastCall[0], { provider: 'openai-codex', id: 'gpt-6.1-sol' });
+  assert.deepEqual(runtime.lastCall[0], { provider: 'openai', id: 'gpt-6.1-sol' });
   assert.equal(runtime.lastCall[1].messages[0].content, request.messages[0].content);
   const { onResponse, ...options } = runtime.lastCall[2];
   assert.equal(typeof onResponse, 'function');
@@ -84,7 +84,7 @@ test('retains HTTP status and distinguishes authentication rejection', async () 
 });
 
 test('rejects completion identity different from selected judge', async () => {
-  const r = runtime({ ...response, provider: 'openai' });
+  const r = runtime({ ...response, provider: 'openai-codex' });
   await assert.rejects(completeJudge(r, request), { category: 'runtime' });
 });
 
@@ -93,7 +93,7 @@ test('host refresh asks Pi for the pinned judge model with the requested validit
   const r = runtime();
   r.getAuth = async (...args) => { calls.push(args); return { auth: { apiKey: 'token' }, source: 'OAuth' }; };
   await refreshLogin(r, 1_800_000);
-  assert.deepEqual(calls, [[{ provider: 'openai-codex', id: 'gpt-6.1-sol' }, { minOAuthValidityMs: 1_800_000 }]]);
+  assert.deepEqual(calls, [[{ provider: 'openai', id: 'gpt-6.1-sol' }, { minOAuthValidityMs: 1_800_000 }]]);
 });
 
 test('host refresh fails without a subscription login or when Pi cannot refresh', async () => {

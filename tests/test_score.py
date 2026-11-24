@@ -499,7 +499,7 @@ def test_verifier_trusts_host_receipt_over_forged_sandbox_logs(tmp_path, monkeyp
     from benchmarks.pi import verifier as judge_verifier
     pi_home = tmp_path / 'pi-agent'
     pi_home.mkdir()
-    (pi_home / 'auth.json').write_text(json.dumps({'openai-codex': {'type': 'oauth', 'access': 'a',
+    (pi_home / 'auth.json').write_text(json.dumps({'openai': {'type': 'oauth', 'access': 'a',
         'refresh': 'r', 'accountId': 'account', 'expires': (time.time() + 3600) * 1000}}))
     monkeypatch.setenv('JUDGE_PI_AUTH_DIR', str(pi_home))
     async def fresh_login(auth_path, min_validity_ms):
@@ -569,6 +569,6 @@ def test_verifier_trusts_host_receipt_over_forged_sandbox_logs(tmp_path, monkeyp
             assert list((trial.verifier_dir / 'upstream').glob('metrics_*.json'))
     else:
         result = asyncio.run(verifier.verify())
-        assert set(environment.judge_login) == {'openai-codex'}
+        assert set(environment.judge_login) == {'openai'}
         assert result.rewards['balanced_score'] == (0.667 if findings else 0.0)
         assert trial.reward_json_path.is_file()

@@ -29,6 +29,9 @@ def summary(case_counts: dict, side='p' * 40):
 
 def test_the_upper_bound_widens_a_five_round_sd_by_the_chi_square_factor():
     assert noise.chi2_lower(0.2, 4) == pytest.approx(1.6488, abs=1e-4)
+    # Published 20% quantiles, including many rounds, where a short series would not converge.
+    for df, quantile in ((1, 0.0642), (10, 6.1791), (22, 16.3140), (50, 41.4492), (200, 183.0028)):
+        assert noise.chi2_lower(0.2, df) == pytest.approx(quantile, abs=1e-3)
     result = noise.spread([0.40, 0.42, 0.41, 0.39, 0.43])
     assert result['sd'] == pytest.approx(0.015811, abs=1e-6)
     assert result['sd_upper'] == pytest.approx(result['sd'] * math.sqrt(4 / 1.648777), rel=1e-5)
@@ -65,3 +68,29 @@ def test_a_spread_too_wide_for_the_target_says_so():
     assert derived['climb_set_size'] is None and derived['rounds'] == 5
     assert derived['smallest_detectable_gain'] == pytest.approx(derived['accept_threshold']['5'])
     assert derived['smallest_detectable_gain'] > settings.load()['target_gain']
+
+
+def test_a_guard_count_that_held_still_takes_poissons_spread():
+    # Every round: four findings judged wrong over 40 scored cases, and no unfinished review.
+    held = {f'case-{index}': [counts(6, 6, [2, 8, 3, 9, 5][number], unmatched_fp=int(index < 4)) for number in range(5)]
+            for index in range(40)}
+    oracle = summary({name: [counts(10, 10, 10)] * 5 for name in held}, side=None)
+    loaded = settings.load()
+    derived = noise.derive(summary(held), oracle, loaded)['derived']
+    scale = loaded['accept_z'] * math.sqrt(2 / derived['rounds'])
+    assert derived['wrong_findings_margin'] == pytest.approx(scale * math.sqrt(4) / 40)
+    assert derived['incomplete_margin'] == pytest.approx(scale * 1)
+
+
+def test_an_oracle_from_another_catalog_judge_or_set_of_cases_is_refused():
+    cases = {f'case-{index}': [counts(6, 6, 5)] * 5 for index in range(30)}
+    oracle = summary({name: [counts(10, 10, 10)] * 5 for name in cases}, side=None)
+    noise.derive(summary(cases), oracle, settings.load())
+    for key in noise.IDENTITY:
+        other = summary({name: [counts(10, 10, 10)] * 5 for name in cases}, side=None)
+        other['catalog_identity'][key] = 'other'
+        with pytest.raises(ValueError, match=f'differ in {key}'):
+            noise.derive(summary(cases), other, settings.load())
+    fewer = summary({name: [counts(10, 10, 10)] * 5 for name in list(cases)[:29]}, side=None)
+    with pytest.raises(ValueError, match='different review cases'):
+        noise.derive(summary(cases), fewer, settings.load())

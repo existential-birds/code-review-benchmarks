@@ -17,7 +17,7 @@ HOUR_MS = 3600 * 1000
 
 
 def login(expires_ms, **extra):
-    return {'openai-codex': {'type': 'oauth', 'access': 'old-access', 'refresh': 'old-refresh',
+    return {'openai': {'type': 'oauth', 'access': 'old-access', 'refresh': 'old-refresh',
                              'accountId': 'account', 'expires': expires_ms}, **extra}
 
 
@@ -58,7 +58,7 @@ def judge(tmp_path, monkeypatch):
     async def refresh(auth_path, min_validity_ms):
         refreshes.append((auth_path, min_validity_ms))
         data = json.loads(auth_path.read_text())
-        data['openai-codex'].update(access='new-access', refresh='new-refresh',
+        data['openai'].update(access='new-access', refresh='new-refresh',
                                     expires=int(time.time() * 1000) + 10 * HOUR_MS)
         auth_path.write_text(json.dumps(data))
     monkeypatch.setattr(judge_verifier, 'refresh_host_login', refresh)
@@ -69,17 +69,17 @@ def judge(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize('kwargs,validity_ms', [({}, 30 * 60 * 1000),
                                                ({'min_judge_validity_sec': '2400'}, 40 * 60 * 1000)])
-def test_uploads_only_the_refreshed_openai_codex_access_before_scoring(judge, kwargs, validity_ms):
+def test_uploads_only_the_refreshed_openai_access_before_scoring(judge, kwargs, validity_ms):
     verifier = judge_verifier.PiJudgeVerifier(task=None, trial_paths=None, environment=judge.environment, **kwargs)
     assert asyncio.run(verifier.verify()) == 'scored'
     assert judge.refreshes == [(judge.home / 'auth.json', validity_ms)]
     assert judge.environment.calls == [('exec', 'mkdir -m 700 /run/judge-pi', 'root'),
                                        ('upload', '/run/judge-pi/auth.json'), ('harbor-verify',)]
     uploaded, mode, source = judge.environment.uploads['/run/judge-pi/auth.json']
-    host = json.loads((judge.home / 'auth.json').read_text())['openai-codex']
+    host = json.loads((judge.home / 'auth.json').read_text())['openai']
     assert host['refresh'] == 'new-refresh'
     # Without a refresh token the container can't rotate the host login.
-    assert uploaded == {'openai-codex': dict(host, refresh='')}
+    assert uploaded == {'openai': dict(host, refresh='')}
     assert mode == 0o600
     assert source.parent == judge.scratch
     assert list(judge.scratch.iterdir()) == []
@@ -98,7 +98,7 @@ def test_any_login_failure_stops_the_trial_before_scoring(judge, monkeypatch, fa
             auth_path.write_text(json.dumps(login(int(time.time() * 1000) + 10 * 60 * 1000)))
         monkeypatch.setattr(judge_verifier, 'refresh_host_login', refresh)
     elif failure == 'api-key':
-        (judge.home / 'auth.json').write_text(json.dumps({'openai-codex': {'type': 'api_key', 'key': 'k'}}))
+        (judge.home / 'auth.json').write_text(json.dumps({'openai': {'type': 'api_key', 'key': 'k'}}))
         async def refresh(auth_path, min_validity_ms):
             pass
         monkeypatch.setattr(judge_verifier, 'refresh_host_login', refresh)
@@ -145,6 +145,11 @@ def test_waits_out_another_process_rewriting_the_login(tmp_path):
     writer = threading.Timer(0.1, auth_path.write_text, [json.dumps(login(5))])
     writer.start()
     try:
-        assert judge_verifier.read_login(auth_path) == login(5)['openai-codex']
+        assert judge_verifier.read_login(auth_path) == login(5)['openai']
     finally:
         writer.join()
+
+
+def test_a_validity_longer_than_the_logins_tokens_is_refused():
+    with pytest.raises(ValueError, match='at most 3000'):
+        judge_verifier.PiJudgeVerifier(task=None, trial_paths=None, environment=None, min_judge_validity_sec=3600)

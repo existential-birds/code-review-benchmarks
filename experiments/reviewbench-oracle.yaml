@@ -9,9 +9,12 @@ retry:
 agents:
   - name: oracle
 verifier:
+  # Within the judge login's validity below; see reviewbench.yaml.
+  override_timeout_sec: 2100
   import_path: benchmarks.pi.verifier:PiJudgeVerifier
   kwargs:
-    min_judge_validity_sec: 7800
+    # The ChatGPT subscription login's tokens last about an hour; see reviewbench.yaml.
+    min_judge_validity_sec: 2400
 environment:
   type: docker
   delete: true
