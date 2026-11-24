@@ -39,6 +39,7 @@ import shutil
 import sys
 import tempfile
 
+from benchmarks.daydream import rounds as shared
 from benchmarks.daydream.entrypoint import _line
 from benchmarks.reviewbench import report
 from loop import rounds, sets
@@ -143,7 +144,8 @@ def _trial(trial: Path, outcome: dict, number: int, golden: list[dict], source: 
                  cause=terminal.get('cause'), folder=f'trials/{outcome["task"]}/round-{number}' if found else None,
                  review_summary={key: summary[key] for key in SUMMARY} if summary else None)
     entry['copies'] = [found[0]] + [deep / name for name in COPIES if (deep / name).is_file()] if found else []
-    entry['rulings'] = _rulings(trial, execution, found[2]) if entry['scored'] else []
+    # A scored trial whose run record wasn't captured keeps its rulings; it just gets no labels.
+    entry['rulings'] = _rulings(trial, execution, found[2] if found else None) if entry['scored'] else []
     covered = {index for finding, _ in entry['rulings'] for index in finding['covered_golden_indices']}
     entry['missed'] = [index for index, reference in enumerate(golden)
                        if entry['scored'] and reference['tp_fp'] == 'tp' and index not in covered]
@@ -217,7 +219,7 @@ def collect(summary_path: Path) -> tuple[dict, dict[str, dict], list[dict], dict
     trials, labels = {case: [] for case in listing['tasks']}, []
     for entry in summary['rounds']:
         for result in sorted((rounds.JOBS / entry['job']).glob('*/result.json')):
-            outcome = report.read_trial(result.parent)
+            outcome = shared.read_trial(result.parent, report.trial_ratios)
             case = outcome['task']
             if case not in climb or case not in trials:
                 raise ValueError(f'Refusing {result.parent}: {case} is outside loop/climb.txt or the catalog')
@@ -293,9 +295,10 @@ def build(summary_path: Path, out: Path) -> dict:
         for folder, sources in copies.items():
             for source in sources:
                 _copy(source, staged / folder / source.name)
-        _set_mode(staged, 0o444, 0o555)
-        # Renamed within one folder, a read-only folder keeps its place.
+        # Moved into place first: macOS won't rename a folder that is itself read-only.
         os.rename(staged, out)
+        staged = out
+        _set_mode(out, 0o444, 0o555)
     except BaseException:
         _set_mode(staged, 0o644, 0o755)
         shutil.rmtree(staged)
