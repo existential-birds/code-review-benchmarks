@@ -20,13 +20,16 @@ PACKAGE = Path(__file__).resolve().parent
 REVIEWBENCH_REVISION = '4f04392d6bf4941ab6f8a3ea0c15b449f4458864'
 # Codex's subscription endpoints; nothing else is reachable from a review.
 REVIEWER_HOSTS = ('chatgpt.com', 'auth.openai.com')
-JUDGE_HOSTS = ('chatgpt.com',)
+# The judge's subscription token goes straight to OpenAI's API.
+JUDGE_HOSTS = ('api.openai.com',)
 # Exported tasks read this placeholder from the host; the judge folder is fixed instead.
 JUDGE_DIR_VARIABLE = 'RB_HARBOR_PI_AGENT_DIR'
-# Pi 0.75.5, which ReviewBench's judge uses, doesn't list this model itself.
+# Pi 0.75.5, which ReviewBench's judge pins, doesn't list this model itself. The endpoint
+# and API are Pi 1.6's for the openai provider. The context window is kept large on
+# purpose: Pi 0.75.5's compaction sends max_output_tokens, which the ChatGPT login rejects.
 JUDGE_MODELS = {'providers': {PROVIDER: {
-    'api': 'openai-codex-responses',
-    'baseUrl': 'https://chatgpt.com/backend-api',
+    'api': 'openai-responses',
+    'baseUrl': 'https://api.openai.com/v1',
     'models': [{
         'id': MODEL, 'name': MODEL, 'reasoning': True, 'input': ['text', 'image'],
         'contextWindow': 1050000, 'maxTokens': 8192,
@@ -37,6 +40,13 @@ TEST_SCRIPT = f'''#!/bin/bash
 set -euo pipefail
 # The verifier uploaded the judge's login here; Pi reads its model list beside it.
 cp /tests/pi-models.json {JUDGE_AUTH_DIR}/models.json
+# Pi 0.75.5 predates the ChatGPT subscription login, which hands its access token to
+# OpenAI's API as a plain key; give it the token in that form.
+node -e '
+const fs = require("fs"), path = "{JUDGE_AUTH_DIR}/auth.json";
+const login = JSON.parse(fs.readFileSync(path, "utf8"))["{PROVIDER}"];
+fs.writeFileSync(path, JSON.stringify({{"{PROVIDER}": {{type: "api_key", key: login.access}}}}));
+'
 cd /tests/judge
 exec node --import tsx scripts/harbor/verify.ts /tests/task.json
 '''
