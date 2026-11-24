@@ -25,7 +25,8 @@ def summary(per_case: list, rounds: int = 3, judge: str = 'j', cost: float | Non
     entries = []
     for number in range(rounds):
         scored = sum(counts[number] is not None for counts in cases.values())
-        entries.append(dict(round=number + 1, failed=len(cases) - scored - missing, missing=missing, incomplete=0,
+        entries.append(dict(round=number + 1, expected=len(cases), failed=len(cases) - scored - missing,
+                            missing=missing, incomplete=0,
                             evaluated=scored,
                             cost_usd=None if cost is None else cost * scored, cost_trials=scored,
                             elapsed_seconds=seconds * scored))
@@ -178,10 +179,20 @@ def test_self_check_counts_how_often_a_build_beats_itself():
     steady = summary([[WIN, BASE, WIN, BASE, WIN]] + [BASE] * 9, rounds=5)
     result = decide.self_check(steady, LIMITS)
     assert result['group_rounds'] == 2 and result['decisions'] == 10 * 3
-    assert result['beats_itself'] == 0 and result['verdicts'] == {'reject': 30}
+    assert result['beats_itself'] == result['beats_itself_on_gain'] == 0 and result['verdicts'] == {'reject': 30}
     # Rounds that drift upwards well beyond it: the later rounds beat the earlier ones.
     drifting = summary([[BASE] * (5 - number) + [WIN] * number for number in range(5)] * 2, rounds=5)
     drift = decide.self_check(drifting, LIMITS)
     assert 0 < drift['beats_itself'] < 30 and drift['verdicts']['accept'] == drift['beats_itself']
+    assert drift['beats_itself_on_gain'] >= drift['beats_itself']
     with pytest.raises(ValueError, match='at least two rounds'):
         decide.self_check(summary([BASE] * 10, rounds=1), LIMITS)
+
+
+def test_a_candidate_that_matched_nothing_is_rejected_not_invalid():
+    # Every review came back empty: recall 0, and no matched finding to give a precision.
+    empty = counts(0, 0, 0, 0, 2, 0)
+    for stage, rounds in (('climb', 3), ('check', 3), ('climb', 1)):
+        result = decide.decide(summary([BASE] * 10), summary([empty] * 10, rounds=rounds), stage, LIMITS)
+        assert result['verdict'] == 'reject' and 'matched no findings' in result['reasons'][0]
+        assert 'grounded_precision' in result['reasons'][0]
