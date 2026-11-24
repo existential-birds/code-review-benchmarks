@@ -139,7 +139,7 @@ def test_summaries_that_cannot_be_compared_are_refused():
     other_build = summary([WIN] * 10)
     other_build['catalog_identity']['daydream'] = {'version': 'candidate'}
     assert decide.decide(baseline, other_build, 'climb', LIMITS)['verdict'] == 'accept'
-    for key in decide.IDENTITY:
+    for key in ('reviewbench_revision', 'split', 'judge'):
         other = summary([WIN] * 10)
         other['catalog_identity'][key] = 'other'
         with pytest.raises(ValueError, match=f'Refusing to compare summaries of different {key}'):
@@ -162,7 +162,11 @@ def test_the_command_prints_the_verdict_or_why_it_could_not_compare(tmp_path, mo
         paths[name] = tmp_path / f'{name}.json'
         paths[name].write_text(json.dumps(summary(per_case)))
     arguments = ['--baseline', str(paths['baseline']), '--candidate', str(paths['candidate']), '--stage', 'climb']
-    # Until the noise measurement sets the derived values, no verdict is given.
+    # Without the noise measurement's derived values, no verdict is given.
+    unmeasured = tmp_path / 'settings.toml'
+    unmeasured.write_text(settings.FILE.read_text().split('[derived]')[0] + '[derived]\n')
+    real_load = settings.load
+    monkeypatch.setattr(settings, 'load', lambda: real_load(unmeasured))
     assert decide.main(arguments) == 2 and 'rounds is unset' in json.loads(capsys.readouterr().out)['error']
     monkeypatch.setattr(settings, 'load', lambda: LIMITS)
     assert decide.main(arguments) == 0
