@@ -11,6 +11,7 @@ import hashlib
 import json
 import re
 from pathlib import Path
+import shutil
 import sys
 from types import SimpleNamespace
 
@@ -353,6 +354,35 @@ def test_the_run_prunes_between_iterations_through_loop_prune(loop, monkeypatch)
     monkeypatch.setitem(sys.modules, 'loop.prune', module)
     assert looprun.prune('run-a', loaded) == {} and calls == [('run-a', dict(between_iterations=True,
                                                                              root=loop.root))]
+
+
+
+def test_the_run_prunes_after_the_limit_check_has_read_the_trial_logs(loop, monkeypatch):
+    # An invalid iteration whose limit shows only in its trial logs, and a prune that removes every job at once,
+    # as keep_rejected_jobs = 0 would: the run still sees the limit and waits.
+    stand_in, pruned = looprun.iterate, []
+
+    def iterate(run, loaded):
+        entry = stand_in(run, loaded)
+        n, job = entry['iteration'], f'{run}-{entry["iteration"]}-climb-round-1-attempt-1'
+        summary = loop.root / f'artifacts/loop/{run}-{n}-climb/summary.json'
+        summary.parent.mkdir(parents=True)
+        summary.write_text(json.dumps(dict(jobs=[dict(job=job)])))
+        trial = loop.root / 'jobs' / job / 'case-a__x/agent'
+        trial.mkdir(parents=True)
+        (trial / 'daydream.stderr.log').write_text(f'codex failed: {LIMIT}\n' if n == 1 else 'done\n')
+        return entry
+
+    def prune(run, loaded, **options):
+        pruned.append(sorted(path.name for path in (loop.root / 'jobs').iterdir()))
+        shutil.rmtree(loop.root / 'jobs')
+        return {}
+    monkeypatch.setattr(looprun, 'iterate', iterate)
+    monkeypatch.setitem(sys.modules, 'loop.prune', SimpleNamespace(prune=prune))
+    assert loop.run('--run', 'run-a', '--set', 'run_max_iterations=2', iterations=['invalid', 'rejected']) == 0
+    assert loop.sleeps == [3600]
+    assert pruned == [['run-a-1-climb-round-1-attempt-1'], ['run-a-2-climb-round-1-attempt-1']]
+    assert kinds(loop.entries())[-3:] == ['#1 invalid', '#2 rejected', 'stop']
 
 
 @pytest.fixture
