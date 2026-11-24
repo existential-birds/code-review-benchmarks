@@ -82,9 +82,13 @@ def test_a_harmless_commit_passes_and_the_gate_runs_in_a_throwaway_clone(repo, g
                                                     seconds=0, output_tail='gate output\n')
     seen = json.loads(gate[1].read_text())
     seen['environment'].pop('LC_CTYPE', None)  # Python's own locale coercion in the stand-in
+    seen['environment'].pop('__CF_USER_TEXT_ENCODING', None)  # macOS adds it to every process
     home, directory = Path(seen['environment']['HOME']), Path(seen['directory'])
+    # The operator's PYTEST_ADDOPTS never reaches the gate; on macOS the guard sets its own deselection.
+    deselect = settings.load()['gate_deselect_macos'] if sys.platform == 'darwin' else []
     assert seen['environment'] == {name: os.environ[name] for name in guard.GATE_ENVIRONMENT if name in os.environ} | UV | {
-        'UV_OFFLINE': '1', 'HOME': str(home)}
+        'UV_OFFLINE': '1', 'HOME': str(home)} | (
+        {'PYTEST_ADDOPTS': shlex.join(f'--deselect={test}' for test in deselect)} if deselect else {})
     assert home.name == 'home' and home.parent == directory.parent and not home.parent.exists()
     assert seen['review'] == 'def review():\n    return ["acme", "widgets"]\n'
 
