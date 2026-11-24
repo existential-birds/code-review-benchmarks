@@ -70,6 +70,7 @@ TOKENS = ('n_input_tokens', 'n_cache_tokens', 'n_output_tokens')
 CATALOG = ('reviewbench_revision', 'split', 'judge', 'daydream')
 # The task containers read the logins from these folders; the Makefile sets them, harbor run alone doesn't.
 CODEX_LOGIN, JUDGE_LOGIN = 'REVIEWER_CODEX_AUTH_DIR', 'JUDGE_PI_AUTH_DIR'
+LOGINS = (CODEX_LOGIN, JUDGE_LOGIN)
 # A round with more unscored trials than this is failed, not finished: a lost login or a
 # Docker outage, not noise (the stop rule of #45). The command stops; a rerun scores it afresh.
 MAX_UNSCORED_FRACTION = 0.2
@@ -177,12 +178,13 @@ def _write(path: Path, state: dict) -> None:
     os.replace(temporary, path)
 
 
-def check_credentials(reviewer: dict, oracle: bool = False) -> None:
+def check_logins(reviewer: dict | None = None, oracle: bool = False) -> None:
     """Refuse to start without the judge's login folder and the reviewer slot's login or key.
 
     A Codex reviewer's tasks mount its login folder, the oracle's too; the oracle runs no
     reviewer, so it needs no key. Only a key's presence is checked; it is never read into a
-    file or printed."""
+    file or printed. The reviewer is the configured slot unless given."""
+    reviewer = settings.load()['reviewer'] if reviewer is None else reviewer
     folders = [JUDGE_LOGIN] + ([CODEX_LOGIN] if reviewer['backend'] == 'codex' else [])
     missing = [name for name in folders if not os.environ.get(name) or not Path(os.environ[name]).is_dir()]
     if missing:
@@ -201,7 +203,7 @@ def run(build: str, cases_file: Path, rounds: int, name: str, *, benchmark: str 
     if rounds < 1 or (limit is not None and limit < 1) or (concurrency is not None and concurrency < 1):
         raise ValueError('Rounds, --limit-cases and --concurrency must be positive')
     loaded = settings.load()
-    check_credentials(loaded['reviewer'], oracle=build == 'oracle')
+    check_logins(loaded['reviewer'], oracle=build == 'oracle')
     concurrency = concurrency or loaded['concurrency']
     folder = ARTIFACTS / name
     path, catalog = folder / 'summary.json', folder / 'catalog'

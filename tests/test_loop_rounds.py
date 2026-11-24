@@ -114,7 +114,7 @@ def workspace(tmp_path, monkeypatch, pinned_wheel):
         (destination / 'metric.py').write_text('')
     monkeypatch.setattr(convert, 'check_source', lambda upstream: None)
     monkeypatch.setattr(convert, 'export', export)
-    for name in (rounds.CODEX_LOGIN, rounds.JUDGE_LOGIN):
+    for name in rounds.LOGINS:
         (tmp_path / name).mkdir()
         monkeypatch.setenv(name, str(tmp_path / name))
     # The default reviewer's key: only its presence is checked.
@@ -337,12 +337,12 @@ def test_the_oracle_records_no_build_and_counts_unscored_trials_as_failed(worksp
     # login, so the oracle then needs that folder too.
     monkeypatch.delenv('OPENROUTER_API_KEY')
     codex = dict(harness='daydream', backend='codex', provider='openai', model='default', effort='default')
-    rounds.check_credentials(settings.load()['reviewer'], oracle=True)
+    rounds.check_logins(settings.load()['reviewer'], oracle=True)
     with pytest.raises(ValueError, match='Set OPENROUTER_API_KEY'):
-        rounds.check_credentials(settings.load()['reviewer'])
+        rounds.check_logins(settings.load()['reviewer'])
     monkeypatch.delenv('REVIEWER_CODEX_AUTH_DIR')
     with pytest.raises(ValueError, match='Set REVIEWER_CODEX_AUTH_DIR'):
-        rounds.check_credentials(codex, oracle=True)
+        rounds.check_logins(codex, oracle=True)
 
 
 def test_aacr_rounds_check_the_build_before_converting_any_case(aacr_workspace, monkeypatch):
