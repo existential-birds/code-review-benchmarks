@@ -108,6 +108,8 @@ reports them, and resumes a run that stopped. Build a candidate first, as in ste
 ```
 
 Give a candidate's `build.json` as `--build` and add `--limit-cases <N>` for a pilot.
+`--build oracle` scores ReviewBench's own true findings over rounds instead, to measure
+the judge's spread alone.
 Its `summary.json`, in `artifacts/loop/<name>/`, holds every round's pooled scores
 and counts, their mean and spread, and each case's counts per round.
 
