@@ -1,0 +1,14 @@
+# Loop canary cases: the ones an oracle round scores to catch the judge drifting
+# (python -m loop.canary).
+# The first canary_cases names of loop/climb.txt, in its order.
+# Regenerate with `python -m loop.sets --upstream <ReviewBench>`.
+semitexa_semitexa-core_38-bc76e026
+VeyronSakai_UniCortex_162-e74a1d69
+mareklesko_ProxmoxMCP-Plus_1-b44013c3
+chrisdevchroma_gsd-ng_16-3a6681c0
+dotnet_efcore_38115-009f4190
+laser-base_laser-core_393-345c5421
+taskless_skills_16-d7b6f3f5
+hughdidit_DAISy-Agency_274-1c88a238
+thomHayner_bicycle-repair-stations_6-567f44d4
+Gibbs-Morris_mississippi_471-fdc4ff8d

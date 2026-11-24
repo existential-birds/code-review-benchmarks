@@ -77,6 +77,10 @@ the proposer reads.
 Dev review cases outside the climb set, scored only for a change that passed on the
 climb set. The proposer never reads their evidence.
 
+**Canary**:
+The first climb-set review cases, scored by the oracle every few iterations to
+catch the judge drifting from the counts it gave them before.
+
 **Ledger**:
 The append-only record of every iteration.
 
