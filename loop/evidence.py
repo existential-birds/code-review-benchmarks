@@ -144,7 +144,8 @@ def _trial(trial: Path, outcome: dict, number: int, golden: list[dict], source: 
                  cause=terminal.get('cause'), folder=f'trials/{outcome["task"]}/round-{number}' if found else None,
                  review_summary={key: summary[key] for key in SUMMARY} if summary else None)
     entry['copies'] = [found[0]] + [deep / name for name in COPIES if (deep / name).is_file()] if found else []
-    entry['rulings'] = _rulings(trial, execution, found[2]) if entry['scored'] else []
+    # A scored trial whose run record wasn't captured keeps its rulings; it just gets no labels.
+    entry['rulings'] = _rulings(trial, execution, found[2] if found else None) if entry['scored'] else []
     covered = {index for finding, _ in entry['rulings'] for index in finding['covered_golden_indices']}
     entry['missed'] = [index for index, reference in enumerate(golden)
                        if entry['scored'] and reference['tp_fp'] == 'tp' and index not in covered]
