@@ -29,7 +29,7 @@ def counts(candidates, matched, matched_tp, unmatched_tp, golden_tp, covered):
                 golden_covered_count=covered)
 
 
-def write_job(job: Path, catalog: Path, rewards: dict, finished=True, build=BUILD) -> None:
+def write_job(job: Path, catalog: Path, rewards: dict, finished=True, build=BUILD, record=True) -> None:
     """A job as Harbor writes it. A null reward is a trial that raised and left no review record."""
     expected = {name: json.loads((catalog / name / 'tests/task.json').read_text()) for name in rewards}
     trials = []
@@ -46,7 +46,7 @@ def write_job(job: Path, catalog: Path, rewards: dict, finished=True, build=BUIL
         trials.append(trial)
         (job / trial.trial_name / 'agent').mkdir(parents=True)
         (job / trial.trial_name / 'result.json').write_text(trial.model_dump_json())
-        if overall:
+        if overall and record:
             (job / trial.trial_name / 'agent/execution.json').write_text(json.dumps({
                 'status': 'complete', 'omitted_findings': 1, 'elapsed_seconds': 60,
                 'usage': {'cost_usd': 2.5}, 'build': {'source_commit': build}}))
@@ -305,3 +305,30 @@ def test_a_reviewbench_summary_from_before_aacr_rounds_still_resumes(workspace, 
                             '-k', '1', '-r', '0', '-n', '2', '--job-name', 'noise-round-1-attempt-1']
     resumed = rounds.run('pinned', workspace / 'cases.txt', 2, 'noise', concurrency=2)
     assert len(calls) == 2 and [entry['round'] for entry in resumed['rounds']] == [1, 2]
+
+
+def test_the_oracle_records_no_build_and_counts_unscored_trials_as_failed(workspace, monkeypatch):
+    configs = []
+    def harbor(command, check):
+        configs.append(command[command.index('-c') + 1])
+        write_job(Path('jobs') / command[command.index('--job-name') + 1], Path(command[command.index('-p') + 1]),
+                  {'case-a': SCORED['case-a'], 'case-b': None if len(configs) == 2 else SCORED['case-b']},
+                  record=False)
+    monkeypatch.setattr(rounds, 'subprocess', SimpleNamespace(run=harbor))
+    with pytest.raises(RuntimeError, match='Round 2 failed'):
+        rounds.run('oracle', workspace / 'cases.txt', 2, 'oracle')
+    assert configs == [str(rounds.ORACLE_CONFIG)] * 2
+    state = rounds.summarise(workspace / 'artifacts/loop/oracle/catalog',
+                             ['oracle-round-1-attempt-1', 'oracle-round-2-attempt-1'], oracle=True)
+    assert state['side'] is None
+    assert [(entry['evaluated'], entry['failed'], entry['incomplete']) for entry in state['rounds']] == [
+        (2, 0, 0), (1, 1, 0)]
+    assert state['cases']['case-b'][1] is None and state['scores']['grounded_f1']['defined_rounds'] == 2
+    # A Daydream build's trials in an oracle summary are refused.
+    write_job(Path('jobs/daydream'), workspace / 'artifacts/loop/oracle/catalog', SCORED)
+    with pytest.raises(ValueError, match='An oracle summary records no build'):
+        rounds.summarise(workspace / 'artifacts/loop/oracle/catalog', ['daydream'], oracle=True)
+    # The tasks mount both login folders, so the oracle needs the reviewer's too.
+    monkeypatch.delenv('REVIEWER_CODEX_AUTH_DIR')
+    with pytest.raises(ValueError, match='Set REVIEWER_CODEX_AUTH_DIR'):
+        rounds.run('oracle', workspace / 'cases.txt', 1, 'oracle-2')

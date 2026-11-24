@@ -1,8 +1,8 @@
 """Load the loop's settings from loop/settings.toml, with a caller's overrides.
 
 The file holds every setting's default and reason. Values derived from the noise
-measurement (#45) sit in its [derived] table and stay unset until that lands;
-asking for one before then is an error, never a guess.
+measurement (#45) sit in its [derived] table; a file without them refuses to hand
+one out rather than guess.
 """
 from __future__ import annotations
 
