@@ -122,10 +122,46 @@ def test_record_replaces_only_the_reference_from_a_fully_scored_round(oracle, ca
     oracle.noise.write_text(json.dumps(before))
     code, result, _ = check(capsys, '--summary', summary, '--noise', str(oracle.noise), '--record')
     after = json.loads(oracle.noise.read_text())
-    assert code == 0 and result == dict(recorded=str(oracle.noise), canary=after['canary'])
+    identity = json.loads(Path(summary).read_text())['catalog_identity']
+    assert code == 0 and result == dict(recorded=str(oracle.noise), canary=after['canary'], replaced=dict(
+        reference=before['canary']['reference'], judge='old/judge',
+        catalog=dict(reviewbench_revision=None, split=None), source=None))
     assert after['derived'] == before['derived']
     assert after['canary'] == before['canary'] | dict(
         judge=JUDGE, source=dict(summary=summary, job='canary-1-round-1-attempt-1'),
+        catalog={key: identity[key] for key in canary.IDENTITY},
         reference={case: {key: MOVED[case][key] for key in noise.CANARY_COUNTS} for case in MOVED})
     code, result, _ = check(capsys, '--summary', summary, '--noise', str(oracle.noise))
     assert code == 0 and result['verdict'] == 'stable'
+
+
+def test_a_round_from_another_revision_or_split_than_the_reference_is_refused(oracle, capsys):
+    oracle.plan.append(STEADY)
+    assert check(capsys, '--name', 'canary-1', '--noise', str(oracle.noise))[0] == 0
+    identity = json.loads(Path('artifacts/loop/canary-1/summary.json').read_text())['catalog_identity']
+    data = json.loads(oracle.noise.read_text())
+    for key in canary.IDENTITY:
+        # A reference derived by loop.noise shares the measurement's catalog.
+        data['catalog'] = {name: identity[name] for name in canary.IDENTITY} | {key: 'other'}
+        oracle.noise.write_text(json.dumps(data))
+        code, result, _ = check(capsys, '--summary', 'artifacts/loop/canary-1/summary.json',
+                                '--noise', str(oracle.noise))
+        assert code == 2 and result['verdict'] == 'invalid' and f'recorded on {key} other' in result['error']
+
+
+def test_a_name_already_scored_is_refused_rather_than_compared_again(oracle, capsys):
+    oracle.plan.append(STEADY)
+    assert check(capsys, '--name', 'canary-1', '--noise', str(oracle.noise))[0] == 0
+    oracle.plan.append(MOVED)
+    code, result, _ = check(capsys, '--name', 'canary-1', '--noise', str(oracle.noise))
+    assert code == 2 and 'scored already' in result['error'] and len(oracle.calls) == 1
+    oracle.plan.clear()
+
+
+def test_a_malformed_reference_is_no_verdict_not_drift(oracle, capsys):
+    oracle.plan.append(STEADY)
+    data = json.loads(oracle.noise.read_text())
+    del data['canary']['counts']
+    oracle.noise.write_text(json.dumps(data))
+    code, result, _ = check(capsys, '--name', 'canary-1', '--noise', str(oracle.noise))
+    assert code == 2 and result['verdict'] == 'invalid' and result['error'].startswith('KeyError')

@@ -11,10 +11,15 @@ its ``tolerance``, which #45 derived from the judge's own round-to-round noise, 
 case left unscored, is drift. The result is JSON for the ledger, on stdout, and the
 command exits 0 when stable, 1 when drifted, and 2 when nothing could be compared:
 ``no-reference`` without a reference, ``invalid`` for a round that isn't one oracle
-round of the canary cases, or one scored by another judge than the reference's.
+round of the canary cases, one scored by another judge, ReviewBench revision or split
+than the reference's, or one that failed outright (more than a fifth of its trials
+unscored, which ``loop.rounds`` refuses). ``loop.run`` stops on either: drift as
+``judge-drift``, no verdict as ``infrastructure``. ``--name`` must be new, since
+``loop.rounds`` would otherwise return the round it scored before.
 
-``--record`` makes the round the new reference instead, keeping the tolerance. Only a
-person runs it, after deciding the judge changed; every baseline is then measured again.
+``--record`` makes the round the new reference instead, keeping the tolerance, and
+prints the reference it replaced. Only a person runs it, after deciding the judge
+changed; every baseline is then measured again.
 """
 from __future__ import annotations
 
@@ -28,6 +33,8 @@ from loop import rounds, sets
 
 NOISE = Path(__file__).with_name('noise.json')
 CASES = sets.CANARY
+# What a round must share with the reference, besides its judge.
+IDENTITY = ('reviewbench_revision', 'split')
 
 
 class NoReference(LookupError):
@@ -45,6 +52,9 @@ def canary_block(noise: Path, referenced: bool = True) -> dict:
     unreferenced = [case for case in block['cases'] if case not in block.get('reference', {})]
     if referenced and unreferenced:
         raise NoReference(f'No reference counts for {unreferenced} in {noise}')
+    # A reference derived by loop.noise shares the measurement's catalog; a recorded one keeps its own.
+    catalog = json.loads(Path(noise).read_text()).get('catalog', {})
+    block.setdefault('catalog', {key: catalog.get(key) for key in IDENTITY})
     return block
 
 
@@ -67,6 +77,10 @@ def compare(block: dict, summary: dict) -> dict:
     job, judge, seen = observed(summary, block['cases'])
     if block.get('judge') not in (None, judge):
         raise ValueError(f'The reference was recorded with judge {block["judge"]}, not {judge}')
+    for key, expected in block.get('catalog', {}).items():
+        if expected is not None and summary['catalog_identity'].get(key) != expected:
+            raise ValueError(f'The reference was recorded on {key} {expected}, '
+                             f'not {summary["catalog_identity"].get(key)}')
     tolerance, cases, moved = block['tolerance'], {}, []
     for case in block['cases']:
         reference, counts = block['reference'][case], seen[case]
@@ -88,7 +102,8 @@ def record(noise: Path, summary: dict, source: Path) -> dict:
     if unscored:
         raise ValueError(f'Refusing to record a round that left {unscored} unscored')
     block.update(reference={case: {key: seen[case][key] for key in block['counts']} for case in block['cases']},
-                 judge=judge, source=dict(summary=str(source), job=job))
+                 judge=judge, catalog={key: summary['catalog_identity'].get(key) for key in IDENTITY},
+                 source=dict(summary=str(source), job=job))
     data['canary'] = block
     temporary = Path(noise).with_suffix('.tmp')
     temporary.write_text(json.dumps(data, indent=2, allow_nan=False) + '\n')
@@ -110,18 +125,22 @@ def main(argv: list[str] | None = None) -> int:
         block = canary_block(arguments.noise, referenced=not arguments.record)
         if arguments.name:
             path = rounds.ARTIFACTS / arguments.name / 'summary.json'
+            if path.exists():
+                raise ValueError(f'{arguments.name} was scored already; give the canary a new name')
             summary = rounds.run('oracle', CASES, 1, arguments.name)
         else:
             path, summary = arguments.summary, json.loads(arguments.summary.read_text())
         if arguments.record:
-            print(json.dumps(dict(recorded=str(arguments.noise), canary=record(arguments.noise, summary, path)),
-                             indent=2, allow_nan=False))
+            replaced = {key: block.get(key) for key in ('reference', 'judge', 'catalog', 'source')}
+            print(json.dumps(dict(recorded=str(arguments.noise), replaced=replaced,
+                                  canary=record(arguments.noise, summary, path)), indent=2, allow_nan=False))
             return 0
         result = compare(block, summary)
     except NoReference as error:
         result = dict(verdict='no-reference', error=str(error))
-    except (ValueError, RuntimeError, OSError) as error:
-        result = dict(verdict='invalid', error=str(error))
+    except (ValueError, RuntimeError, OSError, KeyError, TypeError) as error:
+        # A malformed reference or summary is no verdict on the judge, never drift.
+        result = dict(verdict='invalid', error=f'{type(error).__name__}: {error}')
     print(json.dumps(result, indent=2, allow_nan=False))
     for case in result.get('moved', []):
         moves = [f'{key} {entry["delta"]:+g}' for key, entry in result['cases'][case].items()
