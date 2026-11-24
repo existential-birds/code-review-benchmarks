@@ -93,11 +93,25 @@ class Stop(Exception):
     """Stops the landing for a person, saying what to do."""
 
 
+LOOP_IDENTITY = {f'GIT_{role}_{key}': value for role in ('AUTHOR', 'COMMITTER')
+                 for key, value in (('NAME', 'Daydream loop proposer'), ('EMAIL', 'proposer@daydream-loop.invalid'))}
+
 # The steps that leave this machine, which a dry run never takes and tests replace.
+
+def person_git(repository: Path, *arguments: str) -> str:
+    """Git as the person runs it: their configuration, signing key and credentials, and hooks on, so Daydream's
+    pre-push gate runs. Only a confirmed winner the guard accepted gets here, and the guard refuses a change to
+    hooks, attributes or Git settings, so nothing the proposer wrote can name a driver or hook."""
+    result = subprocess.run([guard.GIT, '-C', str(repository), *arguments], capture_output=True, encoding='utf-8',
+                            errors='surrogateescape')
+    if result.returncode:
+        raise RuntimeError(f'git {" ".join(arguments)} failed: {result.stderr.strip()}')
+    return result.stdout
+
 
 def push(worktree: Path, branch: str) -> None:
     """Push the branch to Daydream with Git's hooks on."""
-    guard.git(worktree, 'push', '--quiet', '--set-upstream', 'origin', f'{branch}:{branch}')
+    person_git(worktree, 'push', '--quiet', '--set-upstream', 'origin', f'{branch}:{branch}')
 
 
 def open_pr(worktree: Path, branch: str, title: str, body: Path) -> str:
@@ -123,8 +137,9 @@ def pr_state(pr: str) -> dict:
 # Landing.
 
 def _config(repository: Path, *key: str) -> str:
+    """A setting as the person's Git reads it; the loop's own Git reads no global settings."""
     try:
-        return guard.git(repository, 'config', '--get', *key).strip()
+        return person_git(repository, 'config', '--get', *key).strip()
     except RuntimeError:
         return ''
 
@@ -150,7 +165,8 @@ def rebase(clone: Path, worktree: Path, branch: str, base: str, commit: str) -> 
     worktree.parent.mkdir(parents=True, exist_ok=True)
     guard.git(clone, 'worktree', 'add', '--quiet', '-B', branch, str(worktree), commit)
     try:
-        guard.git(worktree, 'rebase', '--quiet', '--onto', main, base)
+        # The loop's own Git, which reads no global settings, so it names the committer; signing re-commits it.
+        guard.git(worktree, 'rebase', '--quiet', '--onto', main, base, environment=LOOP_IDENTITY)
     except RuntimeError as error:
         try:
             guard.git(worktree, 'rebase', '--abort')
@@ -184,7 +200,7 @@ def sign(clone: Path, worktree: Path) -> str:
         if value := _config(clone, '--global', key):
             identity += ['-c', f'{key}={value}']
     try:
-        guard.git(worktree, *identity, 'commit', '--quiet', '--amend', '--no-edit', '--gpg-sign')
+        person_git(worktree, *identity, 'commit', '--quiet', '--amend', '--no-edit', '--gpg-sign')
     except RuntimeError as error:
         raise Stop(f'Signing the commit failed: {error}\n\n{SIGNING}') from None
     header = guard.git(worktree, 'cat-file', 'commit', 'HEAD').split('\n\n', 1)[0]
