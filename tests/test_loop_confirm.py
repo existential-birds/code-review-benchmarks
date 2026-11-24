@@ -292,3 +292,14 @@ def test_the_loop_cannot_be_pointed_at_confirmations_or_a_held_out_catalog(held_
     (held_out / 'confirmations/ledger.jsonl').write_text('')
     assert ledger.main(['verify', 'confirmations']) == 1
     assert str(held_out / 'loop-runs/confirmations') in capsys.readouterr().err
+
+
+def test_sides_whose_catalogs_differ_by_a_dropped_case_are_compared_on_the_cases_both_hold():
+    limits = settings.load(sigma=.02, rounds=3, precision_margin=.03, wrong_findings_margin=.2, incomplete_margin=.5)
+    def side(cases):
+        rows = {case: [rb(2), rb(2), rb(1)] for case in cases}
+        return dict(catalog_identity=dict(reviewbench_revision='r', split='test', judge='j', daydream={}),
+                    rounds=[dict(round=n + 1) for n in range(3)], cases=rows)
+    # The candidate's catalog lost case-c, as a commit gone upstream would leave it.
+    result = confirm.compare(side(['case-a', 'case-b', 'case-c']), side(['case-a', 'case-b']), 'reviewbench', limits)
+    assert result['matched'] == dict(cases=2, of=3) and 'unusable' in result

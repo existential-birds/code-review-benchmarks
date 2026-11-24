@@ -96,7 +96,8 @@ for one task:
 ## Compare builds over rounds
 
 To compare the pinned build with a candidate, score each over several rounds of
-ReviewBench's test set. A round is its own job, because Harbor pools the trials of
+ReviewBench's dev split; the test set is held out for `loop.confirm`, below. A round is
+its own job, because Harbor pools the trials of
 one job.
 
 On the dev split, [`loop/rounds.py`](../../loop/rounds.py) scores one build over rounds
@@ -125,9 +126,9 @@ against the baseline, with AACR's held-out cases, and gives one word: `confirmed
 
 ```sh
 .venv/bin/python -m benchmarks.daydream.build <daydream-clone> --candidate <commit>
-.venv/bin/python -m benchmarks.reviewbench.convert --upstream .cache/src/ReviewBench --split test \
+.venv/bin/python -m benchmarks.reviewbench.convert --upstream .cache/src/ReviewBench --split dev \
   --output artifacts/reviewbench/<pinned-catalog>
-.venv/bin/python -m benchmarks.reviewbench.convert --upstream .cache/src/ReviewBench --split test \
+.venv/bin/python -m benchmarks.reviewbench.convert --upstream .cache/src/ReviewBench --split dev \
   --build .cache/daydream-candidates/<commit>/build.json --output artifacts/reviewbench/<candidate-catalog>
 ```
 

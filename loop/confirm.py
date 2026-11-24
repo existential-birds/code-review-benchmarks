@@ -157,8 +157,14 @@ def _pooled(summary: dict, cases: list[str], benchmark: str) -> list[dict]:
 
 def compare(baseline: dict, candidate: dict, benchmark: str, limits: settings.Settings) -> dict:
     """Both sides' rounds on the matched cases, and each figure the rule reads: means and margin."""
+    # A held-out case one side's catalog left out (its upstream commit gone) can't be compared; the sides are
+    # compared on the cases both catalogs hold, and the cases either lacks count against the matched fraction.
+    both = sorted(set(baseline['cases']) & set(candidate['cases']))
+    total_cases = len(set(baseline['cases']) | set(candidate['cases']))
+    baseline, candidate = ({**side, 'cases': {case: side['cases'][case] for case in both}}
+                           for side in (baseline, candidate))
     matched = decide.matched_cases(baseline, candidate)
-    total, least = len(baseline['cases']), limits['min_matched_fraction']
+    total, least = total_cases, limits['min_matched_fraction']
     if not matched or len(matched) / total < least:
         return dict(matched=dict(cases=len(matched), of=total), unusable=(
             f'On {benchmark}, only {len(matched)} of {total} held-out cases were scored in every round of both '

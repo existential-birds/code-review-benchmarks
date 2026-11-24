@@ -229,9 +229,9 @@ def _generate(bench, upstream: Path, catalog: Path, request: dict, split: str) -
     """Generate the build's catalog. On failure, remove what this attempt wrote, so the name runs again.
 
     A held-out set has no case list to drop a case from: when its conversion ran to the end, a
-    case that failed (its upstream commit gone) is left out, and catalog.json records it. Only a
-    case that fails again, with the same error, when converted once more: a passing failure, a
-    network or disk error, would otherwise drop a case from a catalog later rounds share.
+    case that failed (its upstream commit gone) is left out, and catalog.json records it. A case is
+    left out only when it fails again, with the same error, converted once more; a passing failure,
+    a network or disk error, would otherwise drop it from a catalog later rounds share.
     """
     existed = catalog.exists()
     build_file = None if request['build'] in ('pinned', 'oracle') else Path(request['build'])
