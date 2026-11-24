@@ -18,7 +18,8 @@ and the loop uses that cautious figure:
 - Guard margins, each ``accept_z`` times the upper-bound SD of a difference of two
   R-round means: pooled precision (the wider of grounded and augmented), unmatched
   findings judged wrong per scored case, and unfinished reviews (failed, incomplete or
-  missing) per round.
+  missing) per round. A count that held still over the rounds takes Poisson's SD instead,
+  the square root of its mean count per round and at least one event.
 - The canary's per-case reference counts from the oracle rounds, and a tolerance from
   how far the judge moved a case's counts between those rounds.
 """
@@ -82,6 +83,23 @@ def pooled(summary: dict, cases: list[str]) -> list[dict]:
 GUARDS = ('wrong_per_case', 'unfinished')
 
 
+def count_floor(rounds: list[dict], key: str) -> float:
+    """The smallest SD a guard's count may take: Poisson's, of at least one event per round.
+
+    Five rounds can show a rare count, a failed review or a finding judged wrong, holding
+    still, and a zero SD would let one more such event reject a candidate. A count of rare,
+    independent events varies by about the square root of its mean."""
+    if key == 'unfinished':
+        return math.sqrt(max(statistics.fmean(entry['unfinished'] for entry in rounds), 1))
+    if key == 'wrong_per_case':
+        scored = [entry for entry in rounds if entry.get('wrong_per_case') is not None]
+        if not scored:
+            return 0.0
+        cases = statistics.fmean(entry['scored'] for entry in scored)
+        return math.sqrt(max(statistics.fmean(entry['wrong_per_case'] for entry in scored) * cases, 1)) / cases
+    return 0.0
+
+
 def block(rounds: list[dict]) -> dict:
     return {key: spread([entry[key] for entry in rounds if entry.get(key) is not None])
             for key in (*METRICS, *GUARDS) if any(key in entry for entry in rounds)}
@@ -93,7 +111,8 @@ def derive(reviewer: dict, oracle: dict, loaded: settings.Settings) -> dict:
     matched = [case for case in climb if all(counts is not None for counts in reviewer['cases'][case])]
     rounds = [{key: entry[key] for key in (*METRICS, 'unmatched_judged_wrong', 'incomplete', 'failed', 'missing',
                                             'evaluated', 'expected', 'cost_usd', 'elapsed_seconds')}
-              | dict(wrong_per_case=entry['unmatched_judged_wrong'] / entry['evaluated'] if entry['evaluated'] else None,
+              | dict(scored=entry['evaluated'],
+                     wrong_per_case=entry['unmatched_judged_wrong'] / entry['evaluated'] if entry['evaluated'] else None,
                      unfinished=entry['failed'] + entry['incomplete'] + entry['missing'])
               for entry in reviewer['rounds']]
     blocks = {'all': block(rounds), 'matched': block(pooled(reviewer, matched)),
@@ -110,11 +129,12 @@ def derive(reviewer: dict, oracle: dict, loaded: settings.Settings) -> dict:
     size = next((int(name) for name, sd in sizes.items() if enough(sd)), None)
     sigma = sizes[str(size)] if size else sizes['50']
     chosen = enough(sigma) or most
-    source = blocks['first_25'] if size == 25 else blocks['all']
+    source_rounds = pooled(reviewer, climb[:25]) if size == 25 else rounds
+    source = block(source_rounds)
 
     def margin(key: str) -> float | None:
         sd = source.get(key, {}).get('sd_upper')
-        return None if sd is None else threshold(sd, chosen)
+        return None if sd is None else threshold(max(sd, count_floor(source_rounds, key)), chosen)
 
     # The judge alone: the oracle's pooled scores, and how each case's counts moved between rounds.
     oracle_cases = oracle['cases']

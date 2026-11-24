@@ -65,3 +65,15 @@ def test_a_spread_too_wide_for_the_target_says_so():
     assert derived['climb_set_size'] is None and derived['rounds'] == 5
     assert derived['smallest_detectable_gain'] == pytest.approx(derived['accept_threshold']['5'])
     assert derived['smallest_detectable_gain'] > settings.load()['target_gain']
+
+
+def test_a_guard_count_that_held_still_takes_poissons_spread():
+    # Every round: four findings judged wrong over 40 scored cases, and no unfinished review.
+    held = {f'case-{index}': [counts(6, 6, [2, 8, 3, 9, 5][number], unmatched_fp=int(index < 4)) for number in range(5)]
+            for index in range(40)}
+    oracle = summary({name: [counts(10, 10, 10)] * 5 for name in held}, side=None)
+    loaded = settings.load()
+    derived = noise.derive(summary(held), oracle, loaded)['derived']
+    scale = loaded['accept_z'] * math.sqrt(2 / derived['rounds'])
+    assert derived['wrong_findings_margin'] == pytest.approx(scale * math.sqrt(4) / 40)
+    assert derived['incomplete_margin'] == pytest.approx(scale * 1)
