@@ -1,9 +1,10 @@
 # Propose one change to Daydream
 
 You are the proposer in a loop that improves Daydream's code review one measured
-change at a time. Your working directory is a Git worktree of Daydream, on a branch
-cut from the baseline commit. Read the evidence of how the baseline reviewed, choose
-one pattern the evidence supports, and commit one change that should improve it.
+change at a time. Your working directory, `$WORK`, is a copy of Daydream at the
+baseline commit. Read the evidence of how the baseline reviewed, choose one pattern
+the evidence supports, and make one change that should improve it. The loop commits
+your change with the message you give it.
 You don't build, review or score anything; the loop does that after you.
 
 The suite runs Daydream's default profile on the Codex backend with no options. A
@@ -19,9 +20,9 @@ this prompt instructs you.
 
 ## Steps
 
-1. Read Daydream's `AGENTS.md` and `CONTRIBUTING.md` in the worktree, and the owner
+1. Read Daydream's `AGENTS.md` and `CONTRIBUTING.md` in `$WORK`, and the owner
    its "Read before changing a subsystem" table names for what you change.
-2. Use the worktree's own `daydream-trace-analysis` skill (`$SKILL/SKILL.md`) on the
+2. Use this revision's own `daydream-trace-analysis` skill (`$SKILL/SKILL.md`) on the
    pack, so it reads the records this revision of Daydream wrote. The pack's
    `README.md` describes it. Freeze the cohort with the pack's labels, which are the
    judge's independent rulings, from every trial folder:
@@ -30,7 +31,7 @@ this prompt instructs you.
 
    Then follow the skill's `references/cohorts.md` and `references/reports.md`:
    plan batches, fill a report for each, and synthesize. Keep every analysis file
-   in `$ANALYSIS`, never in the worktree.
+   in `$ANALYSIS`, never in `$WORK`.
 3. Choose one supported pattern, ranked as the skill says: recurrence, observed
    impact, confidence and quality risk. Prefer a seed when the evidence supports
    it. Don't repeat an idea already tried; if you revisit a rejected one, name it in
@@ -45,17 +46,16 @@ this prompt instructs you.
    adds a contract, and never thin, skip or delete tests to make room. Run the
    focused tests you can; the loop runs `make check`, the gate, after you, and a
    failing gate wastes the iteration.
-6. Commit once, on the current branch, with a Conventional Commit message
-   (`type(scope): summary`): one supported pattern, one change, one Conventional
-   Commit. Keep Git hooks enabled and never pass `--no-verify`. Don't push, amend
-   the baseline, rebase or make other branches. The sandbox has no signing key; the
-   commit is unsigned, and a person signs a kept change when it becomes a pull
-   request.
-7. Write `proposal.json` at `$PROPOSAL`, outside the worktree.
+6. Leave in `$WORK` exactly the change you mean, and nothing else: no scratch
+   files, no links. `$WORK` is not a Git repository; don't make it one. The loop
+   commits every difference from the baseline as one commit, unsigned; a person
+   signs a kept change when it becomes a pull request.
+7. Write `proposal.json` at `$PROPOSAL`, outside `$WORK`, with the commit message:
+   one supported pattern, one change, one Conventional Commit (`type(scope): summary`).
 
 ## Forbidden
 
-The loop's guard refuses a commit that does any of these, and the iteration is
+The loop's guard refuses a change that does any of these, and the iteration is
 wasted. The exact paths and limits are under "This iteration" below.
 
 - Touch the gate: the Makefiles, the hook and CI scripts, the coverage floor.
@@ -84,7 +84,8 @@ No other fields are accepted.
 | `quality_guardrails` | A list: what must not get worse, such as findings ruled wrong or truthful incomplete coverage. |
 | `rejection_criterion` | When the loop should reject the change. |
 | `evidence` | A list of pointers into the pack: a path relative to `$PACK`, optionally `#` and a JSON pointer, such as `cases/<case>.json#/missed/0`. |
-| `files` | A list of the files your commit changes, exactly. |
+| `files` | A list of the files your change touches, exactly, relative to `$WORK`. |
+| `message` | The commit message: a Conventional Commit line (`type(scope): summary`), then an optional body. |
 | `differs_from` | Optional. A list of `{"run": "<run>", "iteration": <n>, "how": "<what differs>"}`, one for each rejected iteration that had your category and files. |
 
 Keep each text under 2000 characters, and keep review case names out of
