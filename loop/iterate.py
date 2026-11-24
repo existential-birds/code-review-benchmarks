@@ -205,9 +205,14 @@ def unfinished(run: str, n: int, root: Path = ROOT) -> dict | None:
     """
     path, worktree, branch = _state(root, run, n), root / WORKTREES / f'{run}-{n}', f'loop/{run}/{n}'
     if path.exists():
-        saved = json.loads(path.read_text())
-        candidate = saved['fields']['candidate']
-        if worktree.is_dir() and guard.git(worktree, 'rev-parse', 'HEAD').strip() == candidate['commit']:
+        try:
+            saved = json.loads(path.read_text())
+            candidate = saved['fields']['candidate']
+            commit = candidate['commit']
+        except (ValueError, KeyError, TypeError):
+            # Unreadable: redo the iteration from its proposal rather than trust it.
+            saved = commit = None
+        if saved and worktree.is_dir() and guard.git(worktree, 'rev-parse', 'HEAD').strip() == commit:
             if not Path(candidate.get('build', '')).is_file():
                 # Built again, with the guard first, rather than scored against a build that is gone.
                 for key in ('build', 'wheel_sha256'):

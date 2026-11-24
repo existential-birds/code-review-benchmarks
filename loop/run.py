@@ -70,7 +70,6 @@ from pathlib import Path
 import re
 import subprocess
 import sys
-import tempfile
 import time
 import tomllib
 
@@ -79,7 +78,8 @@ from loop import canary, confirm as confirmation, guard, iterate as iteration, l
 
 ROOT = Path(__file__).resolve().parents[1]
 # One loop per machine: its Docker and both subscriptions are shared.
-LOCK = Path(tempfile.gettempdir()) / 'code-review-benchmarks-loop.lock'
+# A fixed path, not $TMPDIR, which differs between users and sandboxed shells on one machine.
+LOCK = Path('/tmp/code-review-benchmarks-loop.lock')
 # What Codex prints when a subscription's limit is reached.
 LIMIT = re.compile(r'hit your usage limit', re.IGNORECASE)
 LAND_ISSUE = 'https://github.com/existential-birds/code-review-benchmarks/issues/57'
@@ -274,6 +274,20 @@ def limited(texts: list[str], names: list[str] = (), logs: Path | None = None) -
     return any(LIMIT.search(_tail(file)) for file in files)
 
 
+def confirmation_limited(commit: str, error: str) -> bool:
+    """Whether loop.confirm stopped on a subscription limit. It keeps Harbor's output in its own log and its
+    trials under confirmations/, so those are searched for the limit alone; nothing else in them is read."""
+    folder = confirmation.CONFIRMATIONS / commit
+    files = [folder / 'confirm.log'] + sorted(file for file in folder.glob('*/jobs/**/*')
+                                              if file.suffix in ('.log', '.txt') and file.is_file())
+    return bool(LIMIT.search(error)) or any(LIMIT.search(_tail(file)) for file in files if file.is_file())
+
+
+def canary_name(run: str, entries: int) -> str:
+    """A fresh loop.rounds name for a canary: stamped, so a resume runs a new round rather than reading an old one."""
+    return f'{run}-canary-{entries}-{datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")}'
+
+
 def _wait(state: dict, loaded: settings.Settings, what: str) -> None:
     """One wait for a subscription limit to clear; a limit met again right after stops the run."""
     minutes = loaded['limit_backoff_minutes']
@@ -290,7 +304,7 @@ def _canary(name: str, loaded: settings.Settings, state: dict) -> dict:
     while True:
         result = canary_round(name, loaded)
         if result['verdict'] in ('stable', 'drifted'):
-            state['waited'] = False
+            # The oracle uses only the judge's login, so a stable canary says nothing of the reviewer's limit.
             return result
         if not limited([result.get('error', '')], [name]):
             raise Stop('infrastructure', f'The canary {name} gave no verdict, {result["verdict"]}: '
@@ -307,7 +321,7 @@ def _confirm(folder: Path, start: dict, entry: dict, loaded: settings.Settings, 
             break
         if confirmation.FRESH_CASES_ISSUE in error:
             raise Stop('held-out-worn', f'#{n} was not confirmed: {error}')
-        if not LIMIT.search(error):
+        if not confirmation_limited(commit, error):
             raise Stop('infrastructure', f'loop.confirm gave #{n} no verdict: {error}')
         _wait(state, loaded, f'The confirmation of #{n}')
     state['waited'] = False
@@ -360,7 +374,7 @@ def drive(run: str, loaded: settings.Settings, state: dict, resumed: bool) -> tu
     canaried = None
     if resumed:
         entries = ledger.read(folder)
-        result = _canary(f'{run}-canary-{len(entries)}', loaded, state)
+        result = _canary(canary_name(run, len(entries)), loaded, state)
         if result['verdict'] == 'drifted':
             raise Stop('judge-drift', f'The canary {result["job"]} moved {", ".join(result["moved"])}')
         canaried = sum(entry['kind'] == 'iteration' for entry in entries)
@@ -376,7 +390,7 @@ def drive(run: str, loaded: settings.Settings, state: dict, resumed: bool) -> tu
             return stop
         if iterations and len(iterations) % loaded['canary_every'] == 0 and canaried != len(iterations):
             canaried = len(iterations)
-            result = _canary(f'{run}-canary-{len(entries)}', loaded, state)
+            result = _canary(canary_name(run, len(entries)), loaded, state)
             if result['verdict'] == 'drifted':
                 raise Stop('judge-drift', f'The canary {result["job"]} moved {", ".join(result["moved"])}')
         entry = iterate(run, loaded)
@@ -450,7 +464,7 @@ def start(run: str, baseline_name: str | None, overrides: dict) -> int:
         if (folder / 'ledger.jsonl').exists():
             raise ValueError(f'{run} has a ledger already; continue it with --resume {run}, or choose a new name')
         try:
-            result = _canary(f'{run}-canary-0', loaded, dict(waited=False))
+            result = _canary(canary_name(run, 0), loaded, dict(waited=False))
         except Stop as stop:
             raise RuntimeError(f'The run did not start: {stop.args[1]}') from None
         if result['verdict'] == 'drifted':

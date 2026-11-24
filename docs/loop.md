@@ -60,8 +60,10 @@ reasons, proposer logs or trial logs, or in a canary's or confirmation's error.
 ```
 
 This continues from the ledger after a crash, Ctrl-C or a stop. It checks everything as at
-the start and runs the canary again. An iteration with no entry is redone from its last
-finished round, and a change accepted on dev but not yet confirmed is confirmed first.
+the start and runs the canary again. An iteration with no entry, cut off by a crash or a
+kill, is redone from its last finished round; one stopped by Ctrl-C is recorded invalid
+and the next is proposed afresh. A change accepted on dev but not yet confirmed is
+confirmed first.
 After a stop, the plateau and invalid streaks count again from zero, but the budgets and
 winners count the whole run: raise the setting to go on past one. After merging a winner,
 start a new run, since the pin, and so the baseline, changed.
@@ -90,4 +92,7 @@ once per setting:
 .venv/bin/python -m loop.run --run trial --set auto_open_pr=false --set run_max_iterations=2
 ```
 
-A run keeps the settings it started with. `--set` on `--resume` changes them from then on.
+A run keeps the settings it started with. `--set` on `--resume` changes them for that
+resume only, so repeat it on the next one; `run_max_wall_hours` counts from the run's
+start, so a resume after a long pause may need it raised. `loop.confirm` reads
+`loop/settings.toml` itself, so a run's `--set` doesn't reach the held-out rule.

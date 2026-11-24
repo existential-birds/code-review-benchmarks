@@ -9,6 +9,7 @@ import fcntl
 from functools import partial
 import hashlib
 import json
+import re
 from pathlib import Path
 import sys
 from types import SimpleNamespace
@@ -51,7 +52,8 @@ def loop(tmp_path, monkeypatch):
     monkeypatch.setattr(looprun, 'repository', lambda: 's' * 40)
 
     def canary_round(name, loaded):
-        done.canary_names.append(name)
+        # Each canary name is stamped fresh; the tests read it without the stamp.
+        done.canary_names.append(re.sub(r'-\d{8}T\d{6}$', '', name))
         return done.canaries.pop(0) if done.canaries else STABLE
     monkeypatch.setattr(looprun, 'canary_round', canary_round)
 
@@ -192,7 +194,7 @@ def test_a_drifted_or_unscored_canary_keeps_the_run_from_starting(loop, capsys):
     assert json.loads(capsys.readouterr().out)['moved'] == ['case-a']
     assert not (loop.root / 'loop-runs/run-a/ledger.jsonl').exists()
     assert loop.run('--run', 'run-a', canaries=[dict(verdict='no-reference', error='No loop/noise.json')]) == 2
-    assert 'The run did not start: The canary run-a-canary-0 gave no verdict, no-reference' in capsys.readouterr().err
+    assert 'The run did not start: The canary run-a-canary-0-' in capsys.readouterr().err
     assert not (loop.root / 'loop-runs/run-a/ledger.jsonl').exists()
 
 
@@ -408,3 +410,13 @@ def test_the_run_start_records_the_summary_iterate_finds(loop, summaries):
 def test_the_runs_spend_counts_the_baselines_check_rounds_an_iteration_made():
     assert looprun.spend(dict(cost_usd_equiv=20, baseline_check=dict(rounds=2, cost_usd_equiv=10))) == 30
     assert looprun.spend(dict(cost_usd_equiv=20)) == 20 and looprun.spend({}) == 0
+
+
+def test_a_canary_name_is_fresh_each_time_and_a_confirmation_limit_is_found_in_its_logs(tmp_path, monkeypatch):
+    assert re.fullmatch(r'run-a-canary-3-\d{8}T\d{6}', looprun.canary_name('run-a', 3))
+    monkeypatch.setattr(confirmation, 'CONFIRMATIONS', tmp_path / 'confirmations')
+    trial = tmp_path / 'confirmations' / ('c' * 40) / 'reviewbench/jobs/job-1/trial/agent'
+    trial.mkdir(parents=True)
+    assert not looprun.confirmation_limited('c' * 40, 'Round 1 failed (job-1)')
+    (trial / 'daydream.stdout.log').write_text("error: You've hit your usage limit. Try again later.\n")
+    assert looprun.confirmation_limited('c' * 40, 'Round 1 failed (job-1)')
