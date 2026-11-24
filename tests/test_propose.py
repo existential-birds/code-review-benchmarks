@@ -11,7 +11,7 @@ import sys
 
 import pytest
 
-from loop import guard, ledger, propose, settings
+from loop import ledger, propose, settings
 from real_git import commit
 
 DAYDREAM = {'AGENTS.md': '# Agent guidance\n', 'daydream/config.py': 'EFFORT = "medium"\n',
