@@ -38,10 +38,16 @@ the change: they are reported apart, under ``baseline_check``, and count against
 budget, though ``loop.run`` counts their cost against the run's. SIGTERM and SIGHUP are
 recorded as interrupts.
 
+The entry records the ``[proposer]`` slot that wrote the change. The reviewer and judge
+slots (#81) must be the configured ones: those the run-start entry records, when it records
+any, and those the baseline's rounds were scored under, so a baseline from another reviewer
+or judge is never compared with a candidate.
+
 Nothing here changes the pin or makes the candidate the baseline: that waits for
 confirmation (#54) and the loop (#55). Prints the entry, or exits 2 with an ``error``,
 recording nothing, when the iteration can't start: no run-start entry or baseline
-summary, a derived setting unset, or no login folders.
+summary, a baseline or run made under other slots, a derived setting unset, or no login
+folders or reviewer key.
 """
 from __future__ import annotations
 
@@ -55,7 +61,7 @@ import sys
 import time
 
 from benchmarks.daydream import build
-from loop import decide, evidence, guard, ledger, propose, rounds, sets, settings
+from loop import decide, evidence, guard, ledger, propose, rounds, sets, settings, slots
 
 ROOT = Path(__file__).resolve().parents[1]
 CLONE = Path('.cache/loop/daydream')
@@ -76,6 +82,9 @@ def baseline(run: Path, loaded: settings.Settings) -> dict:
     if not entries:
         raise ValueError(f'No ledger at {run / "ledger.jsonl"}; a run starts with its run-start entry')
     start = entries[0]
+    configured = dict(reviewer=loaded['reviewer'], judge=loaded['judge'])
+    if 'slots' in start and start['slots'] != configured:
+        raise ValueError(f"The run started under the slots {start['slots']}, not the configured {configured}")
     found = [path for path in sorted(rounds.ARTIFACTS.glob('*/summary.json'))
              if _sha256(path) == start['baseline_summary_sha256']]
     if len(found) != 1:
@@ -85,6 +94,7 @@ def baseline(run: Path, loaded: settings.Settings) -> dict:
     if summary['request'] != dict(build='pinned', cases=sets.read(sets.CLIMB)) or summary.get(
             'side') != start['baseline_commit']:
         raise ValueError(f"{found[0]} is not the pinned build {start['baseline_commit']} on {sets.CLIMB}")
+    slots.check_measured(summary['catalog_identity'], loaded['reviewer'], loaded['judge'], f'The baseline {found[0]}')
     if len(summary.get('rounds', [])) != loaded['rounds']:
         raise ValueError(f'{found[0]} has {len(summary.get("rounds", []))} rounds, not the {loaded["rounds"]} planned')
     loaded.accept_threshold()
@@ -220,7 +230,7 @@ def iterate(run: str, loaded: settings.Settings, *, root: Path = ROOT) -> dict:
     folder = root / 'loop-runs' / run
     base = baseline(folder, loaded)
     rounds.check_logins()
-    work = dict(fields=dict(iteration=base['iteration']), patch=None, worktree=None, rounds={}, attempts=0,
+    work = dict(fields=dict(iteration=base['iteration'], proposer=loaded['proposer']), patch=None, worktree=None, rounds={}, attempts=0,
                 started=time.monotonic(), baseline_rounds=[], baseline_seconds=0.0)
     interrupted = None
     try:

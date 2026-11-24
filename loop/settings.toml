@@ -76,9 +76,41 @@ invalid_streak_stop = 3
 limit_backoff_minutes = 60
 # A dev round is 131 cases and about 8 reviewer-hours; AACR is used at confirmation.
 aacr_in_climb = false
-# Run in loop.propose's container, which holds only a copy of the baseline, the evidence pack and the Codex
-# login: the container is the sandbox, since Codex's own limits writes but not reads. Non-interactive.
-proposer_command = ["codex", "exec", "--dangerously-bypass-approvals-and-sandbox", "--skip-git-repo-check"]
+
+# The three model roles (#81). Each is a slot: change a field to swap the harness, provider,
+# model or effort. effort = "default" sends none, so the provider's or harness's own applies.
+# Scores, noise figures and ledgers record the reviewer and judge slots, and the loop compares
+# only scores made under the same two; the proposer may change freely.
+
+# Who reviews: Daydream's Pi backend through OpenRouter, with DeepSeek V4.1 Flash on every phase
+# (Daydream has no per-phase model table on Pi). The model is always passed: without one,
+# Daydream falls back to its own DEFAULT_PI_MODEL. The key comes from OPENROUTER_API_KEY.
+# Daydream's defaults on Codex, the reviewer before #81, are backend "codex", provider "openai",
+# model and effort "default".
+[reviewer]
+harness = "daydream"
+backend = "pi"
+provider = "openrouter"
+model = "deepseek/deepseek-v4.1-flash-1017"
+effort = "default"
+
+# Who judges: Pi on the ChatGPT subscription login, with the provider's default reasoning, as
+# docs/citing.md describes. Changing it restarts every baseline.
+[judge]
+harness = "pi"
+provider = "openai"
+model = "gpt-6.1-sol"
+effort = "default"
+
+# Who proposes, in loop.propose's container, which holds only a copy of the baseline, the
+# evidence pack and this CLI's login: the container is the sandbox. agy 1.5.16 has a Linux arm64
+# build, but its login lives in the macOS Keychain and doesn't reach the container, so Codex runs
+# until an agy login folder exists (AGY_LOGIN_DIR; loop/proposers.py says how to make one).
+# agy: cli "agy", model "gemini-4-neon-xhigh", effort "xhigh".
+[proposer]
+cli = "codex"
+model = "gpt-6.2-sol"
+effort = "high"
 
 # Derived by the noise measurement of #45 (docs/loop-noise.md, loop/noise.json): five rounds of
 # Daydream 0.37.0 on the 50 climb cases. accept_threshold(R) = accept_z * sigma * sqrt(2 / R)
@@ -95,3 +127,13 @@ rounds = 5
 precision_margin = 0.024083429458845364
 wrong_findings_margin = 0.026352313834736494
 incomplete_margin = 1.788854381999832
+# The slots #45 measured: Daydream's defaults on Codex, judged by gpt-6.1-sol. They aren't the
+# configured reviewer, so these values are refused until #82 measures the noise again.
+judge = "openai/gpt-6.1-sol"
+
+[derived.reviewer]
+harness = "daydream"
+backend = "codex"
+provider = "openai"
+model = "default"
+effort = "default"

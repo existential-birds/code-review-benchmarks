@@ -20,6 +20,13 @@ The complete system being evaluated for producing code-review findings,
 including its model, orchestration, and filtering behavior.
 _Avoid_: Model, when referring to the complete system
 
+**Slot**:
+One model role in the loop's settings, the reviewer, the judge or the proposer, and
+what fills it: for the reviewer and judge a harness, provider, model and effort (the
+reviewer also a backend), for the proposer a CLI, model and effort. Scores made under
+different reviewer or judge slots aren't compared.
+_Avoid_: Backend, when meaning the whole role
+
 **Candidate build**:
 A Daydream commit built for scoring without changing the pinned build.
 

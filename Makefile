@@ -8,6 +8,9 @@ DAYDREAM_COMMIT := $(shell sed -n 's/.*"source_commit": "\([0-9a-f]*\)".*/\1/p' 
 AACR_COMMIT := $(shell sed -n "s/^AACR_REVISION = '\([0-9a-f]*\)'/\1/p" benchmarks/aacr/convert.py)
 REVIEWBENCH_COMMIT := $(shell sed -n "s/^REVIEWBENCH_REVISION = '\([0-9a-f]*\)'/\1/p" benchmarks/reviewbench/convert.py)
 
+# The reviewer slot's backend, which decides the reviewer's login or key.
+REVIEWER_BACKEND := $(shell sed -n '/^\[reviewer\]/,/^\[/s/^backend = "\(.*\)"/\1/p' loop/settings.toml)
+
 # Where Codex and Pi keep their logins, unless set.
 REVIEWER_CODEX_AUTH_DIR ?= $(or $(CODEX_HOME),$(HOME)/.codex)
 JUDGE_PI_AUTH_DIR ?= $(or $(PI_CODING_AGENT_DIR),$(HOME)/.pi/agent)
@@ -55,12 +58,13 @@ test: $(SETUP) $(SRC)/.ReviewBench-$(REVIEWBENCH_COMMIT)
 
 prereqs:
 	@docker info >/dev/null 2>&1 || { echo 'Docker is not running.'; exit 1; }
-	@test -f "$(REVIEWER_CODEX_AUTH_DIR)/auth.json" || { echo 'No Codex login in $(REVIEWER_CODEX_AUTH_DIR): run codex login, or set REVIEWER_CODEX_AUTH_DIR.'; exit 1; }
+	@if [ "$(REVIEWER_BACKEND)" = codex ]; then test -f "$(REVIEWER_CODEX_AUTH_DIR)/auth.json" || { echo 'No Codex login in $(REVIEWER_CODEX_AUTH_DIR): run codex login, or set REVIEWER_CODEX_AUTH_DIR.'; exit 1; }; \
+	else test -n "$$OPENROUTER_API_KEY" || { echo 'The $(REVIEWER_BACKEND) reviewer in loop/settings.toml needs OPENROUTER_API_KEY set.'; exit 1; }; fi
 	@test -f "$(JUDGE_PI_AUTH_DIR)/auth.json" || { echo 'No Pi login in $(JUDGE_PI_AUTH_DIR): run /login in Pi, or set JUDGE_PI_AUTH_DIR.'; exit 1; }
 	@node -e 'process.exit(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).openai?.type === "oauth" ? 0 : 1)' "$(JUDGE_PI_AUTH_DIR)/auth.json" \
 		|| { echo 'No ChatGPT subscription login in Pi: run /login in Pi 1.6 or later and choose Sign in with ChatGPT.'; exit 1; }
 
-$(QUICKSTART)/catalog.json: $(SETUP) $(SRC)/.aacr-bench-$(AACR_COMMIT) $(SUITE)
+$(QUICKSTART)/catalog.json: $(SETUP) $(SRC)/.aacr-bench-$(AACR_COMMIT) $(SUITE) loop/settings.toml
 	rm -rf $(QUICKSTART)
 	$(PY) -m benchmarks.aacr.convert --upstream $(SRC)/aacr-bench --output $(QUICKSTART) --task $(CASE)
 

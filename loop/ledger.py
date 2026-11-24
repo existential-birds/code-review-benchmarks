@@ -6,10 +6,13 @@ Each line is one JSON object with ``schema_version``, ``run``, ``time`` (UTC, IS
 the first line), ``kind`` and that kind's fields, and no others:
 
 - ``run-start`` (always the first line): ``settings`` (a copy), ``suite_commit``,
-  ``judge``, ``baseline_commit``, ``baseline_summary_sha256`` and ``canary``.
+  ``judge``, ``baseline_commit``, ``baseline_summary_sha256`` and ``canary``, and
+  ``slots``, the reviewer and judge slots the run scores under (#81; runs before slots
+  have none and ran Daydream's defaults on Codex).
 - ``iteration``: ``iteration`` (its number n) and ``verdict``, an object with
   ``verdict`` (accepted-on-dev, rejected or invalid) and ``reasons`` (a list of
-  strings), and nothing else. As far as it got: ``proposal`` (strings ``hypothesis``
+  strings), and nothing else. As far as it got: ``proposer``, the proposer slot that
+  wrote it; ``proposal`` (strings ``hypothesis``
   in one sentence, ``category`` from Daydream's trace-analysis skill, ``prediction``
   and ``rejection_criterion``; lists of strings ``evidence`` pointers and ``files``
   touched); ``candidate`` (``commit``,
@@ -45,11 +48,14 @@ from pathlib import Path
 import re
 import sys
 
+from loop import slots
+
 SCHEMA_VERSION = 1
 RUNS = Path(__file__).resolve().parents[1] / 'loop-runs'
 FIELDS = {  # kind: (required, optional)
-    'run-start': ({'settings', 'suite_commit', 'judge', 'baseline_commit', 'baseline_summary_sha256', 'canary'}, set()),
-    'iteration': ({'iteration', 'verdict'}, {'proposal', 'candidate', 'gate', 'scores', 'cost'}),
+    'run-start': ({'settings', 'suite_commit', 'judge', 'baseline_commit', 'baseline_summary_sha256', 'canary'},
+                  {'slots'}),
+    'iteration': ({'iteration', 'verdict'}, {'proposal', 'proposer', 'candidate', 'gate', 'scores', 'cost'}),
     'confirmation': ({'iteration', 'verdict'}, set()),
     'stop': ({'reason'}, set()),
 }
@@ -80,6 +86,14 @@ def _check(kind: str, fields: dict, earlier: list[dict]) -> None:
     if not required <= set(fields) <= required | optional:
         allowed = f' and may add {sorted(optional)}' if optional else ' only'
         raise ValueError(f'A {kind} entry holds {sorted(required)}{allowed}: got {sorted(fields)}')
+    if kind == 'run-start' and 'slots' in fields:
+        given = fields['slots']
+        if not isinstance(given, dict) or set(given) != {'reviewer', 'judge'}:
+            raise ValueError(f'Run-start slots are exactly {{"reviewer", "judge"}}: {given!r}')
+        slots.reviewer(given['reviewer'])
+        slots.judge(given['judge'])
+    if kind == 'iteration' and 'proposer' in fields:
+        slots.proposer(fields['proposer'])
     if kind == 'stop' and not isinstance(fields['reason'], str):
         raise ValueError(f'A stop reason is a string: {fields["reason"]!r}')
     if kind in ('iteration', 'confirmation'):

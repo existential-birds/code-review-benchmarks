@@ -42,10 +42,12 @@ def order(names) -> list[str]:
 
 def dev_cases(upstream: Path) -> list[str]:
     """The task names ReviewBench's exporter writes for its full set and not its test set."""
+    # The names don't depend on the slots; the exporter needs some to write its tasks.
+    loaded = settings.load()
     with tempfile.TemporaryDirectory(prefix='loop-sets-') as temporary:
         exported = {}
         for split in ('full', 'test'):
-            convert.export(Path(upstream).resolve(), Path(temporary) / split, split)
+            convert.export(Path(upstream).resolve(), Path(temporary) / split, split, loaded['reviewer'], loaded['judge'])
             exported[split] = {path.name for path in (Path(temporary) / split).iterdir() if path.is_dir()}
     return sorted(exported['full'] - exported['test'])
 
