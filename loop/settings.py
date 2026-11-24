@@ -22,7 +22,7 @@ SETTINGS = {
     'auto_open_pr': bool, 'holdout_rounds': int, 'holdout_rule': str, 'holdout_max_uses': int,
     'canary_cases': int, 'canary_every': int, 'baseline_max_age_days': float, 'keep_rejected_jobs': int,
     'min_matched_fraction': float, 'max_proposal_attempts': int, 'invalid_streak_stop': int,
-    'limit_backoff_minutes': float, 'aacr_in_climb': bool, 'proposer_command': list,
+    'limit_backoff_minutes': float, 'aacr_in_climb': bool, 'proposer_command': list, 'gate_deselect_macos': list,
 }
 DERIVED = {'sigma': float, 'rounds': int, 'precision_margin': float,
            'wrong_findings_margin': float, 'incomplete_margin': float}

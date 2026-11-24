@@ -7,6 +7,7 @@ Daydream's gate never runs; a stand-in records what it was given.
 """
 import json
 import os
+import shlex
 from pathlib import Path
 import sys
 import time
@@ -266,3 +267,16 @@ def test_a_commit_the_guard_cannot_check_still_gives_json(repo, git, monkeypatch
     monkeypatch.setattr(guard, 'benchmark_names', unpinned)
     assert guard.main([str(path), base, base]) == 2
     assert json.loads(capsys.readouterr().out) == dict(accepted=False, error='Expected ReviewBench revision x')
+
+
+def test_on_macos_the_gate_deselects_the_tests_the_pinned_build_fails_there(repo, git, gate, monkeypatch):
+    path, base = repo
+    head = commit(git, path, {'daydream/review.py': 'def review():\n    return ["ok"]\n'})
+    tests = ['tests/test_a.py::test_one', 'tests/test_b.py::test_two[x y]']
+    monkeypatch.setattr(guard.sys, 'platform', 'darwin')
+    assert guard.check(path, base, head, settings.load(gate_deselect_macos=tests), NAMES)['accepted']
+    seen = json.loads(gate[1].read_text())['environment']
+    assert shlex.split(seen['PYTEST_ADDOPTS']) == [f'--deselect={test}' for test in tests]
+    monkeypatch.setattr(guard.sys, 'platform', 'linux')
+    assert guard.check(path, base, head, settings.load(gate_deselect_macos=tests), NAMES)['accepted']
+    assert 'PYTEST_ADDOPTS' not in json.loads(gate[1].read_text())['environment']
