@@ -35,10 +35,6 @@ gate_deselect_macos = [
 ]
 # The documented -n; recorded runs used 2 or 3.
 concurrency = 2
-# Harbor's -r for every round. Daydream 84c37cd's Pi backend gives up on a review when OpenRouter
-# drops a connection ("other side closed"), about 1 request in 80, which ends about a third of
-# reviews; one retry re-runs such a trial as a fresh review. Back to 0 once Daydream retries it.
-trial_retries = 1
 # A full iteration: five climb and five check rounds of 50, at the 2 to 4 hours and about $126 a round
 # that #45 measured, with room for the proposer, gate and canary.
 iteration_max_wall_hours = 48
