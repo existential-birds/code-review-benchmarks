@@ -215,3 +215,13 @@ def test_the_baselines_check_rounds_count_against_neither_budget(loop):
     entry = loop.run(['win'] * 4, iteration_max_cost_usd_equiv=25)
     assert entry['verdict']['verdict'] == 'accepted-on-dev'
     assert entry['cost']['cost_usd_equiv'] == 20 and entry['cost']['baseline_check']['cost_usd_equiv'] == 10
+
+
+def test_a_patch_with_bytes_that_are_not_utf8_is_saved_as_git_gave_it(loop, tmp_path):
+    run = loop.root / 'loop-runs/run-x'
+    ledger.append(run, 'run-start', dict(settings={}, suite_commit='a' * 40, judge='pi', baseline_commit='b' * 40,
+                                         baseline_summary_sha256='0' * 64, canary={}))
+    patch = b'+caf\xe9\n'.decode('utf-8', 'surrogateescape')
+    ledger.append(run, 'iteration', dict(iteration=1, verdict=dict(verdict='invalid', reasons=['x']),
+                                         candidate=dict(commit='c' * 40, patch_id='p' * 40)), patch=patch)
+    assert (run / 'patches/1.patch').read_bytes() == b'+caf\xe9\n'

@@ -184,7 +184,8 @@ def append(run: Path, kind: str, fields: dict, patch: str | None = None) -> dict
         if patch is not None:
             (run / 'patches').mkdir(exist_ok=True)
             with open(run / 'patches' / f'{fields["iteration"]}.patch', 'wb') as file:
-                _write(file, patch.encode())
+                # The bytes Git gave, even those that aren't UTF-8 and were read back as surrogates.
+                _write(file, patch.encode('utf-8', 'surrogateescape'))
         _write(ledger, line + b'\n')
     return entry
 
