@@ -45,9 +45,16 @@ A run that stops for infrastructure reasons, a failed or abandoned round, gives 
 verdict and isn't counted: run the same command again and it resumes, scoring that
 round as a fresh job and reusing the finished ones.
 
-``--limit-cases N`` is for checking the command only: a pilot on the first N cases of
-each held-out set, written under ``confirmations/pilots/<N>/`` in the same layout and
-kept out of the use count. The loop never reads a pilot's verdict.
+``--limit-cases N`` is for checking the command only: a pilot of a build against itself
+on the first N cases of each held-out set, N at most ``PILOT_MAX_CASES``, written under
+``confirmations/pilots/<N>/`` in the same layout and kept out of the use count. A build
+against itself says nothing about a change, so a pilot can't stand in for a counted
+confirmation. The loop never reads a pilot's verdict.
+
+A comparison the rule can't make once every round has run, too few cases scored in
+every round of both sides or a figure undefined, is ``not-confirmed`` and counted: the
+rounds finished, so it isn't an infrastructure failure, and running again would only
+read the held-out set once more.
 """
 from __future__ import annotations
 
@@ -81,12 +88,16 @@ FRESH_CASES_ISSUE = 'https://github.com/existential-birds/code-review-benchmarks
 COMMIT = re.compile(r'[0-9a-f]{40}')
 
 
+# A pilot checks the command; more cases would be held-out scores read without being counted.
+PILOT_MAX_CASES = 2
+
+
 def home(candidate: str, limit: int | None = None, root: Path = CONFIRMATIONS) -> Path:
     """The candidate's folder: ``confirmations/<candidate>``, or a pilot's under ``pilots/<N>``."""
     if not COMMIT.fullmatch(candidate):
         raise ValueError(f'A candidate is a full Daydream commit, 40 lowercase hex digits: {candidate!r}')
-    if limit is not None and limit < 1:
-        raise ValueError('--limit-cases must be positive')
+    if limit is not None and not 1 <= limit <= PILOT_MAX_CASES:
+        raise ValueError(f'--limit-cases must be from 1 to {PILOT_MAX_CASES}')
     return (root if limit is None else root / 'pilots' / str(limit)) / candidate
 
 
@@ -149,8 +160,9 @@ def compare(baseline: dict, candidate: dict, benchmark: str, limits: settings.Se
     matched = decide.matched_cases(baseline, candidate)
     total, least = len(baseline['cases']), limits['min_matched_fraction']
     if not matched or len(matched) / total < least:
-        raise ValueError(f'On {benchmark}, only {len(matched)} of {total} held-out cases were scored in every round '
-                         f'of both sides, below the {least:g} needed to compare them')
+        return dict(matched=dict(cases=len(matched), of=total), unusable=(
+            f'On {benchmark}, only {len(matched)} of {total} held-out cases were scored in every round of both '
+            f'sides, below the {least:g} needed to compare them'))
     sides = dict(baseline=_pooled(baseline, matched, benchmark), candidate=_pooled(candidate, matched, benchmark))
     result = dict(matched=dict(cases=len(matched), of=total),
                   **{name: dict(rounds=entries, mean=decide.means(entries)) for name, entries in sides.items()},
@@ -158,7 +170,7 @@ def compare(baseline: dict, candidate: dict, benchmark: str, limits: settings.Se
     for key in READS[benchmark]:
         values = {name: [entry[key] for entry in entries] for name, entries in sides.items()}
         if any(value is None for side in values.values() for value in side):
-            raise ValueError(f'On {benchmark}, {key} is undefined in some round on the matched cases')
+            return result | dict(unusable=f'On {benchmark}, {key} is undefined in some round on the matched cases')
         result['rule'][key] = dict(
             baseline=statistics.fmean(values['baseline']), candidate=statistics.fmean(values['candidate']),
             stddev={name: statistics.stdev(side) for name, side in values.items()},
@@ -169,6 +181,8 @@ def compare(baseline: dict, candidate: dict, benchmark: str, limits: settings.Se
 
 def rule(comparisons: dict) -> str:
     """The verdict from each benchmark's ``compare``."""
+    if any('unusable' in comparison for comparison in comparisons.values()):
+        return 'not-confirmed'
     reviewbench, aacr = comparisons['reviewbench']['rule'], comparisons['aacr']['rule']
 
     def below(figure: dict) -> bool:
@@ -193,8 +207,9 @@ def confirm(baseline: str, candidate: str, *, limit: int | None = None, concurre
     if planned < 2:
         raise ValueError('holdout_rounds must be at least 2, for each side to have a spread')
     base_commit, base_build = _build(baseline)
-    if base_commit == candidate:
-        raise ValueError('The candidate is the baseline')
+    if (base_commit == candidate) != (limit is not None):
+        raise ValueError('A pilot (--limit-cases) scores a build against itself, and only a pilot does: '
+                         + ('the candidate is the baseline' if limit is None else 'the candidate is not the baseline'))
     candidate_build = _build(candidate)[1]
     root.mkdir(parents=True, exist_ok=True)
     with open(root / 'lock', 'w') as lock:

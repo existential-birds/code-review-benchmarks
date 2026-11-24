@@ -48,6 +48,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from types import SimpleNamespace
 
 from benchmarks.aacr import convert as aacr_convert, metric as aacr_metric, report as aacr_report
@@ -228,7 +229,9 @@ def _generate(bench, upstream: Path, catalog: Path, request: dict, split: str) -
     """Generate the build's catalog. On failure, remove what this attempt wrote, so the name runs again.
 
     A held-out set has no case list to drop a case from: when its conversion ran to the end, a
-    case that failed (its upstream commit gone) is left out, and catalog.json records it.
+    case that failed (its upstream commit gone) is left out, and catalog.json records it. Only a
+    case that fails again, with the same error, when converted once more: a passing failure, a
+    network or disk error, would otherwise drop a case from a catalog later rounds share.
     """
     existed = catalog.exists()
     build_file = None if request['build'] in ('pinned', 'oracle') else Path(request['build'])
@@ -247,13 +250,33 @@ def _generate(bench, upstream: Path, catalog: Path, request: dict, split: str) -
         failed = {case['task_name']: case.get('error') for case in listing.get('cases', [])
                   if case.get('status') == 'error'}
         if (split != 'dev' and failed and len(listing['cases']) == listing.get('selected_records')
-                and len(failed) < len(listing['cases'])):
+                and len(failed) < len(listing['cases']) and _fails_again(bench, upstream, catalog, failed,
+                                                                         build_file, split)):
             return
         shutil.rmtree(catalog, ignore_errors=True)
         if failed:
             raise ValueError(f'These cases failed to convert: {failed}. Drop them from the case list and run '
                              'again; the partial catalog was removed') from error
         raise
+
+
+def _fails_again(bench, upstream: Path, catalog: Path, failed: dict, build_file: Path | None, split: str) -> bool:
+    """Whether every failed case fails again, with the same error, converted on its own once more."""
+    retry = Path(tempfile.mkdtemp(prefix='.retry-', dir=catalog.parent))
+    try:
+        try:
+            bench.generate(upstream, retry / 'catalog', sorted(failed), build_file, split)
+        except Exception:
+            pass
+        try:
+            again = {case['task_name']: case.get('error')
+                     for case in json.loads((retry / 'catalog/catalog.json').read_text()).get('cases', [])
+                     if case.get('status') == 'error'}
+        except (OSError, ValueError):
+            return False
+        return again == failed
+    finally:
+        shutil.rmtree(retry, ignore_errors=True)
 
 
 def _rounds(benchmark, request, rounds, name, path, catalog, concurrency, upstream, split, jobs_dir) -> dict:

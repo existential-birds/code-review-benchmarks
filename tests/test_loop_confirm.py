@@ -210,18 +210,57 @@ def test_one_verdict_per_candidate_and_none_once_a_set_is_used_up(held_out, monk
         confirm.verdict(CANDIDATE)
 
 
-def test_a_pilot_scores_the_first_cases_and_stays_out_of_the_count(held_out, monkeypatch, capfd):
-    harbor(monkeypatch, dict(reviewbench=GAIN, aacr=BASELINE['aacr']), scored=(['case-t'], ['owner-project-2']))
-    assert confirm.main(['--baseline', 'pinned', '--candidate', CANDIDATE, '--limit-cases', '1']) == 0
-    assert capfd.readouterr().out == 'confirmed\n'
+def test_a_pilot_scores_the_pinned_build_against_itself_on_the_first_cases_and_stays_out_of_the_count(
+        held_out, monkeypatch, capfd):
+    harbor(monkeypatch, BASELINE, scored=(['case-t'], ['owner-project-2']))
+    assert confirm.main(['--baseline', 'pinned', '--candidate', PINNED, '--limit-cases', '1']) == 0
+    assert capfd.readouterr().out == 'not-confirmed\n'
     pilot = held_out / 'confirmations/pilots/1'
-    assert json.loads((pilot / CANDIDATE / 'verdict.json').read_text()) == {'verdict': 'confirmed'}
-    assert not json.loads((pilot / CANDIDATE / 'result.json').read_text())['counted']
+    assert json.loads((pilot / PINNED / 'verdict.json').read_text()) == {'verdict': 'not-confirmed'}
+    assert not json.loads((pilot / PINNED / 'result.json').read_text())['counted']
     for benchmark, case in (('reviewbench', 'case-t'), ('aacr', 'owner-project-2')):
         assert json.loads((pilot / 'baselines' / PINNED / benchmark / 'summary.json').read_text())['request'][
             'cases'] == [case]
-    # The loop never sees it, and the real confirmation is still to come.
-    assert confirm.verdict(CANDIDATE) is None and not (held_out / 'confirmations/uses.json').exists()
+    # The loop never sees it, and nothing was counted.
+    assert confirm.verdict(PINNED) is None and not (held_out / 'confirmations/uses.json').exists()
+
+
+@pytest.mark.parametrize('baseline, candidate, limit, message', [
+    # A pilot of a candidate against the baseline would be a held-out verdict nobody counts.
+    ('pinned', CANDIDATE, 1, 'the candidate is not the baseline'),
+    ('pinned', PINNED, None, 'the candidate is the baseline'),
+    ('pinned', PINNED, confirm.PILOT_MAX_CASES + 1, '--limit-cases must be from 1 to 2'),
+])
+def test_a_pilot_is_only_a_build_against_itself_on_a_few_cases(held_out, baseline, candidate, limit, message):
+    with pytest.raises(ValueError, match=message):
+        confirm.confirm(baseline, candidate, limit=limit)
+    assert not (held_out / 'confirmations/uses.json').exists()
+
+
+def test_a_comparison_the_rule_cannot_make_is_counted_as_not_confirmed(held_out, monkeypatch):
+    # The candidate sends no findings at all: its grounded F1 is undefined in every round.
+    harbor(monkeypatch, dict(reviewbench=[counts(0, 0, 0, 0, 4, 0)] * 3, aacr=BASELINE['aacr']))
+    assert confirm.confirm('pinned', CANDIDATE) == 'not-confirmed'
+    result = json.loads((held_out / f'confirmations/{CANDIDATE}/result.json').read_text())
+    assert 'undefined' in result['benchmarks']['reviewbench']['unusable']
+    assert confirm.uses(held_out / 'confirmations') == {'reviewbench-test': 2, 'aacr-holdout': 1}
+
+
+def test_a_held_out_case_that_fails_to_convert_once_is_not_left_out(held_out, monkeypatch):
+    real, failures = aacr_convert.write_task, ['owner-project-3']
+    def flaky(record, output, daydream, build_file):
+        if aacr_convert.task_name(record) in failures:
+            failures.remove(aacr_convert.task_name(record))
+            raise OSError('disk full')
+        return real(record, output, daydream, build_file)
+    monkeypatch.setattr(aacr_convert, 'write_task', flaky)
+    harbor(monkeypatch, dict(reviewbench=GAIN, aacr=BASELINE['aacr']))
+    with pytest.raises(ValueError, match="These cases failed to convert: .*owner-project-3"):
+        confirm.confirm('pinned', CANDIDATE)
+    # Nothing was counted and no partial catalog stays: the next run converts every case.
+    assert not (held_out / 'confirmations/uses.json').exists()
+    assert not (held_out / f'confirmations/baselines/{PINNED}/aacr/catalog').exists()
+    assert confirm.confirm('pinned', CANDIDATE) == 'confirmed'
 
 
 def test_the_loop_cannot_be_pointed_at_confirmations_or_a_held_out_catalog(held_out, monkeypatch, capsys):
