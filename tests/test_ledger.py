@@ -199,3 +199,20 @@ def test_a_landing_needs_a_confirmed_iteration_and_a_merge_needs_its_landing(run
     with pytest.raises(ValueError, match='already merged'):
         ledger.append(run, 'merge', {'iteration': 3, 'url': url, 'merge_commit': 'm' * 40})
     assert [entry['kind'] for entry in ledger.read(run)[-3:]] == ['confirmation', 'landing', 'merge']
+
+
+def test_a_run_records_its_reviewer_and_judge_slots_and_each_iteration_its_proposer(tmp_path):
+    from loop import settings
+    loaded = settings.load()
+    run = tmp_path / 'run-slots'
+    with pytest.raises(ValueError, match=r'Run-start slots are exactly'):
+        ledger.append(run, 'run-start', RUN_START | {'slots': {'reviewer': loaded['reviewer']}})
+    with pytest.raises(ValueError, match=r'\[reviewer\] lacks'):
+        ledger.append(run, 'run-start', RUN_START | {'slots': {'reviewer': {}, 'judge': loaded['judge']}})
+    ledger.append(run, 'run-start', RUN_START | {'slots': {'reviewer': loaded['reviewer'], 'judge': loaded['judge']}})
+    with pytest.raises(ValueError, match=r'\[proposer\] effort must be'):
+        ledger.append(run, 'iteration', iteration(1) | {'proposer': dict(loaded['proposer'], effort='extreme')},
+                      patch=PATCH)
+    ledger.append(run, 'iteration', iteration(1) | {'proposer': loaded['proposer']}, patch=PATCH)
+    start, first = ledger.read(run)
+    assert start['slots']['reviewer']['backend'] == 'pi' and first['proposer'] == loaded['proposer']

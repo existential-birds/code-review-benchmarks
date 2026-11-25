@@ -81,10 +81,13 @@ def test_a_harmless_commit_passes_and_the_gate_runs_in_a_throwaway_clone(repo, g
                                                     seconds=0, output_tail='gate output\n')
     seen = json.loads(gate[1].read_text())
     seen['environment'].pop('LC_CTYPE', None)  # Python's own locale coercion in the stand-in
+    seen['environment'].pop('__CF_USER_TEXT_ENCODING', None)  # macOS adds it to every process
     home, directory = Path(seen['environment']['HOME']), Path(seen['directory'])
     assert seen['environment'] == {name: os.environ[name] for name in guard.GATE_ENVIRONMENT if name in os.environ} | UV | {
         'UV_OFFLINE': '1', 'HOME': str(home)}
-    assert home.name == 'home' and home.parent == directory.parent and not home.parent.exists()
+    # Resolved: on macOS the temporary folder sits under /var, a link to /private/var, and the stand-in's
+    # working directory comes back resolved.
+    assert home.name == 'home' and home.parent.resolve() == directory.parent.resolve() and not home.parent.exists()
     assert seen['review'] == 'def review():\n    return ["acme", "widgets"]\n'
 
 

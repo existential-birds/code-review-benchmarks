@@ -1,36 +1,23 @@
 # Contributing
 
-Open an issue before starting a change, so we can agree on the approach first.
-
-## Setup
-
-Run the lint and tests with `make test`, which installs the suite first if needed.
-[`tests.yml`](.github/workflows/tests.yml) runs the same command, but is skipped for
-now. Use the terms in the [glossary](GLOSSARY.md).
+Run `make test` locally (installs `.venv` first if needed);
+[`tests.yml`](.github/workflows/tests.yml) is skipped (`if: false`), so GitHub
+checks don't run the suite. Use [glossary](GLOSSARY.md) terms.
 
 ## Harbor first
 
-Harbor runs the jobs, so every benchmark shares its execution and there's no
-separate runner to maintain. Use Harbor's built-in behavior, configuration and
-extension points wherever possible, and keep custom code to the minimum required.
-That covers task selection, attempt count (`k`), concurrency, timeouts, retries,
-scheduling, result storage, aggregation and inspection. Don't add a suite runner,
-custom loops, configuration schemas or parallel execution infrastructure.
+Delegate job execution to Harbor's CLI, config and extension points: task
+selection, `-k` attempts, `-n` concurrency, timeouts, `-r` retries, scheduling,
+storage, job-level aggregation and inspection. The [loop](loop/) sits on top of
+`harbor run` to score and compare candidate builds across rounds.
 
-Before writing custom code, check Harbor's source, documentation and tests at the
-pinned revision to confirm the capability isn't already there. Record what you
-inspected and the precise gap in your pull request. Any custom integration should
-cover only that gap and use Harbor's supported interfaces.
-
-The [loop](loop/) that tunes Daydream sits on top of Harbor, not beside it. Every
-trial still runs through `harbor run`; the loop adds no scheduling, retries, attempt
-counts or aggregation of its own. It decides which builds to score on which cases,
-and what to do with the scores.
+Before writing custom code, check Harbor at `HARBOR_COMMIT` in the
+[`Makefile`](Makefile) (installed in `.venv`) to confirm the capability isn't built
+in. Cover only that gap through supported interfaces, and record the inspected
+paths and gap in your PR.
 
 ## Pull requests
 
-Follow the [PR template](.github/pull_request_template.md). Keep every checklist
-item, and check one only after recording its evidence or why it doesn't apply. Leave
-failed, skipped or blocked items unchecked and explain them.
-
-Keep Git hooks enabled; see [AGENTS.md](AGENTS.md).
+Follow the [PR template](.github/pull_request_template.md): keep every checklist
+item, check one only with its evidence or N/A reason, and leave failed, skipped or
+blocked items unchecked and explained.

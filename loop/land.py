@@ -438,6 +438,7 @@ def bump(tag: str, root: Path = ROOT) -> dict:
     current = json.loads((root / PIN).read_text())
     pin = {key: identity[key] for key in ('source_commit', 'version', 'wheel_name', 'wheel_sha256')}
     pin['codex_cli'] = current['codex_cli']
+    pin['pi_cli'] = current['pi_cli']
     version = identity['version']
     branch, worktree = f'pin/daydream-{version}', root / BUMPS / version
     # The person's commit in this repository: their identity and configuration, and its hooks on.

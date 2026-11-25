@@ -1,14 +1,18 @@
 # Agent guidance
 
-Read and follow [CONTRIBUTING.md](CONTRIBUTING.md) before making changes or
-creating or updating a PR. Repository skills live in `.agents/skills/` and are
-linked into `.claude/skills/`.
+Read [CONTRIBUTING.md](CONTRIBUTING.md) before making changes or working on a PR.
+Tracked skills live in `.agents/skills/`, linked from `.claude/skills/`.
 
-## Never bypass Git hooks
-
-Never use `--no-verify`, hook-disabling environment variables, or any other
-mechanism that skips commit, push, or repository verification hooks. This is
-never permitted, even when a failure appears unrelated or pre-existing. Fix
-the failure on the current branch and retry the ordinary command with hooks
-enabled, or stop and report the blocker. A commit or push is complete only
-after the normal hook-enabled command succeeds.
+- **Never bypass Git hooks.** Don't use `--no-verify` or disable hooks, even for
+  unrelated failures; fix the cause and retry normally, or report the blocker.
+- **Fix first, then answer.** When asked for a fix, make and verify it before
+  replying; don't stop to propose a plan or ask what the repo can answer.
+- **Report whole-session status.** Before saying "done" or handing off, check the
+  whole session: say "done" only when nothing remains open; otherwise list every
+  unmerged PR, unfinished step and running job with what it needs.
+- **Fix root causes upstream.** Fix defects in Daydream or other owner-controlled
+  dependencies there; never mask them with workarounds here unless asked by name.
+- **Preserve committed work and live runs.** Don't revert changes unasked; when a
+  better fix lands, say so and let the owner decide. Let healthy live jobs finish
+  (resuming can delete trials), and use a worktree to edit alongside a live job or
+  active branch.

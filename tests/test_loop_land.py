@@ -306,7 +306,7 @@ def test_bump_prepares_the_pin_change_on_a_branch_and_runs_nothing(git, tmp_path
         path = candidates / ('n' * 40) / 'build.json'
         path.parent.mkdir(parents=True)
         path.write_text(json.dumps(dict(source_commit='n' * 40, version='0.38.0', wheel_name='daydream-0.38.0.whl',
-                                        wheel_sha256='h' * 64, codex_cli='0.1.0', candidate=True)))
+                                        wheel_sha256='h' * 64, codex_cli='0.1.0', pi_cli='1.6.0', candidate=True)))
         return path
     monkeypatch.setattr(land.build, 'build_candidate', build_candidate)
     monkeypatch.setattr(land, 'ROOT', root)
@@ -316,7 +316,7 @@ def test_bump_prepares_the_pin_change_on_a_branch_and_runs_nothing(git, tmp_path
     worktree = root / land.BUMPS / '0.38.0'
     assert json.loads((worktree / land.PIN).read_text()) == dict(
         source_commit='n' * 40, version='0.38.0', wheel_name='daydream-0.38.0.whl', wheel_sha256='h' * 64,
-        codex_cli=pin['codex_cli'])
+        codex_cli=pin['codex_cli'], pi_cli=pin['pi_cli'])
     assert (root / land.PIN).read_text() == before
     assert git(root, 'log', '-1', '--format=%s %an', 'pin/daydream-0.38.0') == 'Pin Daydream 0.38.0 Person'
     assert git(root, 'diff', '--name-only', 'main', 'pin/daydream-0.38.0') == str(land.PIN)
