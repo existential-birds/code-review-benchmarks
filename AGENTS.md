@@ -14,5 +14,5 @@ Tracked skills live in `.agents/skills/`, linked from `.claude/skills/`.
   dependencies there; never mask them with workarounds here unless asked by name.
 - **Preserve committed work and live runs.** Don't revert changes unasked; when a
   better fix lands, say so and let the owner decide. Let healthy live jobs finish
-  (interrupted Harbor jobs can't resume), and use a worktree to edit alongside a
-  live job or active branch.
+  (resuming can delete trials), and use a worktree to edit alongside a live job or
+  active branch.
