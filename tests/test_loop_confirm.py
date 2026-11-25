@@ -10,7 +10,7 @@ import pytest
 from benchmarks.aacr import convert as aacr_convert
 from benchmarks.daydream import build
 from benchmarks.reviewbench import convert
-from loop import confirm, decide, ledger, rounds, settings
+from loop import confirm, decide, evidence, ledger, rounds, settings
 from test_aacr_report import write_job as write_aacr_job
 from test_loop_rounds import argument, counts, write_job
 from test_reviewbench import exported_task
@@ -284,6 +284,10 @@ def test_the_loop_cannot_be_pointed_at_confirmations_or_a_held_out_catalog(held_
     capsys.readouterr()
     assert decide.main(['--baseline', str(summaries[0]), '--candidate', str(summaries[1]), '--stage', 'climb']) == 2
     assert 'held-out rounds belong to loop.confirm' in json.loads(capsys.readouterr().out)['error']
+    # loop.evidence: a held-out summary is refused and nothing is written.
+    assert evidence.main(['--summary', str(summaries[0]), '--out', str(held_out / 'pack')]) == 1
+    assert "the proposer reads the dev split's climb set only" in capsys.readouterr().err
+    assert not (held_out / 'pack').exists()
     # The ledger: a run is a folder under loop-runs/, so confirmations/ can't be named; a confirmation is one word.
     monkeypatch.setattr(ledger, 'RUNS', held_out / 'loop-runs')
     for command in ('verify', 'show', 'ideas'):
