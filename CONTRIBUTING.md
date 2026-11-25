@@ -34,3 +34,17 @@ item, and check one only after recording its evidence or why it doesn't apply. L
 failed, skipped or blocked items unchecked and explain them.
 
 Keep Git hooks enabled; see [AGENTS.md](AGENTS.md).
+
+## Working on live runs and long tasks
+
+- **Estimate wall time first.** Before starting, add up the compute that each
+  issue's live **Done when** needs, and say up front if the deadline can't hold it.
+- **Start long runs first.** Launch live measurements at the start, and do code
+  and pull request work while they run.
+- **Keep the review loop lean.** Skip an independent sub-agent review for a diff
+  under about 200 lines. Push all fixes for one round of review findings together,
+  and request one re-review per round, not one per push.
+- **Stacked pull requests.** Merge main into each branch once, after the pull
+  request below it merges; don't also keep an integration branch in step.
+- **Keep handoff state on GitHub as you go:** branch heads, what is running and
+  where, and spend so far, so any agent can take over at once.
