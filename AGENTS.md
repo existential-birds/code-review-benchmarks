@@ -13,6 +13,12 @@ the failure on the current branch and retry the ordinary command with hooks
 enabled, or stop and report the blocker. A commit or push is complete only
 after the normal hook-enabled command succeeds.
 
+## Fix first, then answer
+
+When the owner asks for a fix, make the fix, verify it, and merge or apply it
+before replying. Don't reply with questions or a plan in its place; ask only
+when the fix truly can't proceed without the owner's decision.
+
 ## Status reports are final
 
 Before saying a task is done or handing it off, list every open item: unmerged
