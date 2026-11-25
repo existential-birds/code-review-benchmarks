@@ -9,10 +9,16 @@ has the details.
 
 ## Before you start
 
-- `make setup`, Docker running, and both logins (`codex login`, Pi's `/login`). The loop
-  checks them with `make prereqs`, using the same login folders as the Makefile.
+- `make setup`, Docker running, and the logins or keys for the configured slots
+  (`[reviewer]`, `[judge]`, `[proposer]` in `loop/settings.toml`): `OPENROUTER_API_KEY`
+  (or `codex login` / `REVIEWER_CODEX_AUTH_DIR` for a Codex reviewer), Pi's `/login`
+  (`JUDGE_PI_AUTH_DIR`) for the judge, and the proposer CLI's login or key (`codex login`,
+  `AGY_LOGIN_DIR`, `CLAUDE_LOGIN_DIR`, or provider key). The loop checks reviewer and
+  judge prerequisites with `make prereqs`, using the same login folders as the Makefile.
 - The derived settings in `loop/settings.toml`'s `[derived]` table, from the noise
-  measurement (`python -m loop.noise`, #45). The loop refuses to start without them.
+  measurement (`python -m loop.noise`, #45) under the configured `[reviewer]` and `[judge]`
+  slots. The loop refuses to start without them or when `[derived]` was measured under
+  other slots.
 - Nothing uncommitted: the run records the suite's commit.
 - One loop per machine: a second one refuses to start while the first holds the lock.
 
@@ -50,8 +56,10 @@ Each stop is a `stop` entry in the ledger, with a reason and a detail:
 | `held-out-worn` | `loop.confirm` refused: its held-out cases are used up (#58) |
 | `infrastructure` | `invalid_streak_stop` invalid iterations in a row; a subscription limit still there after one wait of `limit_backoff_minutes`; a canary or confirmation that gave no verdict; or an error in the loop |
 
-A subscription limit is Codex's "You've hit your usage limit" in an invalid iteration's
-reasons, proposer logs or trial logs, or in a canary's or confirmation's error.
+A subscription limit or provider quota is Codex's `"You've hit your usage limit"`,
+OpenRouter's `"requires more credits"` / `"openrouter_key_limit"` / `"openrouter_credits"`
+/ `"rate limit exceeded"`, or `agy`'s `"Individual quota reached"` in an invalid
+iteration's reasons, proposer logs or trial logs, or in a canary's or confirmation's error.
 
 ## Resume
 
@@ -76,23 +84,27 @@ start a new run, since the pin, and so the baseline, changed.
 .venv/bin/python -m loop.ledger ideas <run>    # one line per proposal, with its verdict
 ```
 
-The run-start entry holds the settings the run used, the baseline and the canary's result.
-Each iteration entry holds the proposal, the candidate commit (its patch is in
-`loop-runs/<run>/patches/<n>.patch`), the gate, the climb- and check-set scores and the
-cost. A confirmation holds one word; no held-out score is ever recorded. Each `--resume`
-adds a line to `loop-runs/<run>/resumes.jsonl` with the settings it changed.
+The run-start entry holds the settings and reviewer/judge `slots` the run used, the
+baseline and the canary's result. Each iteration entry holds the `proposer` slot, the
+proposal, the candidate commit (its patch is in `loop-runs/<run>/patches/<n>.patch`), the
+gate, the climb- and check-set scores and the cost. A confirmation holds one word; no
+held-out score is ever recorded. Each `--resume` adds a line to
+`loop-runs/<run>/resumes.jsonl` with the settings it changed.
 
 ## Change a setting
 
-Every setting and its reason is in [`loop/settings.toml`](../loop/settings.toml); change it
-there and commit it. To change one for a single run, add `--set key=value`, typed as TOML,
-once per setting:
+Every setting and its reason is in [`loop/settings.toml`](../loop/settings.toml), including
+the `[reviewer]`, `[judge]` and `[proposer]` slot tables; change a setting there and commit
+it. To change one for a single run, add `--set key=value`, typed as TOML, once per
+setting:
 
 ```sh
 .venv/bin/python -m loop.run --run trial --set auto_open_pr=false --set run_max_iterations=2
 ```
 
-A run keeps the settings it started with. `--set` on `--resume` changes them for that
-resume only, so repeat it on the next one; `run_max_wall_hours` counts from the run's
-start, so a resume after a long pause may need it raised. `loop.confirm` reads
+A run keeps the settings it started with, and refuses to compare baselines or resume runs
+whose recorded reviewer or judge slots differ from the configured `[reviewer]` and `[judge]`;
+`[proposer]` may change freely, even on `--resume`. `--set` on `--resume` changes settings
+for that resume only, so repeat it on the next one; `run_max_wall_hours` counts from the
+run's start, so a resume after a long pause may need it raised. `loop.confirm` reads
 `loop/settings.toml` itself, so a run's `--set` doesn't reach the held-out rule.

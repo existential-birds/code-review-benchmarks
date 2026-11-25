@@ -90,5 +90,11 @@ def candidate_build(tmp_path):
     build_file.write_text(json.dumps({
         'source_commit': 'c' * 40, 'version': '0.34.0', 'wheel_name': wheel.name,
         'wheel_sha256': hashlib.sha256(wheel.read_bytes()).hexdigest(),
-        'codex_cli': build.BUILD['codex_cli'], 'candidate': True}))
+        'codex_cli': build.BUILD['codex_cli'], 'pi_cli': build.BUILD['pi_cli'], 'candidate': True}))
     return build_file
+
+
+@pytest.fixture(autouse=True)
+def reviewer_key(monkeypatch):
+    """A stand-in key for the default Pi reviewer slot: commands check only that it is set."""
+    monkeypatch.setenv('OPENROUTER_API_KEY', 'stand-in-openrouter-key')

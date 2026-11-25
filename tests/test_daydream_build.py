@@ -86,7 +86,7 @@ def test_candidate_builds_any_commit_beside_its_own_identity_and_leaves_the_pin(
     assert json.loads((root / commit / 'build.json').read_text()) == {
         'source_commit': commit, 'version': '0.35.0.dev1', 'wheel_name': 'daydream-0.35.0.dev1-py3-none-any.whl',
         'wheel_sha256': hashlib.sha256(b'rebuilt candidate bytes').hexdigest(),
-        'codex_cli': build.BUILD['codex_cli'], 'candidate': True}
+        'codex_cli': build.BUILD['codex_cli'], 'pi_cli': build.BUILD['pi_cli'], 'candidate': True}
     assert sorted(path.name for path in root.iterdir()) == [commit]
     assert sorted(path.name for path in (root / commit).iterdir()) == [
         'build.json', 'daydream-0.35.0.dev1-py3-none-any.whl', build.LOCK_NAME]

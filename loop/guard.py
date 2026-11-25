@@ -12,7 +12,7 @@ pytest hook or coverage exclusion; and carry no benchmark knowledge. Then ``make
 check`` must pass in the clone within ``gate_timeout_seconds``, with a throwaway HOME
 and only an allowlisted environment. uv runs offline from the operator's cache, so
 one ordinary ``make check`` in a Daydream checkout must have filled it first. The
-guard never commits, so it neither passes ``--no-verify`` nor touches the hooks.
+guard never commits; the Git it runs has hooks off, so nothing a candidate holds runs outside its gate.
 
 It does not catch gutted test bodies or assertions, code that behaves differently
 under test, or names written in disguise. It matches only a review case's name and
@@ -43,11 +43,11 @@ from loop import settings
 ROOT = Path(__file__).resolve().parents[1]
 REVIEWBENCH, AACR = ROOT / '.cache/src/ReviewBench', ROOT / '.cache/src/aacr-bench'
 GIT = 'git'
-# No global attributes file, which could hide content from the diff, and no fsmonitor hook.
 # No system or global configuration, so no filter, diff or merge driver of the operator's runs on files a
 # candidate commits.
 ISOLATED = {'GIT_ATTR_NOSYSTEM': '1', 'GIT_CONFIG_NOSYSTEM': '1', 'GIT_CONFIG_GLOBAL': os.devnull}
-# No hooks, filesystem monitor or global attributes: nothing a repository holds runs.
+# No hooks, filesystem monitor or global attributes file, which could hide content from the diff: nothing a
+# repository holds runs.
 GIT_OPTIONS = ('-c', 'core.attributesFile=/dev/null', '-c', 'core.fsmonitor=', '-c', 'core.hooksPath=/dev/null')
 GATE = ('make', 'check')
 # The only variables the gate sees, besides HOME and uv's cache, Pythons and offline switch.

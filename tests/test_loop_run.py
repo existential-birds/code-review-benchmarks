@@ -17,7 +17,7 @@ from types import SimpleNamespace
 import pytest
 
 from benchmarks.daydream import build
-from loop import confirm as confirmation, ledger, rounds, run as looprun, sets, settings
+from loop import confirm as confirmation, ledger, rounds, run as looprun, sets, settings, slots
 
 PIN = build.BUILD['source_commit']
 DERIVED = dict(sigma=0.02, rounds=2, precision_margin=0.03, wrong_findings_margin=0.2, incomplete_margin=0.5)
@@ -32,6 +32,11 @@ class Killed(BaseException):
     """The process dying without recording anything."""
 
 
+# The [derived] values are taken as measured under the configured reviewer and judge slots.
+MEASURED = (f"judge = \"{slots.judge_name(settings.load()['judge'])}\"\n[derived.reviewer]\n"
+            + ''.join(f'{key} = "{value}"\n' for key, value in settings.load()['reviewer'].items()))
+
+
 @pytest.fixture
 def loop(tmp_path, monkeypatch):
     """A repository root with the derived settings set, and stand-ins that follow plans."""
@@ -40,7 +45,7 @@ def loop(tmp_path, monkeypatch):
     monkeypatch.setattr(looprun, 'LOCK', tmp_path / 'loop.lock')
     derived = tmp_path / 'settings.toml'
     derived.write_text(settings.FILE.read_text().split('[derived]')[0] + '[derived]\n'
-                       + ''.join(f'{key} = {value}\n' for key, value in DERIVED.items()))
+                       + ''.join(f'{key} = {value}\n' for key, value in DERIVED.items()) + MEASURED)
     monkeypatch.setattr(settings, 'load', partial(settings.load, derived))
     done = SimpleNamespace(iterations=[], confirms=[], canaries=[], canary_names=[], sleeps=[], prereqs=0,
                            confirmed=[], root=tmp_path, clock=None,
@@ -118,6 +123,7 @@ def test_a_run_starts_with_the_effective_settings_and_stops_on_a_plateau(loop, c
     start, stop = entries[0], entries[-1]
     assert start['settings'] == looprun.effective(settings.load(plateau_iterations=2, auto_open_pr=False))
     assert start['settings']['plateau_iterations'] == 2 and start['settings']['sigma'] == 0.02
+    assert start['slots'] == dict(reviewer=settings.load()['reviewer'], judge=settings.load()['judge'])
     assert (start['baseline_commit'], start['suite_commit'], start['judge'], start['canary']) == (
         PIN, 's' * 40, 'pi/judge', STABLE)
     assert stop == stop | dict(reason='plateau', detail='2 iterations in a row with nothing accepted on dev '
@@ -230,6 +236,30 @@ def test_a_limit_shows_in_the_proposer_logs_and_the_trial_logs(loop):
     trial.mkdir(parents=True)
     (trial / 'daydream.stderr.log').write_text(f'codex failed: {LIMIT}\n')
     assert looprun.limited(['RuntimeError: Round 1 failed'], ['run-a-1-climb'])
+
+
+@pytest.mark.parametrize('message', [
+    LIMIT,
+    ('║ PiError: 402: {"message":"This request requires more credits, or fewer       ║\n'
+     '║ max_tokens. You requested up to 32768 tokens, but can only afford 2048.     ║\n'
+     '║ limit","code":402,"metadata":{"limit_source":"openrouter_key_limit","remedy_ ║\n'),
+    'PiError: 402: {"error":{"metadata":{"limit_source":"openrouter_credits"}}}',
+    'Error 429: Rate limit exceeded: free-models-per-min.',
+    '⚠ Individual quota reached. Please upgrade your subscription or try again later.',
+], ids=['codex', 'openrouter-402-box', 'openrouter-credits', 'openrouter-429', 'agy'])
+def test_provider_quota_and_rate_limit_messages_are_detected_in_logs(loop, message):
+    logs = loop.root / '.cache/loop/logs/run-a-2'
+    logs.mkdir(parents=True)
+    (logs / 'attempt-1.log').write_text(message)
+    assert looprun.limited(['The proposer exited 1'], [], logs)
+    (logs / 'attempt-1.log').unlink()
+    summary = loop.root / 'artifacts/loop/run-a-2-climb/summary.json'
+    summary.parent.mkdir(parents=True)
+    summary.write_text(json.dumps(dict(jobs=[dict(job='run-a-2-climb-round-1-attempt-1')])))
+    trial = loop.root / 'jobs/run-a-2-climb-round-1-attempt-1/case-a__x/agent'
+    trial.mkdir(parents=True)
+    (trial / 'daydream.stdout.log').write_text(message)
+    assert looprun.limited(['RuntimeError: Round 1 failed'], ['run-a-2-climb'])
 
 
 def test_a_confirmation_limit_gets_one_wait_too(loop):
