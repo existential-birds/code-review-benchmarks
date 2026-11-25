@@ -1,43 +1,18 @@
 # Agent guidance
 
-Read and follow [CONTRIBUTING.md](CONTRIBUTING.md) before making changes or
-creating or updating a PR. Repository skills live in `.agents/skills/` and are
-linked into `.claude/skills/`.
+Read [CONTRIBUTING.md](CONTRIBUTING.md) before making changes or working on a PR.
+Tracked skills live in `.agents/skills/`, linked from `.claude/skills/`.
 
-## Never bypass Git hooks
-
-Never use `--no-verify`, hook-disabling environment variables, or any other
-mechanism that skips commit, push, or repository verification hooks. This is
-never permitted, even when a failure appears unrelated or pre-existing. Fix
-the failure on the current branch and retry the ordinary command with hooks
-enabled, or stop and report the blocker. A commit or push is complete only
-after the normal hook-enabled command succeeds.
-
-## Fix first, then answer
-
-The owner's words: "When I ask you to fix something, do not answer until it is
-fixed. That's what I want, not a weird interrogation."
-
-## Status reports are final
-
-Before saying a task is done or handing it off, list every open item from the whole
-session, not just the current request: unmerged
-pull requests, unfinished steps, and anything still running. Say "done" only
-when that list is empty; otherwise the status names each open item and what it
-needs. Never add a step to a task already reported as done unless the owner asks
-a new question.
-
-## Fix problems where they live
-
-When a failure's cause is in Daydream or another dependency the owner controls,
-fix it there. Add no workaround in this repository unless the owner asks for one
-by name.
-
-## Don't undo or stop work unasked
-
-Never revert a change unless the owner asks; when a better fix lands, say so and
-let the owner decide. Never stop a running live job unless it is failing or the
-owner says to: let it finish and fix forward.
-
-For long tasks and live runs, also follow
-[Working on live runs and long tasks](CONTRIBUTING.md#working-on-live-runs-and-long-tasks).
+- **Never bypass Git hooks.** Don't use `--no-verify` or disable hooks, even for
+  unrelated failures; fix the cause and retry normally, or report the blocker.
+- **Fix first, then answer.** When asked for a fix, make and verify it before
+  replying; don't stop to propose a plan or ask what the repo can answer.
+- **Report whole-session status.** Before saying "done" or handing off, check the
+  whole session: say "done" only when nothing remains open; otherwise list every
+  unmerged PR, unfinished step and running job with what it needs.
+- **Fix root causes upstream.** Fix defects in Daydream or other owner-controlled
+  dependencies there; never mask them with workarounds here unless asked by name.
+- **Preserve committed work and live runs.** Don't revert changes unasked; when a
+  better fix lands, say so and let the owner decide. Let healthy live jobs finish
+  (interrupted Harbor jobs can't resume), and use a worktree to edit alongside a
+  live job or active branch.
