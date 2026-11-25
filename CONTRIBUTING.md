@@ -34,3 +34,15 @@ item, and check one only after recording its evidence or why it doesn't apply. L
 failed, skipped or blocked items unchecked and explain them.
 
 Keep Git hooks enabled; see [AGENTS.md](AGENTS.md).
+
+## Working on live runs and long tasks
+
+- **Start long runs first.** Launch live measurements at the start, and do code
+  and pull request work while they run.
+- **No sub-agent review.** `make test` passing is the merge gate.
+- **One branch per issue, off main.** No stacked branches.
+- **Run only the touched tests while iterating;** run `make test` once before merge.
+- **Moving work to the owner's Mac:** a plain `git fetch` and `git merge --ff-only`;
+  no extra verification steps.
+- **Keep handoff state on GitHub as you go:** branch heads, what is running and
+  where, and spend so far, so any agent can take over at once.
