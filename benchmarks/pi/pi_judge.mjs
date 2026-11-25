@@ -5,7 +5,22 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 export const PROVIDER = 'openai';
 export const MODEL = 'gpt-6.1-sol';
+// The judge slot (#81) a task asks for; without one, the judge every catalog used before slots.
+export const DEFAULT_JUDGE = { harness: 'pi', provider: PROVIDER, model: MODEL, effort: 'default' };
+// What the openai-responses API takes as reasoningEffort; it has no 'off'.
+const EFFORTS = ['minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
 const SDK_VERSION = '1.6.0';
+
+export function judgeSlot(value = DEFAULT_JUDGE) {
+  const keys = ['harness', 'provider', 'model', 'effort'];
+  if (!value || typeof value !== 'object' || Object.keys(value).sort().join() !== [...keys].sort().join()
+      || keys.some((key) => typeof value[key] !== 'string' || !value[key].trim())
+      || value.harness !== 'pi' || value.provider !== PROVIDER
+      || (value.effort !== 'default' && !EFFORTS.includes(value.effort))) {
+    throw failure('request', 'Invalid judge slot');
+  }
+  return value;
+}
 
 export function failure(category, message, details = {}) {
   return Object.assign(new Error(message), { category, ...details });
@@ -24,17 +39,18 @@ export function safeFailure(error) {
   return result;
 }
 
-export async function completeJudge(runtime, request) {
+export async function completeJudge(runtime, request, judge = DEFAULT_JUDGE) {
+  const { provider, model: modelId, effort } = judgeSlot(judge);
   if (!Array.isArray(request?.messages) || request.messages.length !== 1
       || request.messages[0]?.role !== 'user'
       || typeof request.messages[0].content !== 'string') {
     throw failure('request', 'Expected a single user prompt');
   }
-  if (!runtime.isUsingSubscription(PROVIDER)
-      || (await runtime.checkAuth(PROVIDER))?.type !== 'oauth') {
+  if (!runtime.isUsingSubscription(provider)
+      || (await runtime.checkAuth(provider))?.type !== 'oauth') {
     throw failure('authentication', 'Pi subscription login required');
   }
-  const model = runtime.getModel(PROVIDER, MODEL);
+  const model = runtime.getModel(provider, modelId);
   if (!model) throw failure('runtime', 'Pinned judge model unavailable');
   let httpStatus = null;
   const options = {
@@ -42,6 +58,7 @@ export async function completeJudge(runtime, request) {
     // requested value is kept in the evidence but not sent.
     transport: 'sse', maxRetries: 0,
     onResponse: ({ status }) => { httpStatus = status; },
+    ...(effort === 'default' ? {} : { reasoningEffort: effort }),
   };
   let result;
   try {
@@ -58,7 +75,7 @@ export async function completeJudge(runtime, request) {
     throw failure([401, 403].includes(httpStatus) ? 'authentication' : 'transport',
       'Pi did not complete the judge request', { http_status: httpStatus, stop_reason: result?.stopReason });
   }
-  if (result.provider !== PROVIDER || result.model !== MODEL) {
+  if (result.provider !== provider || result.model !== modelId) {
     throw failure('runtime', 'Pi response has unexpected judge identity');
   }
   if (!['stop', 'length'].includes(result.stopReason) || !Array.isArray(result.content)) {
@@ -74,7 +91,7 @@ export async function completeJudge(runtime, request) {
     ok: true,
     text,
     metadata: {
-      provider: PROVIDER, model: MODEL, subscription: true,
+      provider, model: modelId, subscription: true,
       sdk_version: SDK_VERSION, pi_ai_version: SDK_VERSION,
       node_version: process.versions.node,
       auth_type: 'oauth', stop_reason: result.stopReason, http_status: httpStatus,
@@ -84,7 +101,7 @@ export async function completeJudge(runtime, request) {
       effective_options: {
         temperature: null,
         transport: 'sse', max_retries: 0,
-        reasoning: 'provider default (no reasoningEffort override)',
+        reasoning: effort === 'default' ? 'provider default (no reasoningEffort override)' : effort,
         models_path: null, allow_model_network: false,
         server_output_limit: null,
         unsupported_upstream_options: ['temperature', 'top_p', 'chat_template_kwargs', 'max_tokens'],
@@ -124,11 +141,12 @@ async function main() {
     let input = '';
     for await (const chunk of process.stdin) input += chunk;
     const request = JSON.parse(input);
+    const judge = process.argv[2] ? JSON.parse(process.argv[2]) : DEFAULT_JUDGE;
     const { ModelRuntime } = await import('@earendil-works/pi-coding-agent');
     const runtime = await ModelRuntime.create({
       authPath: '/run/judge-pi/auth.json', modelsPath: null, allowModelNetwork: false,
     });
-    process.stdout.write(JSON.stringify(await completeJudge(runtime, request)) + '\n');
+    process.stdout.write(JSON.stringify(await completeJudge(runtime, request, judge)) + '\n');
   } catch (error) {
     process.stdout.write(JSON.stringify({ ok: false, error: safeFailure(error) }) + '\n');
     process.exitCode = 1;

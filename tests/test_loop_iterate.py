@@ -16,7 +16,7 @@ import zipfile
 import pytest
 
 from benchmarks.daydream import build
-from loop import evidence, guard, iterate, ledger, propose, rounds, sets, settings
+from loop import evidence, guard, iterate, ledger, propose, rounds, sets, settings, slots
 from real_git import commit
 from test_loop_decide import BASE, WIN
 from test_loop_rounds import workspace, write_job  # noqa: F401 (workspace is a fixture)
@@ -40,6 +40,7 @@ def candidate_folder(root: Path, commit: str) -> Path:
     (folder / 'build.json').write_text(json.dumps({
         'source_commit': commit, 'version': '0.38.0', 'wheel_name': wheel.name,
         'wheel_sha256': hashlib.sha256(wheel.read_bytes()).hexdigest(), 'codex_cli': build.BUILD['codex_cli'],
+        'pi_cli': build.BUILD['pi_cli'],
         'candidate': True}))
     return folder / 'build.json'
 
@@ -135,6 +136,8 @@ def test_a_change_accepted_on_the_climb_set_is_scored_on_the_check_set_against_t
     assert first['cost']['baseline_check'] | dict(wall_seconds=0) == dict(rounds=2, cost_usd_equiv=10,
                                                                          reviewer_seconds=240, wall_seconds=0)
     assert not worktree(loop, 1).exists() and git(loop.clone, 'rev-parse', 'loop/run-a/1') == first['candidate']['commit']
+    # The entry records who proposed it (#81).
+    assert first['proposer'] == settings.load()['proposer']
 
     second = loop.run(['win'] * 4)
     assert second['verdict']['verdict'] == 'accepted-on-dev'
@@ -209,6 +212,23 @@ def test_an_iteration_that_cannot_start_records_nothing(loop, tmp_path, monkeypa
     monkeypatch.setattr(iterate, 'ROOT', tmp_path / 'elsewhere')
     assert iterate.main(['--run', 'run-a']) == 2
     assert 'No ledger' in json.loads(capsys.readouterr().out)['error']
+
+
+def test_a_baseline_or_run_from_other_reviewer_or_judge_slots_is_refused(loop):
+    codex = dict(slots.LEGACY_REVIEWER)
+    # The baseline's rounds were scored under the configured Pi reviewer.
+    with pytest.raises(ValueError, match=r"The baseline .* was made under the reviewer slot .*'pi'"):
+        loop.run(reviewer=codex)
+    with pytest.raises(ValueError, match=r"judged by 'openai/gpt-6.1-sol', not the configured 'openai/gpt-7'"):
+        loop.run(judge=dict(settings.load()['judge'], model='gpt-7'))
+    # A run whose start recorded other slots doesn't go on under these.
+    other = loop.root / 'loop-runs/run-b'
+    start = ledger.read(loop.root / 'loop-runs/run-a')[0]
+    ledger.append(other, 'run-start', {key: start[key] for key in ledger.FIELDS['run-start'][0]} | {
+        'slots': {'reviewer': codex, 'judge': settings.load()['judge']}})
+    with pytest.raises(ValueError, match='The run started under the slots'):
+        iterate.iterate('run-b', settings.load(**LIMITS), root=loop.root)
+    assert not loop.jobs and not loop.packs
 
 
 def test_the_baselines_check_rounds_count_against_neither_budget(loop):

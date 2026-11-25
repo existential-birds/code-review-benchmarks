@@ -17,9 +17,13 @@ from benchmarks.daydream.build import BUILD, CASE_DIR, CODEX_LOGIN_DIR
 from benchmarks.pi import verifier as judge_verifier
 from benchmarks.pi.verifier import JUDGE_AUTH_DIR, MODEL
 from benchmarks.reviewbench import convert
+from loop import settings
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE, HEAD = 'a' * 40, 'b' * 40
+CODEX = dict(harness='daydream', backend='codex', provider='openai', model='default', effort='default')
+PI = settings.load()['reviewer']
+JUDGE = settings.load()['judge']
 
 
 def exported_task(task: Path, name: str) -> Path:
@@ -47,7 +51,7 @@ def exported_task(task: Path, name: str) -> Path:
 def test_task_runs_the_pinned_daydream_and_points_the_judge_at_its_login(tmp_path, pinned_wheel):
     from benchmarks.daydream import build
     task = exported_task(tmp_path / 'task', 'owner_project_7-bbbbbbbb')
-    convert.configure_task(task, build.reviewer_image())
+    convert.configure_task(task, build.reviewer_image(), CODEX, JUDGE)
     lines = (task / 'environment/Dockerfile').read_text().splitlines()
     # Daydream's shared layers come before the per-task checkout; the frozen
     # comparison comes after the checkout it records.
@@ -59,7 +63,8 @@ def test_task_runs_the_pinned_daydream_and_points_the_judge_at_its_login(tmp_pat
     assert case == {'format': 'reviewbench', 'repository': '/work/repo', 'findings': '/work/out/findings.json',
                     'base': BASE, 'pr': {'repo': 'https://github.com/owner/project', 'pr_number': 7,
                                          'base': BASE, 'head': HEAD},
-                    'description': 'Fix pagination\n\nStops at the last page.'}
+                    'description': 'Fix pagination\n\nStops at the last page.', 'reviewer': CODEX,
+                    'reviewer_credential': None}
     identity = json.loads((task / 'environment/daydream-case/build.json').read_text())
     assert {key: identity[key] for key in BUILD} == BUILD
     assert (task / 'environment' / BUILD['wheel_name']).read_bytes() == pinned_wheel.read_bytes()
@@ -68,6 +73,7 @@ def test_task_runs_the_pinned_daydream_and_points_the_judge_at_its_login(tmp_pat
     config = tomllib.loads((task / 'task.toml').read_text())
     assert config['verifier']['env'] == {'PI_CODING_AGENT_DIR': JUDGE_AUTH_DIR}
     assert config['metadata']['daydream_wheel_sha256'] == BUILD['wheel_sha256']
+    assert config['metadata']['daydream_pi_cli'] == BUILD['pi_cli'] and config['metadata']['reviewer_backend'] == 'codex'
     assert config['task']['keywords'] == ['code-review', 'reviewbench', 'daydream']
     models = json.loads((task / 'tests/pi-models.json').read_text())
     assert [model['id'] for model in models['providers']['openai']['models']] == [MODEL]
@@ -79,14 +85,53 @@ def test_task_runs_the_pinned_daydream_and_points_the_judge_at_its_login(tmp_pat
     changed = exported_task(tmp_path / 'changed', 'owner_project_8-bbbbbbbb')
     (changed / 'environment/Dockerfile').write_text('FROM node@sha256:x\n')
     with pytest.raises(ValueError, match='Unexpected ReviewBench Dockerfile'):
-        convert.configure_task(changed, build.reviewer_image())
+        convert.configure_task(changed, build.reviewer_image(), CODEX, JUDGE)
+
+
+def test_a_pi_reviewer_task_mounts_no_login_and_reaches_only_its_provider(tmp_path, pinned_wheel, monkeypatch):
+    from benchmarks.daydream import build
+    task = exported_task(tmp_path / 'task', 'owner_project_7-bbbbbbbb')
+    convert.configure_task(task, build.reviewer_image(), PI, JUDGE)
+    case = json.loads((task / 'environment/daydream-case/case.json').read_text())
+    assert case['reviewer'] == PI and case['reviewer_credential'] == 'OPENROUTER_API_KEY'
+    # Its key comes from Harbor's agent env, so the task neither mounts the Codex login nor holds a key.
+    assert not (task / 'environment/docker-compose.yaml').exists()
+    metadata = tomllib.loads((task / 'task.toml').read_text())['metadata']
+    assert {key: metadata[f'reviewer_{key}'] for key in PI} == PI
+    # The image installs both reviewer CLIs at the build's pins.
+    dockerfile = (task / 'environment/Dockerfile').read_text()
+    assert f"@openai/codex@{BUILD['codex_cli']} @earendil-works/pi-coding-agent@{BUILD['pi_cli']}" in dockerfile
+    # Pi's find tool needs fd, which it can't download offline.
+    assert 'install -y --no-install-recommends fd-find ripgrep' in dockerfile and 'fdfind --version' in dockerfile
+    calls = []
+    monkeypatch.setattr(convert.subprocess, 'run', lambda command, **kwargs: calls.append(command))
+    convert.export(tmp_path, tmp_path / 'out', 'test', PI, dict(JUDGE, model='gpt-7'))
+    convert.export(tmp_path, tmp_path / 'out', 'test', CODEX, JUDGE)
+    hosts = [[command[at + 1] for at, part in enumerate(command) if part == '--agent-host'] for command in calls]
+    assert hosts == [['openrouter.ai'], ['chatgpt.com', 'auth.openai.com']]
+    assert calls[0][calls[0].index('--judge-model') + 1] == 'gpt-7'
+
+
+def test_the_judge_slot_sets_the_judges_model(tmp_path, pinned_wheel, monkeypatch):
+    from benchmarks.daydream import build
+    other = dict(JUDGE, model='gpt-7')
+    task = exported_task(tmp_path / 'task', 'owner_project_7-bbbbbbbb')
+    convert.configure_task(task, build.reviewer_image(), PI, other)
+    models = json.loads((task / 'tests/pi-models.json').read_text())
+    assert [model['id'] for model in models['providers']['openai']['models']] == ['gpt-7']
+    monkeypatch.setattr(convert, 'check_source', lambda upstream: None)
+    with pytest.raises(ValueError, match="pinned judge takes no reasoning effort"):
+        convert.generate_catalog(tmp_path, tmp_path / 'catalog', judge=dict(JUDGE, effort='high'))
+    with pytest.raises(ValueError, match=r'\[judge\] must be harness .pi. and provider .openai.'):
+        convert.generate_catalog(tmp_path, tmp_path / 'catalog', judge=dict(JUDGE, provider='openrouter'))
 
 
 def test_catalog_keeps_selected_tasks_and_drops_the_exporters_stale_manifest(tmp_path, monkeypatch, pinned_wheel,
                                                                               candidate_build):
     names = ['owner_a_1-aaaaaaaa', 'owner_b_2-bbbbbbbb', 'owner_c_3-cccccccc']
     splits = []
-    def export(upstream, destination, split):
+    def export(upstream, destination, split, reviewer, judge):
+        assert (reviewer, judge) == (PI, JUDGE)
         splits.append(split)
         for name in names:
             exported_task(destination / name, name)
@@ -104,7 +149,7 @@ def test_catalog_keeps_selected_tasks_and_drops_the_exporters_stale_manifest(tmp
     assert tasks == [output / names[1]]
     assert sorted(path.name for path in output.iterdir()) == ['catalog.json', names[1]]
     catalog = json.loads((output / 'catalog.json').read_text())
-    assert catalog['tasks'] == [names[1]] and catalog['judge'] == f'openai/{MODEL}'
+    assert catalog['tasks'] == [names[1]] and catalog['judge'] == f'openai/{MODEL}' and catalog['reviewer'] == PI
     assert catalog['reviewbench_revision'] == convert.REVIEWBENCH_REVISION
     # A candidate catalog says so, and so does each task, so its scores can't pass for the pin's.
     assert catalog['daydream']['candidate'] is True and catalog['daydream']['source_commit'] == 'c' * 40
@@ -118,7 +163,7 @@ def test_catalog_keeps_selected_tasks_and_drops_the_exporters_stale_manifest(tmp
 def test_dev_split_is_the_full_set_less_the_exporters_test_set(tmp_path, monkeypatch, pinned_wheel):
     exported = {'full': ['owner_a_1-aaaaaaaa', 'owner_b_2-bbbbbbbb', 'owner_c_3-cccccccc'],
                 'test': ['owner_b_2-bbbbbbbb']}
-    def export(upstream, destination, split):
+    def export(upstream, destination, split, reviewer, judge):
         for name in exported[split]:
             exported_task(destination / name, name)
         (destination / 'dataset.toml').write_text('[[tasks]]\n')
@@ -175,6 +220,8 @@ def test_experiment_settings_reach_every_trial(tmp_path):
         assert trial.environment.override_cpus == 4 and trial.environment.override_memory_mb == 8192
         assert trial.environment.kwargs['auto_mounting'] is True
         assert trial.verifier.import_path == 'benchmarks.daydream.verifier:DaydreamVerifier'
+        # A Pi reviewer's key, by reference: the saved configuration never holds its value.
+        assert trial.agent.env == {'OPENROUTER_API_KEY': '${OPENROUTER_API_KEY:-}'}
     for trial in [*trials, *plans['reviewbench-oracle']]:
         # The judge's login must outlast the verifier's timeout plus Pi's five-minute
         # refresh threshold, or scoring can fail midway. The login's tokens last an hour.
@@ -186,7 +233,7 @@ def test_experiment_settings_reach_every_trial(tmp_path):
 
 def test_the_task_hands_pinned_pi_the_chatgpt_login_as_a_plain_key(tmp_path):
     # Pi 0.75.5 predates the ChatGPT login; the task script rewrites the uploaded copy.
-    script = convert.TEST_SCRIPT.split("node -e '", 1)[1].split("\n'\n", 1)[0]
+    script = convert.test_script(JUDGE).split("node -e '", 1)[1].split("\n'\n", 1)[0]
     script = script.replace(convert.JUDGE_AUTH_DIR, str(tmp_path))
     auth = tmp_path / 'auth.json'
     auth.write_text(json.dumps({'openai': {'type': 'oauth', 'access': 'token', 'refresh': '', 'expires': 1}}))

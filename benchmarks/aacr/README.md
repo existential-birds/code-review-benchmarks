@@ -41,14 +41,21 @@ folders. Don't copy `auth.json`: a copy clones its refresh token, so the copy an
 original would rotate it out from under each other.
 
 ```sh
-export REVIEWER_CODEX_AUTH_DIR=~/.codex   # Daydream reviewer
+export OPENROUTER_API_KEY=...             # The default reviewer slot: Daydream on Pi through OpenRouter
+export REVIEWER_CODEX_AUTH_DIR=~/.codex   # A Codex reviewer slot
 export JUDGE_PI_AUTH_DIR=~/.pi/agent      # Judge; Pi's /login, Sign in with ChatGPT
 ```
 
 Neither container sees the rest of these folders, and logins stay out of task
 assets and results:
 
-- **Reviewer:** only the Codex `auth.json` is mounted, and it stays writable, so
+- **Pi reviewer:** nothing is mounted. Harbor sets `OPENROUTER_API_KEY` on the agent's
+  setup and run commands only, from `env` in the experiment, and the entrypoint hands it to
+  Pi alone, with an empty Pi agent folder and no update checks or telemetry. A job's
+  saved configuration holds `${OPENROUTER_API_KEY}`, not the key. The review
+  container reaches only `openrouter.ai` on ReviewBench, and the public network on
+  AACR, so a hostile review case could try to send the key elsewhere.
+- **Codex reviewer:** only the Codex `auth.json` is mounted, and it stays writable, so
   Codex saves a refresh made during the review to your file. Codex must keep its
   login in `auth.json`, not in the system keyring. The review container has network
   access while it holds your Codex session, so a hostile review case could try to
@@ -206,7 +213,8 @@ refuses:
 
 Each round lists its trials and the same counts as ReviewBench's report: `expected`,
 `missing`, `produced`, `completed_empty`, `incomplete`, `failed`, `evaluated`,
-`elapsed_seconds` and `cost_usd`, an API-equivalent estimate. A trial is scored by the
+`elapsed_seconds`, and `cost_usd`, the API-equivalent estimates of the `cost_trials`
+trials that reported one, null when none did. A trial is scored by the
 same rule: not if it raised, never finished, was verified outside a separate
 environment or had a failed step. Such a trial is dropped even if it left a reward, so a
 round's metric here can differ from Harbor's own pooled job metric, shown in the same
