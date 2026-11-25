@@ -20,7 +20,8 @@ fixed. That's what I want, not a weird interrogation."
 
 ## Status reports are final
 
-Before saying a task is done or handing it off, list every open item: unmerged
+Before saying a task is done or handing it off, list every open item from the whole
+session, not just the current request: unmerged
 pull requests, unfinished steps, and anything still running. Say "done" only
 when that list is empty; otherwise the status names each open item and what it
 needs. Never add a step to a task already reported as done unless the owner asks
