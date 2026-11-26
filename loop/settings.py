@@ -28,7 +28,7 @@ SETTINGS = {
     'auto_open_pr': bool, 'holdout_rounds': int, 'holdout_rule': str, 'holdout_max_uses': int,
     'canary_cases': int, 'canary_every': int, 'baseline_max_age_days': float, 'keep_rejected_jobs': int,
     'min_matched_fraction': float, 'max_proposal_attempts': int, 'invalid_streak_stop': int,
-    'limit_backoff_minutes': float, 'aacr_in_climb': bool,
+    'limit_backoff_minutes': float, 'aacr_in_climb': bool, 'trial_retries': int,
 }
 # Each slot's table and the function that checks it.
 SLOTS = {'reviewer': slots.reviewer, 'judge': slots.judge, 'proposer': slots.proposer}
