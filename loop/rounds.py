@@ -1,7 +1,7 @@
 """Score one Daydream build over rounds of ReviewBench or AACR cases with one command.
 
 Harbor pools the trials of one job, so a round is its own job: one pass over the
-cases with ``-k 1 -r 0``. This generates one catalog for the build, runs each round
+cases with ``-k 1 -r <trial_retries>``. This generates one catalog for the build, runs each round
 with ``harbor run`` one after another, and summarises them::
 
     .venv/bin/python -m loop.rounds --build pinned --cases loop/climb.txt --rounds 5 --name baseline
