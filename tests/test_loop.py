@@ -79,13 +79,13 @@ def test_derived_values_are_refused_until_measured(tmp_path):
 
 
 def test_derived_values_measured_under_other_slots_are_refused(tmp_path):
-    # The committed values measured Daydream on Codex (#45); the configured reviewer is Pi (#81).
-    with pytest.raises(LookupError, match=r"reviewer slot .*'codex'.* not the configured .*'pi'.*/issues/82"):
-        settings.load()['sigma']
-    assert settings.load(reviewer=dict(slots.LEGACY_REVIEWER))['sigma'] > 0
+    # The committed values measured the configured Pi reviewer (#82); Codex (#45) is refused.
+    assert settings.load()['sigma'] > 0
+    with pytest.raises(LookupError, match=r"reviewer slot .*'pi'.* not the configured .*'codex'.*/issues/82"):
+        settings.load(reviewer=dict(slots.LEGACY_REVIEWER))['sigma']
     other_judge = dict(settings.load()['judge'], model='gpt-7')
     with pytest.raises(LookupError, match="judged by 'openai/gpt-6.1-sol', not the configured 'openai/gpt-7'"):
-        settings.load(reviewer=dict(slots.LEGACY_REVIEWER), judge=other_judge)['rounds']
+        settings.load(judge=other_judge)['rounds']
     # A file that doesn't say what it measured hands out nothing; a caller's own value is its own.
     unrecorded = tmp_path / 'settings.toml'
     unrecorded.write_text(settings.FILE.read_text().split('judge = "openai/gpt-6.1-sol"\n\n[derived.reviewer]')[0])
@@ -95,8 +95,10 @@ def test_derived_values_measured_under_other_slots_are_refused(tmp_path):
 
 
 def test_the_committed_derived_values_are_the_noise_measurements():
-    derived = json.loads((ROOT / 'loop/noise.json').read_text())['derived']
-    loaded = settings.load(reviewer=dict(slots.LEGACY_REVIEWER))
+    noise_data = json.loads((ROOT / 'loop/noise.json').read_text())
+    derived = noise_data['derived']
+    loaded = settings.load()
+    assert noise_data['measured'] == {'reviewer': loaded['reviewer'], 'judge': slots.judge_name(loaded['judge'])}
     for name in settings.DERIVED:
         assert loaded[name] == derived[name]
     for rounds, threshold in derived['accept_threshold'].items():

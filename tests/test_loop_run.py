@@ -321,6 +321,39 @@ def test_one_loop_per_machine(loop, capsys):
     assert loop.run('--run', 'run-a', '--set', 'run_max_iterations=0') == 0
 
 
+def test_resume_refuses_mismatched_reviewer_or_judge_slots_before_canary(loop, capsys):
+    with pytest.raises(Killed):
+        loop.run('--run', 'run-a', iterations=['kill'])
+    started = loop.entries()[0]['slots']
+    proposer = settings.load()['proposer']
+    original = (loop.root / 'settings.toml').read_text()
+    loop.prereqs, loop.canary_names[:] = 0, []
+
+    (loop.root / 'settings.toml').write_text(original.replace('\neffort = "default"\n', '\neffort = "medium"\n', 1))
+    assert settings.load()['reviewer'] != started['reviewer']
+    assert loop.run('--resume', 'run-a') == 2
+    assert 'The run started under the slots' in capsys.readouterr().err
+    assert loop.prereqs == 0 and loop.canary_names == []
+    assert not (loop.root / 'loop-runs/run-a/resumes.jsonl').exists()
+    assert not any(entry['kind'] == 'stop' for entry in loop.entries())
+
+    (loop.root / 'settings.toml').write_text(original.replace('model = "gpt-6.1-sol"', 'model = "gpt-5.4"', 1))
+    assert settings.load()['judge'] != started['judge']
+    assert loop.run('--resume', 'run-a') == 2
+    assert 'The run started under the slots' in capsys.readouterr().err
+    assert loop.prereqs == 0 and loop.canary_names == []
+    assert not (loop.root / 'loop-runs/run-a/resumes.jsonl').exists()
+    assert not any(entry['kind'] == 'stop' for entry in loop.entries())
+
+    # Changing [proposer] leaves reviewer and judge slots unchanged, so the run resumes.
+    (loop.root / 'settings.toml').write_text(
+        original.replace('cli = "codex"\nmodel = "gpt-6.2-sol"\neffort = "high"',
+                         'cli = "agy"\nmodel = "gemini-4-neon-xhigh"\neffort = "xhigh"', 1))
+    assert settings.load()['proposer'] != proposer
+    assert loop.run('--resume', 'run-a', '--set', 'run_max_iterations=1', iterations=['rejected']) == 0
+    assert kinds(loop.entries()) == ['run-start', '#1 rejected', 'stop']
+
+
 def test_what_keeps_a_run_from_starting_or_resuming(loop, monkeypatch, capsys):
     with pytest.raises(SystemExit):
         looprun.main(['--resume', 'run-a', '--baseline-name', 'base'])

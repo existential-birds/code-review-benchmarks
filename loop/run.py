@@ -492,6 +492,9 @@ def resume(run: str, overrides: dict) -> int:
     if not entries:
         raise ValueError(f'No ledger at {folder / "ledger.jsonl"}; start a run without --resume')
     loaded = settings.load(**(entries[0]['settings'] | overrides))
+    configured = dict(reviewer=loaded['reviewer'], judge=loaded['judge'])
+    if 'slots' in entries[0] and entries[0]['slots'] != configured:
+        raise ValueError(f"The run started under the slots {entries[0]['slots']}, not the configured {configured}")
     _derived(loaded)
     prereqs()
     commit = repository()
