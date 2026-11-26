@@ -103,9 +103,11 @@ def benchmark_names(reviewbench_source: Path = REVIEWBENCH, aacr_source: Path = 
     """Every review case's task name and its repository's owner/name, from both pinned sources."""
     source = Path(reviewbench_source).resolve()
     reviewbench.check_source(source)
+    # The names don't depend on the slots; the exporter needs some to write its tasks.
+    loaded = settings.load()
     names = set()
     with tempfile.TemporaryDirectory(prefix='loop-guard-') as temporary, _stdout_to_stderr():
-        reviewbench.export(source, Path(temporary) / 'full', 'full')
+        reviewbench.export(source, Path(temporary) / 'full', 'full', loaded['reviewer'], loaded['judge'])
         for task in (Path(temporary) / 'full').iterdir():
             if task.is_dir():
                 pr = json.loads((task / 'environment/pr.json').read_text())

@@ -236,8 +236,11 @@ def test_a_failing_or_overrunning_gate_is_a_refusal_and_leaves_nothing_running(r
 
 
 def test_names_come_from_both_pinned_sources_and_keep_stdout_for_the_json(tmp_path, monkeypatch, capfd):
-    def export(upstream, destination, split):
+    loaded = settings.load()
+
+    def export(upstream, destination, split, reviewer, judge):
         assert split == 'full'
+        assert reviewer == loaded['reviewer'] and judge == loaded['judge']
         environment = destination / 'acme_widgets_7-0123abcd/environment'
         environment.mkdir(parents=True)
         (environment / 'pr.json').write_text(json.dumps(dict(repo='https://github.com/acme/widgets',
@@ -250,7 +253,7 @@ def test_names_come_from_both_pinned_sources_and_keep_stdout_for_the_json(tmp_pa
         'acme_widgets_7-0123abcd', 'acme/widgets', 'other-gadget-js-12', 'Other/gadget.js'}
     assert capfd.readouterr() == ('', 'Exported 1 tasks\n')
     monkeypatch.setattr(aacr, 'load_records', lambda upstream: [])
-    monkeypatch.setattr(reviewbench, 'export', lambda upstream, destination, split: destination.mkdir())
+    monkeypatch.setattr(reviewbench, 'export', lambda upstream, destination, split, reviewer, judge: destination.mkdir())
     with pytest.raises(ValueError, match='gave no review case names'):
         guard.benchmark_names(tmp_path, tmp_path)
     with pytest.raises(ValueError, match='No names to match'):

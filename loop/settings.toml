@@ -6,7 +6,7 @@
 climb_benchmark = "reviewbench"
 # Rests on matches with reference findings, not on the judge's opinion of unmatched ones.
 primary_metric = "grounded_f1"
-# #45 measured noise on these 50: 25 would need a gain of 0.037 to show at five rounds, 50 one of 0.0205.
+# #82 measured noise on these 50: 25 would need a gain of 0.083 to show at five rounds, 50 one of 0.0521.
 climb_set_size = 50
 # The same size as the climb set, so the same noise figures apply; change the two together.
 check_set_size = 50
@@ -35,6 +35,10 @@ gate_deselect_macos = [
 ]
 # The documented -n; recorded runs used 2 or 3.
 concurrency = 2
+# Harbor's -r for every round. Added in 802268f for Daydream 84c37cd when OpenRouter drops a
+# connection ("other side closed"); ca1b35e (existential-birds/daydream#1983) is now pinned and
+# trial_retries = 1 remains as committed in 802268f pending owner decision.
+trial_retries = 1
 # A full iteration: five climb and five check rounds of 50, at the 2 to 4 hours and about $126 a round
 # that #45 measured, with room for the proposer, gate and canary.
 iteration_max_wall_hours = 48
@@ -112,28 +116,28 @@ cli = "codex"
 model = "gpt-6.2-sol"
 effort = "high"
 
-# Derived by the noise measurement of #45 (docs/loop-noise.md, loop/noise.json): five rounds of
-# Daydream 0.37.0 on the 50 climb cases. accept_threshold(R) = accept_z * sigma * sqrt(2 / R)
-# follows from sigma. Even at rounds_max the threshold, 0.0205, sits just above target_gain:
-# the loop detects a grounded F1 gain of 0.0205 or more, and the 25-case set reaches only 0.037.
+# Derived by the noise measurement of #82 (docs/loop-noise.md, loop/noise.json): five rounds of
+# Daydream 0.38.1 (ca1b35e, #1983) on Pi/OpenRouter deepseek/deepseek-v4.1-flash-1017 across the
+# 50 climb cases, with oracle-45b for the judge. accept_threshold(R) = accept_z * sigma * sqrt(2 / R)
+# follows from sigma. Even at rounds_max the threshold, 0.0521, sits above target_gain:
+# the loop detects a grounded F1 gain of 0.0521 or more, and the 25-case set reaches only 0.083.
 [derived]
 # The one-sided 80% upper bound of the SD of pooled grounded F1 between rounds.
-sigma = 0.01620729443009426
+sigma = 0.041192679604331296
 # No R up to rounds_max reaches target_gain, so the most the loop allows.
 rounds = 5
 # accept_z times the upper-bound SD of a difference of two 5-round means, for the wider of the
 # two pooled precisions; for unmatched findings judged wrong per scored case; and for unfinished
-# reviews per round. The last two are rare counts, so their SD is never taken below Poisson's.
-precision_margin = 0.024083429458845364
-wrong_findings_margin = 0.026352313834736494
-incomplete_margin = 1.788854381999832
-# The slots #45 measured: Daydream's defaults on Codex, judged by gpt-6.1-sol. They aren't the
-# configured reviewer, so these values are refused until #82 measures the noise again.
+# reviews per round. A rare count's SD is never taken below Poisson's (used here for unfinished).
+precision_margin = 0.0491416137315116
+wrong_findings_margin = 0.17401214759988276
+incomplete_margin = 1.2649110640673518
+# The slots #82 measured: Pi/OpenRouter DeepSeek V4.1 Flash, judged by gpt-6.1-sol.
 judge = "openai/gpt-6.1-sol"
 
 [derived.reviewer]
 harness = "daydream"
-backend = "codex"
-provider = "openai"
-model = "default"
+backend = "pi"
+provider = "openrouter"
+model = "deepseek/deepseek-v4.1-flash-1017"
 effort = "default"

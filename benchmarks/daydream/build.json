@@ -1,8 +1,8 @@
 {
-  "source_commit": "84c37cd5aa4f448e7e8f9108907d59b791beb2e3",
+  "source_commit": "ca1b35e18ecab8e6e4e5b6c1dad968c23ceb14af",
   "version": "0.38.1",
   "wheel_name": "daydream-0.38.1-py3-none-any.whl",
-  "wheel_sha256": "5cb1cafbde80be1eb7b5ed2a96386032f2ae728e50ac3ef46b6bf7c9d363d15a",
+  "wheel_sha256": "fad80899090eab46f1525b850b992792aa9201e3cf06eae427254252527c275e",
   "codex_cli": "0.171.0",
   "pi_cli": "1.6.0"
 }
