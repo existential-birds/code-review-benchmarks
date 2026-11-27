@@ -27,6 +27,12 @@ max_diff_files = 5
 max_diff_lines = 500
 # Daydream's gate budget is 2 minutes on a cloud container; 300 seconds leaves headroom for a slower machine.
 gate_timeout_seconds = 300
+# Tests of the pinned build that fail on macOS before any change, so no candidate could pass the gate
+# there. Daydream's CI runs on Linux only, where they pass. Checked at f18f4f0 for #53: this one counts one
+# "could not be cleaned" warning of the two it expects on macOS and passes on Linux. Deselected on macOS only.
+gate_deselect_macos = [
+    "tests/test_artifact_visibility.py::test_closing_session_bounds_finished_runs_and_drops_finalized_live_copies",
+]
 # The documented -n; recorded runs used 2 or 3.
 concurrency = 2
 # Harbor's -r for every round. Added in 802268f for Daydream 84c37cd when OpenRouter drops a

@@ -28,7 +28,7 @@ SETTINGS = {
     'auto_open_pr': bool, 'holdout_rounds': int, 'holdout_rule': str, 'holdout_max_uses': int,
     'canary_cases': int, 'canary_every': int, 'baseline_max_age_days': float, 'keep_rejected_jobs': int,
     'min_matched_fraction': float, 'max_proposal_attempts': int, 'invalid_streak_stop': int,
-    'limit_backoff_minutes': float, 'aacr_in_climb': bool, 'trial_retries': int,
+    'limit_backoff_minutes': float, 'aacr_in_climb': bool, 'gate_deselect_macos': list, 'trial_retries': int,
 }
 # Each slot's table and the function that checks it.
 SLOTS = {'reviewer': slots.reviewer, 'judge': slots.judge, 'proposer': slots.proposer}
@@ -39,9 +39,11 @@ MEASURED = {'reviewer': dict, 'judge': str}
 
 
 def _valid(kind: type, value: object) -> bool:
-    """TOML integers count as floats; booleans never count as numbers."""
+    """TOML integers count as floats; booleans never count as numbers; a list holds strings."""
     if isinstance(value, bool) != (kind is bool):
         return False
+    if kind is list:
+        return isinstance(value, list) and bool(value) and all(isinstance(part, str) for part in value)
     return isinstance(value, (int, float) if kind is float else kind)
 
 
