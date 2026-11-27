@@ -73,7 +73,7 @@ def _validate_daydream_completion(instance, findings_path: Path, findings: dict,
         raise VerificationError('Daydream invocation evidence is stale or mismatched')
     if (receipt.get('status') != 'succeeded'
             or type(receipt.get('return_code')) is not int or receipt['return_code'] != 0
-            or type(execution.get('schema_version')) is not int or execution['schema_version'] != 1
+            or type(execution.get('schema_version')) is not int or execution['schema_version'] not in (1, 2)
             or type(execution.get('runner_exit_code')) is not int or execution['runner_exit_code'] != 0
             or execution.get('status') != ('complete' if findings['review_output'] else 'completed_empty')):
         raise VerificationError('Daydream invocation did not finish successfully')
