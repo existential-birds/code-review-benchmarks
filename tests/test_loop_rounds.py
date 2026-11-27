@@ -307,7 +307,7 @@ def test_a_reviewbench_summary_from_before_aacr_rounds_still_resumes(workspace, 
     first = rounds.run('pinned', workspace / 'cases.txt', 1, 'noise', concurrency=2)
     assert first['request'] == {'build': 'pinned', 'cases': ['case-a', 'case-b']}
     assert calls[0][1:] == ['run', '-c', 'experiments/reviewbench.yaml', '-p', 'artifacts/loop/noise/catalog',
-                            '-k', '1', '-r', '1', '-n', '2', '--job-name', 'noise-round-1-attempt-1']
+                            '-o', 'jobs', '-k', '1', '-r', '1', '-n', '2', '--job-name', 'noise-round-1-attempt-1']
     resumed = rounds.run('pinned', workspace / 'cases.txt', 2, 'noise', concurrency=2)
     assert len(calls) == 2 and [entry['round'] for entry in resumed['rounds']] == [1, 2]
 

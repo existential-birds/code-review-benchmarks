@@ -214,3 +214,9 @@ def test_a_candidate_that_matched_nothing_is_rejected_not_invalid():
         result = decide.decide(summary([BASE] * 10), summary([empty] * 10, rounds=rounds), stage, LIMITS)
         assert result['verdict'] == 'reject' and 'matched no findings' in result['reasons'][0]
         assert 'grounded_precision' in result['reasons'][0]
+
+
+def test_two_summaries_without_cases_are_invalid_not_a_crash():
+    empty = summary([])
+    result = decide.decide(empty, summary([]), 'climb', LIMITS)
+    assert result['verdict'] == 'invalid' and result['matched']['fraction'] == 0

@@ -96,7 +96,8 @@ for one task:
 ## Compare builds over rounds
 
 To compare the pinned build with a candidate, score each over several rounds of
-ReviewBench's test set. A round is its own job, because Harbor pools the trials of
+ReviewBench's dev split; the test set is held out for `loop.confirm`, below. A round is
+its own job, because Harbor pools the trials of
 one job.
 
 On the dev split, [`loop/rounds.py`](../../loop/rounds.py) scores one build over rounds
@@ -120,13 +121,21 @@ the judge is stable, 1 when it drifted and 2 when there is nothing to compare wi
 `--summary` compares a round already scored; `--record` makes a round the new
 reference, only after a person decides the judge changed.
 
+On the test set, [`loop/confirm.py`](../../loop/confirm.py) alone scores a kept change
+against the baseline, with AACR's held-out cases, and gives one word: `confirmed`,
+`not-confirmed` or `regressed`. Its rule, storage and use count are in its help.
+
+```sh
+.venv/bin/python -m loop.confirm --baseline pinned --candidate <commit>
+```
+
 **1. Build the candidate and generate one catalog per build.**
 
 ```sh
 .venv/bin/python -m benchmarks.daydream.build <daydream-clone> --candidate <commit>
-.venv/bin/python -m benchmarks.reviewbench.convert --upstream .cache/src/ReviewBench --split test \
+.venv/bin/python -m benchmarks.reviewbench.convert --upstream .cache/src/ReviewBench --split dev \
   --output artifacts/reviewbench/<pinned-catalog>
-.venv/bin/python -m benchmarks.reviewbench.convert --upstream .cache/src/ReviewBench --split test \
+.venv/bin/python -m benchmarks.reviewbench.convert --upstream .cache/src/ReviewBench --split dev \
   --build .cache/daydream-candidates/<commit>/build.json --output artifacts/reviewbench/<candidate-catalog>
 ```
 

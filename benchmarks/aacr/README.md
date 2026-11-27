@@ -190,7 +190,9 @@ same scores and counts to `artifacts/loop/<name>/summary.json`, with each case's
 reward counts per round. It resumes a run that stopped, and a case that fails to convert
 leaves no catalog behind, so drop it from the list and run again. It uses only the dev
 split. The loop that tunes Daydream scores only ReviewBench's dev cases; AACR dev rounds
-exist to check this report and a build. Held-out rounds belong to confirmation (#54).
+exist to check this report and a build. Held-out rounds belong to
+[`loop/confirm.py`](../../loop/confirm.py) alone, which confirms a kept change on these
+held-out cases and ReviewBench's test set, outside the loop.
 
 ```sh
 .venv/bin/python -m loop.rounds --benchmark aacr --build pinned \
