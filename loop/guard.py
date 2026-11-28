@@ -60,10 +60,11 @@ PROTECTED = ('Makefile', 'GNUmakefile', 'makefile', 'uv.lock', '.python-version'
              'scripts/hooks/*', 'scripts/ci_*', 'scripts/check-naming.sh', 'scripts/check-packaged-runtimes.sh',
              '.github/*', 'docs/coverage.md', 'daydream/benchmarks/*', '.agents/*', 'AGENTS.md', 'CONTRIBUTING.md')
 # Wherever they sit: tool settings, and files that take precedence over pyproject.toml's,
-# and .gitattributes, which can turn a file's diff into "Binary files differ".
+# .gitattributes, which can turn a file's diff into "Binary files differ", and the Git settings a person's Git
+# reads when a winner is landed with it: .lfsconfig and .gitmodules.
 SETTINGS_FILES = {'pyproject.toml', 'uv.toml', 'ruff.toml', '.ruff.toml', 'mypy.ini', '.mypy.ini',
                   'pytest.toml', '.pytest.toml', 'pytest.ini', '.pytest.ini', 'tox.ini', 'setup.cfg',
-                  '.coveragerc', '.gitattributes'}
+                  '.coveragerc', '.gitattributes', '.lfsconfig', '.gitmodules'}
 KEYWORDS = re.compile('reviewbench|aacr|harbor', re.IGNORECASE)
 # Ways to skip, expect failure, deselect or rewrite results in pytest and unittest.
 # The bare word "skip" is common in Daydream's tests, so only call and marker forms count.
@@ -131,7 +132,10 @@ def name_pattern(names: set[str]) -> re.Pattern:
 
 
 def protected(path: str) -> bool:
-    return PurePosixPath(path).name in SETTINGS_FILES or any(fnmatch.fnmatchcase(path, rule) for rule in PROTECTED)
+    # Casefolded: on a disk that ignores case, as macOS's does by default, .GITATTRIBUTES is .gitattributes.
+    folded = path.casefold()
+    return (PurePosixPath(folded).name in {name.casefold() for name in SETTINGS_FILES}
+            or any(fnmatch.fnmatchcase(folded, rule.casefold()) for rule in PROTECTED))
 
 
 def is_test_file(path: str) -> bool:

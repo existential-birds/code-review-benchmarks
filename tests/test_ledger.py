@@ -174,6 +174,33 @@ def test_the_ledger_stays_locked_from_verifying_to_appending(run, monkeypatch):
     assert held == [True]
 
 
+def test_a_landing_needs_a_confirmed_iteration_and_a_merge_needs_its_landing(run):
+    url = 'https://github.com/existential-birds/daydream/pull/7'
+    ledger.append(run, 'iteration', iteration(3, 'accepted-on-dev'), patch=PATCH)
+    landing = {'iteration': 3, 'url': url, 'branch': 'loop/restate', 'commit': 'c' * 40}
+    for kind, fields, message in (
+            ('landing', landing, 'Only a confirmed iteration is landed, and iteration 3 is not'),
+            ('landing', landing | {'iteration': 2}, 'Only a confirmed iteration is landed, and iteration 2 is not'),
+            ('merge', {'iteration': 3, 'url': url, 'merge_commit': 'm' * 40}, 'Iteration 3 was not landed as')):
+        with pytest.raises(ValueError, match=message):
+            ledger.append(run, kind, fields)
+    ledger.append(run, 'confirmation', {'iteration': 3, 'verdict': 'confirmed'})
+    with pytest.raises(ValueError, match='holds strings besides'):
+        ledger.append(run, 'landing', landing | {'url': None})
+    with pytest.raises(ValueError, match=r'landing entry holds .* only'):
+        ledger.append(run, 'landing', landing | {'held_out_f1': 0.41})
+    ledger.append(run, 'landing', landing)
+    for kind, fields, message in (
+            ('landing', landing, 'already landed'),
+            ('merge', {'iteration': 3, 'url': url + '0', 'merge_commit': 'm' * 40}, 'was not landed as')):
+        with pytest.raises(ValueError, match=message):
+            ledger.append(run, kind, fields)
+    ledger.append(run, 'merge', {'iteration': 3, 'url': url, 'merge_commit': 'm' * 40})
+    with pytest.raises(ValueError, match='already merged'):
+        ledger.append(run, 'merge', {'iteration': 3, 'url': url, 'merge_commit': 'm' * 40})
+    assert [entry['kind'] for entry in ledger.read(run)[-3:]] == ['confirmation', 'landing', 'merge']
+
+
 def test_a_run_records_its_reviewer_and_judge_slots_and_each_iteration_its_proposer(tmp_path):
     from loop import settings
     loaded = settings.load()

@@ -1,8 +1,8 @@
 """loop.run with stand-ins for loop.iterate, loop.confirm, the canary, the checks and the clock.
 
 The stand-in iteration appends the entry loop.iterate would, with the verdict and cost the
-test plans; the stand-in confirmation gives the planned word. The ledger, the stop rules,
-the lock and the #57 stand-in are the real ones.
+test plans; the stand-in confirmation gives the planned word, and the stand-in for loop.land
+records what it was asked. The ledger, the stop rules and the lock are the real ones.
 """
 from datetime import datetime, timedelta, timezone
 import fcntl
@@ -18,7 +18,7 @@ from types import SimpleNamespace
 import pytest
 
 from benchmarks.daydream import build
-from loop import confirm as confirmation, ledger, rounds, run as looprun, sets, settings, slots
+from loop import confirm as confirmation, land as landing, ledger, rounds, run as looprun, sets, settings, slots
 
 PIN = build.BUILD['source_commit']
 DERIVED = dict(sigma=0.02, rounds=2, precision_margin=0.03, wrong_findings_margin=0.2, incomplete_margin=0.5)
@@ -49,7 +49,7 @@ def loop(tmp_path, monkeypatch):
                        + ''.join(f'{key} = {value}\n' for key, value in DERIVED.items()) + MEASURED)
     monkeypatch.setattr(settings, 'load', partial(settings.load, derived))
     done = SimpleNamespace(iterations=[], confirms=[], canaries=[], canary_names=[], sleeps=[], prereqs=0,
-                           confirmed=[], root=tmp_path, clock=None,
+                           confirmed=[], landed=[], root=tmp_path, clock=None,
                            real=dict(confirm=looprun.confirm, baseline=looprun.baseline))
 
     def prereqs():
@@ -96,6 +96,7 @@ def loop(tmp_path, monkeypatch):
             raise Killed
         return (planned, '') if planned in ledger.CONFIRMATIONS else (None, planned)
     monkeypatch.setattr(looprun, 'confirm', confirm)
+    monkeypatch.setattr(landing, 'land', lambda run, n, dry_run, root: done.landed.append((run, n, dry_run, root)))
     monkeypatch.setattr(looprun, 'sleep', done.sleeps.append)
     real_now = looprun.now
     monkeypatch.setattr(looprun, 'now', lambda: done.clock or real_now())
@@ -149,30 +150,52 @@ def test_each_budget_stops_the_run(loop, overrides, iterations, detail):
     assert len(loop.entries()) == 2 + len(iterations)
 
 
-def test_a_winner_is_landed_when_auto_open_pr_is_on_and_stops_the_run_awaiting_merge(loop, capsys):
+def test_a_winner_is_landed_when_auto_open_pr_is_on_and_stops_the_run_awaiting_merge(loop):
     assert loop.run('--run', 'run-a', iterations=['accepted', 'accepted'],
                     confirms=['not-confirmed', 'confirmed']) == 0
     assert kinds(loop.entries()) == ['run-start', '#1 accepted-on-dev', 'confirmation 1 not-confirmed',
                                      '#2 accepted-on-dev', 'confirmation 2 confirmed', 'stop']
     assert loop.entries()[-1]['reason'] == 'winner-awaiting-merge'
     assert loop.confirmed == ['1' * 40, '2' * 40]
-    err = capsys.readouterr().err
-    # The stand-in for #57 says so, and opens nothing.
-    assert f"run-a #2 ({'2' * 40}) is a winner; its pull request is not opened: landing is #57's" in err
+    assert loop.landed == [('run-a', 2, False, loop.root)]
 
 
-def test_with_auto_open_pr_off_a_winner_is_not_landed(loop, capsys, monkeypatch):
-    calls = []
-    monkeypatch.setattr(looprun, 'land', lambda *arguments: calls.append(arguments))
+def test_with_auto_open_pr_off_a_winner_is_landed_as_a_dry_run(loop):
     assert loop.run('--run', 'run-a', '--set', 'auto_open_pr=false', iterations=['accepted'],
                     confirms=['confirmed']) == 0
-    assert loop.entries()[-1]['reason'] == 'winner-awaiting-merge' and calls == []
-    assert "landing is #57's" not in capsys.readouterr().err
+    assert loop.entries()[-1]['reason'] == 'winner-awaiting-merge'
+    assert loop.landed == [('run-a', 1, True, loop.root)]
 
 
-def test_the_landing_stand_in_opens_nothing():
-    assert looprun.land('run-a', 2, 'c' * 40) == dict(run='run-a', iteration=2, commit='c' * 40, opened=False,
-                                                      reason="landing is #57's")
+def test_a_landing_that_stops_is_reported_and_the_run_goes_on_to_its_stop(loop, monkeypatch, capsys):
+    def stopped(run, n, dry_run, root):
+        raise landing.Stop('No signing key')
+    monkeypatch.setattr(landing, 'land', stopped)
+    assert loop.run('--run', 'run-a', iterations=['accepted'], confirms=['confirmed']) == 0
+    assert loop.entries()[-1]['reason'] == 'winner-awaiting-merge'
+    assert ('#1 is a winner, but loop.land stopped: No signing key\nLand it by hand: python -m loop.land --run '
+            'run-a --iteration 1') in capsys.readouterr().err
+
+
+def test_a_merged_winner_ends_the_run_since_its_baseline_is_stale(loop):
+    assert loop.run('--run', 'run-a', iterations=['accepted'], confirms=['confirmed']) == 0
+    url = 'https://github.com/existential-birds/daydream/pull/1'
+    folder = loop.root / 'loop-runs/run-a'
+    ledger.append(folder, 'landing', dict(iteration=1, url=url, branch='loop/x', commit='1' * 40))
+    ledger.append(folder, 'merge', dict(iteration=1, url=url, merge_commit='m' * 40))
+    # No more iterations against the old baseline: the merge reaches the next run through the pin bump.
+    assert loop.run('--resume', 'run-a', iterations=[]) == 0
+    assert loop.entries()[-1]['reason'] == 'winner-merged' and 'loop.land --bump' in loop.entries()[-1]['detail']
+
+
+def test_the_first_run_on_a_new_pin_reports_its_gap_from_the_merged_winner(loop, monkeypatch, capsys):
+    asked = []
+    gap = dict(pin='n' * 40, baseline_mean=0.5, baseline_rounds=[0.5], run='run-0', iteration=3, merge_commit='m' * 40,
+               winner_mean=0.6, winner_rounds=[0.6], gap=-0.1, margin=0.03, beyond_noise=True)
+    monkeypatch.setattr(landing, 'pin_gap', lambda summary, loaded, root: asked.append((summary, root)) or gap)
+    assert loop.run('--run', 'run-a', '--set', 'run_max_iterations=0') == 0
+    assert asked == [(loop.root / 'artifacts/loop/run-a-baseline/summary.json', loop.root)]
+    assert 'a gap of -0.1000, larger than the noise margin 0.0300' in capsys.readouterr().err
 
 
 @pytest.mark.parametrize('word, reason, kinds_after', [

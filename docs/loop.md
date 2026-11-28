@@ -38,9 +38,9 @@ with the same name, and reuses the rounds it finished.
 
 Then it repeats iterations until a stop rule holds. After a change is accepted on dev it
 runs `loop.confirm` in a separate process and reads only its one word. A `confirmed`
-change is a winner: with `auto_open_pr` on, its draft pull request would open, but that
-is #57's, so for now the loop only says so. At the end it prints each iteration's verdict,
-the best gain on dev, the spend and why it stopped.
+change is a winner, landed with `loop.land` (below): with `auto_open_pr` on, its draft
+pull request opens; off, its branch and body are only written locally. At the end it
+prints each iteration's verdict, the best gain on dev, the spend and why it stopped.
 
 ## Why it stops
 
@@ -52,7 +52,8 @@ Each stop is a `stop` entry in the ledger, with a reason and a detail:
 | `budget` | `run_max_iterations` iterations, `run_max_cost_usd_equiv` spent on them, or `run_max_wall_hours` since the run started |
 | `held-out-regression` | a confirmation said `regressed` |
 | `judge-drift` | the canary, run again every `canary_every` iterations, drifted |
-| `winner-awaiting-merge` | `max_unmerged_winners` confirmed winners in the run |
+| `winner-awaiting-merge` | `max_unmerged_winners` confirmed winners in the run not yet merged |
+| `winner-merged` | A winner merged into Daydream: the run's baseline is stale, and a new run starts once the pin moves to a release holding it |
 | `held-out-worn` | `loop.confirm` refused: its held-out cases are used up (#58) |
 | `infrastructure` | `invalid_streak_stop` invalid iterations in a row; a subscription limit still there after one wait of `limit_backoff_minutes`; a canary or confirmation that gave no verdict; or an error in the loop |
 
@@ -73,8 +74,41 @@ kill, is redone from its last finished round; one stopped by Ctrl-C is recorded 
 and the next is proposed afresh. A change accepted on dev but not yet confirmed is
 confirmed first.
 After a stop, the plateau and invalid streaks count again from zero, but the budgets and
-winners count the whole run: raise the setting to go on past one. After merging a winner,
-start a new run, since the pin, and so the baseline, changed.
+winners count the whole run: raise the setting to go on past one. Once a winner merges
+(`loop.land --merged`), the run stops with `winner-merged`; start a new run after the pin
+moves to a release holding it (`loop.land --bump`), since that changes the baseline.
+
+## Land a winner
+
+```sh
+.venv/bin/python -m loop.land --run <run> --iteration <n> --dry-run
+```
+
+This lands a confirmed iteration, and refuses any other. In the loop's own Daydream clone,
+`.cache/loop/daydream`, it rebases the scored commit onto Daydream's `origin/main` (a
+conflict stops for you; if `main` moved, the guard and gate run again), adds a
+`CHANGELOG.md` line under `[Unreleased]` when the change touches `daydream/`, and signs the
+commit with your `user.signingkey` (without one it stops and says what to set up). The
+branch is `loop/<pattern>`, and the body, from Daydream's pull request template, is
+`loop-runs/<run>/land/<n>.md`: the proposal, both builds' dev scores, "Confirmed on the
+held-out split" and no held-out number, and how to score it again. `--dry-run` stops there,
+as `loop.run` does when `auto_open_pr` is off; run `loop.land` again without it to land the
+winner. Without it the branch is pushed with hooks on, a
+draft pull request opens, and its URL goes in the ledger; it is never marked ready or
+merged by the loop.
+
+Once a person merged it, and once Daydream released it:
+
+```sh
+.venv/bin/python -m loop.land --merged <pull request>   # records the merge; the winner no longer holds the run
+.venv/bin/python -m loop.land --bump <tag>              # prepares the pin change on a branch here
+```
+
+`--bump` builds the tag, writes `benchmarks/daydream/build.json` on the branch
+`pin/daydream-<version>` in `.cache/loop/bump/<version>`, writes a body from this
+repository's template, and prints the rest: `make setup`, `make test`, the pilots, the push
+and the pull request. The first run on the new pin compares its baseline with the winner's
+recorded dev scores and says whether they differ by more than the noise.
 
 ## Read the ledger
 
