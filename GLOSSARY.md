@@ -88,8 +88,14 @@ climb set. The proposer never reads their evidence.
 The first climb-set review cases, scored by the oracle every few iterations to
 catch the judge drifting from the counts it gave them before.
 
+**Run**:
+Iterations of the loop against one baseline, from its start to a stated stop.
+
 **Ledger**:
-The append-only record of every iteration.
+The append-only record of every iteration of a run.
 
 **Confirmation**:
 Scoring a kept change on the held-out split, outside the loop.
+
+**Winner**:
+A change confirmed on the held-out split, waiting for a person to merge it.
