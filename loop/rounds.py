@@ -1,7 +1,7 @@
 """Score one Daydream build over rounds of ReviewBench or AACR cases with one command.
 
 Harbor pools the trials of one job, so a round is its own job: one pass over the
-cases with ``-k 1 -r 0``. This generates one catalog for the build, runs each round
+cases with ``-k 1 -r <trial_retries>``. This generates one catalog for the build, runs each round
 with ``harbor run`` one after another, and summarises them::
 
     .venv/bin/python -m loop.rounds --build pinned --cases loop/climb.txt --rounds 5 --name baseline
@@ -340,7 +340,8 @@ def _rounds(benchmark, request, rounds, name, path, catalog, concurrency, upstre
         save()
         config = ORACLE_CONFIG if request['build'] == 'oracle' else bench.config
         subprocess.run([str(HARBOR), 'run', '-c', str(config), '-p', str(catalog), '-o', str(jobs_dir),
-                        '-k', '1', '-r', '0', '-n', str(concurrency), '--job-name', job], check=False)
+                        '-k', '1', '-r', str(settings.load()['trial_retries']), '-n', str(concurrency),
+                        '--job-name', job], check=False)
         entry['state'] = outcome(job, catalog, benchmark, jobs_dir)
         save()
         if entry['state'] != 'finished':

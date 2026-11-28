@@ -173,7 +173,7 @@ def test_transport_sticky_failure_is_checked_even_with_valid_verdict(tmp_path):
     assert not (paths[2] / 'reward.json').exists()
 
 
-def daydream_artifacts(tmp_path, findings):
+def daydream_artifacts(tmp_path, findings, *, schema_version=2):
     """Daydream's completion evidence for one review: terminal result, execution record and receipts."""
     paths = fixture(tmp_path, findings)
     proof = tmp_path / 'daydream'
@@ -196,7 +196,7 @@ def daydream_artifacts(tmp_path, findings):
         'projection_valid': True, 'cause': None,
     }
     execution = {
-        'schema_version': 1, 'invocation_id': invocation,
+        'schema_version': schema_version, 'invocation_id': invocation,
         'status': 'complete' if findings else 'completed_empty', 'runner_exit_code': 0,
         'terminal_result': terminal, 'analyzed_comparison': comparison,
         'post_comparison': comparison, 'usage': {}, 'retained_findings': findings,
@@ -216,9 +216,11 @@ def daydream_artifacts(tmp_path, findings):
     return paths, proof, expected, host_receipt
 
 
+@pytest.mark.parametrize('schema_version', [1, 2])
 @pytest.mark.parametrize('findings,responses', [([], []), ([finding()], ['One agreement\n[1]'])])
-def test_daydream_completed_review_requires_terminal_result_and_process_proof(tmp_path, findings, responses):
-    paths, proof, expected, host_receipt = daydream_artifacts(tmp_path, findings)
+def test_daydream_completed_review_requires_terminal_result_and_process_proof(tmp_path, findings, responses,
+                                                                            schema_version):
+    paths, proof, expected, host_receipt = daydream_artifacts(tmp_path, findings, schema_version=schema_version)
     client = JudgeTransport(*responses)
     result = asyncio.run(score.score_case(*paths, client=client,
                         daydream_proof=proof, comparison_path=expected, host_receipt_path=host_receipt))
@@ -237,7 +239,8 @@ def test_daydream_completed_review_requires_terminal_result_and_process_proof(tm
     ('host-receipt.json', 'invocation_id', str(uuid.UUID(int=1))),
     ('request.json', 'invocation_id', 'not-an-invocation'),
     ('execution.json', 'invocation_id', str(uuid.UUID(int=1))),
-    ('execution.json', 'schema_version', 2),
+    ('execution.json', 'schema_version', 3),
+    ('execution.json', 'schema_version', True),
     ('execution.json', 'runner_exit_code', 1),
     ('execution.json', 'status', 'incomplete'),
     ('execution.json', 'status', 'failed'),

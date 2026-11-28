@@ -7,6 +7,7 @@ Daydream's gate never runs; a stand-in records what it was given.
 """
 import json
 import os
+import shlex
 from pathlib import Path
 import sys
 import time
@@ -83,8 +84,11 @@ def test_a_harmless_commit_passes_and_the_gate_runs_in_a_throwaway_clone(repo, g
     seen['environment'].pop('LC_CTYPE', None)  # Python's own locale coercion in the stand-in
     seen['environment'].pop('__CF_USER_TEXT_ENCODING', None)  # macOS adds it to every process
     home, directory = Path(seen['environment']['HOME']), Path(seen['directory'])
+    # The operator's PYTEST_ADDOPTS never reaches the gate; on macOS the guard sets its own deselection.
+    deselect = settings.load()['gate_deselect_macos'] if sys.platform == 'darwin' else []
     assert seen['environment'] == {name: os.environ[name] for name in guard.GATE_ENVIRONMENT if name in os.environ} | UV | {
-        'UV_OFFLINE': '1', 'HOME': str(home)}
+        'UV_OFFLINE': '1', 'HOME': str(home)} | (
+        {'PYTEST_ADDOPTS': shlex.join(f'--deselect={test}' for test in deselect)} if deselect else {})
     # Resolved: on macOS the temporary folder sits under /var, a link to /private/var, and the stand-in's
     # working directory comes back resolved.
     assert home.name == 'home' and home.parent.resolve() == directory.parent.resolve() and not home.parent.exists()
@@ -238,8 +242,11 @@ def test_a_failing_or_overrunning_gate_is_a_refusal_and_leaves_nothing_running(r
 
 
 def test_names_come_from_both_pinned_sources_and_keep_stdout_for_the_json(tmp_path, monkeypatch, capfd):
-    def export(upstream, destination, split):
+    loaded = settings.load()
+
+    def export(upstream, destination, split, reviewer, judge):
         assert split == 'full'
+        assert reviewer == loaded['reviewer'] and judge == loaded['judge']
         environment = destination / 'acme_widgets_7-0123abcd/environment'
         environment.mkdir(parents=True)
         (environment / 'pr.json').write_text(json.dumps(dict(repo='https://github.com/acme/widgets',
@@ -252,7 +259,7 @@ def test_names_come_from_both_pinned_sources_and_keep_stdout_for_the_json(tmp_pa
         'acme_widgets_7-0123abcd', 'acme/widgets', 'other-gadget-js-12', 'Other/gadget.js'}
     assert capfd.readouterr() == ('', 'Exported 1 tasks\n')
     monkeypatch.setattr(aacr, 'load_records', lambda upstream: [])
-    monkeypatch.setattr(reviewbench, 'export', lambda upstream, destination, split: destination.mkdir())
+    monkeypatch.setattr(reviewbench, 'export', lambda upstream, destination, split, reviewer, judge: destination.mkdir())
     with pytest.raises(ValueError, match='gave no review case names'):
         guard.benchmark_names(tmp_path, tmp_path)
     with pytest.raises(ValueError, match='No names to match'):
@@ -270,3 +277,16 @@ def test_a_commit_the_guard_cannot_check_still_gives_json(repo, git, monkeypatch
     monkeypatch.setattr(guard, 'benchmark_names', unpinned)
     assert guard.main([str(path), base, base]) == 2
     assert json.loads(capsys.readouterr().out) == dict(accepted=False, error='Expected ReviewBench revision x')
+
+
+def test_on_macos_the_gate_deselects_the_tests_the_pinned_build_fails_there(repo, git, gate, monkeypatch):
+    path, base = repo
+    head = commit(git, path, {'daydream/review.py': 'def review():\n    return ["ok"]\n'})
+    tests = ['tests/test_a.py::test_one', 'tests/test_b.py::test_two[x y]']
+    monkeypatch.setattr(guard.sys, 'platform', 'darwin')
+    assert guard.check(path, base, head, settings.load(gate_deselect_macos=tests), NAMES)['accepted']
+    seen = json.loads(gate[1].read_text())['environment']
+    assert shlex.split(seen['PYTEST_ADDOPTS']) == [f'--deselect={test}' for test in tests]
+    monkeypatch.setattr(guard.sys, 'platform', 'linux')
+    assert guard.check(path, base, head, settings.load(gate_deselect_macos=tests), NAMES)['accepted']
+    assert 'PYTEST_ADDOPTS' not in json.loads(gate[1].read_text())['environment']

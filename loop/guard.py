@@ -10,7 +10,8 @@ coverage floor, tool settings, ``.gitattributes``, dependencies, the vendored Ha
 export and agent guidance alone; keep every test, add no skip, xfail, deselection,
 pytest hook or coverage exclusion; and carry no benchmark knowledge. Then ``make
 check`` must pass in the clone within ``gate_timeout_seconds``, with a throwaway HOME
-and only an allowlisted environment. uv runs offline from the operator's cache, so
+and only an allowlisted environment. On macOS it deselects ``gate_deselect_macos``, the
+pinned build's own tests that fail there before any change. uv runs offline from the operator's cache, so
 one ordinary ``make check`` in a Daydream checkout must have filled it first. The
 guard never commits; the Git it runs has hooks off, so nothing a candidate holds runs outside its gate.
 
@@ -29,6 +30,7 @@ import json
 import os
 from pathlib import Path, PurePosixPath
 import re
+import shlex
 import signal
 import subprocess
 import sys
@@ -102,9 +104,11 @@ def benchmark_names(reviewbench_source: Path = REVIEWBENCH, aacr_source: Path = 
     """Every review case's task name and its repository's owner/name, from both pinned sources."""
     source = Path(reviewbench_source).resolve()
     reviewbench.check_source(source)
+    # The names don't depend on the slots; the exporter needs some to write its tasks.
+    loaded = settings.load()
     names = set()
     with tempfile.TemporaryDirectory(prefix='loop-guard-') as temporary, _stdout_to_stderr():
-        reviewbench.export(source, Path(temporary) / 'full', 'full')
+        reviewbench.export(source, Path(temporary) / 'full', 'full', loaded['reviewer'], loaded['judge'])
         for task in (Path(temporary) / 'full').iterdir():
             if task.is_dir():
                 pr = json.loads((task / 'environment/pr.json').read_text())
@@ -198,13 +202,16 @@ def uv_directories() -> dict[str, str]:
             for name, command in (('UV_CACHE_DIR', ('cache', 'dir')), ('UV_PYTHON_INSTALL_DIR', ('python', 'dir')))}
 
 
-def run_gate(checkout: Path, scratch: Path, timeout: int) -> dict:
-    """Run Daydream's gate with a throwaway HOME, and kill whatever it leaves behind."""
+def run_gate(checkout: Path, scratch: Path, timeout: int, deselect: list[str] = ()) -> dict:
+    """Run Daydream's gate with a throwaway HOME, less the deselected tests, and kill whatever it leaves behind."""
     home, log = scratch / 'home', scratch / 'gate.log'
     home.mkdir()
     # uv works offline from the operator's cache, so the gate needs no proxy or credentials.
     environment = ({name: os.environ[name] for name in GATE_ENVIRONMENT if name in os.environ}
                    | uv_directories() | {'UV_OFFLINE': '1', 'HOME': str(home)})
+    if deselect:
+        # Daydream's `make test` passes PYTEST_ADDOPTS through to pytest.
+        environment['PYTEST_ADDOPTS'] = shlex.join(f'--deselect={test}' for test in deselect)
     returncode, seconds = run_bounded(GATE, checkout, environment, log, timeout)
     return dict(command=' '.join(GATE), returncode=returncode, timed_out=returncode is None,
                 seconds=round(seconds, 1), output_tail=log.read_text(encoding='utf-8', errors='replace')[-4000:])
@@ -297,7 +304,8 @@ def _check(checkout: Path, scratch: Path, base: str, commit: str, loaded: settin
             refuse(kind, f'{path}:{numbers[0]} {finding}{more}')
     gate = None
     if not refusals:
-        gate = run_gate(checkout, scratch, loaded['gate_timeout_seconds'])
+        gate = run_gate(checkout, scratch, loaded['gate_timeout_seconds'],
+                        loaded['gate_deselect_macos'] if sys.platform == 'darwin' else [])
         if gate['timed_out']:
             refuse('gate', f'make check ran past {loaded["gate_timeout_seconds"]} seconds')
         elif gate['returncode']:
