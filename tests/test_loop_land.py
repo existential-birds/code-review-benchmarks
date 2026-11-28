@@ -324,6 +324,7 @@ def test_bump_prepares_the_pin_change_on_a_branch_and_runs_nothing(git, tmp_path
     for heading in ('## Summary', '## Added', '## Changed', '## Removed', '## Verification steps'):
         assert heading in body
     assert '- [ ] Ran the relevant documented repository checks' in body and '`make test` — [result]' in body
+    assert '- [ ] Updated `CHANGELOG.md` under `[Unreleased]`' in body
     err = capsys.readouterr().err
     # The pilot is a climb-set case on the dev split; no held-out case is scored for a bump.
     climb = sets.read(sets.CLIMB)[0]

@@ -469,7 +469,9 @@ def bump(tag: str, root: Path = ROOT) -> dict:
             '- [ ] Ran the relevant documented repository checks and recorded the outcome below, or explained why '
             'they are not applicable.',
             '- [ ] For custom code, recorded the Harbor-first evidence required by `CONTRIBUTING.md`, or explained '
-            'why it is not applicable. N/A: the pin only, no custom code.', '',
+            'why it is not applicable. N/A: the pin only, no custom code.',
+            '- [ ] Updated `CHANGELOG.md` under `[Unreleased]` and noted SemVer impact, or explained why it is not '
+            'applicable.', '',
             'Verified revision: [commit SHA]', '', *(f'- `{check}` — [result]' for check in checks))),
         'Review context': '- The ReviewBench pilot is one climb-set case from the dev split; no held-out case is '
                           'scored for a pin bump.',
