@@ -6,7 +6,7 @@
 Run it from the repository root, as ``loop.iterate``. ``--set`` overrides a setting of
 ``loop/settings.toml`` for this run, typed as TOML (``--set auto_open_pr=false``).
 
-Start: checks Docker and both logins (``make prereqs``), a clean working tree and the
+Start: checks Docker and the configured logins or keys (``make prereqs``), a clean working tree and the
 derived settings (#45), then takes the machine's loop lock, so two loops can't run on one
 machine. Runs the judge canary (``loop.canary``) as ``<run>-canary-0``: if it drifts, or
 gives no verdict, the run doesn't start and nothing goes in the ledger. The baseline's
@@ -15,7 +15,7 @@ on ``loop/climb.txt`` with ``rounds`` rounds, while it is younger than
 ``baseline_max_age_days``; otherwise they are measured again as ``<run>-baseline``. A
 summary's age is its newest round's: the ``finished_at`` Harbor wrote in that job's
 ``result.json``, or the summary's modification time when no job folder is left. Then the
-run-start entry, with the effective settings.
+run-start entry, with the effective settings and the reviewer and judge slots.
 
 Repeat: before each iteration, the stop rules below; every ``canary_every`` iterations,
 the canary again; then one iteration with ``loop.iterate``, and ``loop.prune`` between
@@ -40,9 +40,11 @@ Each stop is a ``stop`` entry, with its reason and a detail:
   limit still there after one wait of ``limit_backoff_minutes``, a canary or confirmation
   that gave no verdict, or an error that stopped the loop itself.
 
-A subscription limit is Codex's "You've hit your usage limit" in an invalid iteration's
-reasons, its proposer logs or its rounds' trial logs, or in a canary's or confirmation's
-error. The loop waits once, then tries again; a limit met again stops it.
+A subscription limit or provider quota is Codex's "You've hit your usage limit", OpenRouter's
+"requires more credits" / "openrouter_key_limit" / "openrouter_credits" / "rate limit exceeded",
+or agy's "Individual quota reached" in an invalid iteration's reasons, its proposer logs or its
+rounds' trial logs, or in a canary's or confirmation's error. The loop waits once, then tries
+again; a limit met again stops it.
 
 Resume: ``--resume`` continues a run from its ledger after a crash or a stop, with the
 run-start's settings and any new ``--set``, kept with the suite's commit in
@@ -80,8 +82,12 @@ ROOT = Path(__file__).resolve().parents[1]
 # One loop per machine: its Docker and both subscriptions are shared.
 # A fixed path, not $TMPDIR, which differs between users and sandboxed shells on one machine.
 LOCK = Path('/tmp/code-review-benchmarks-loop.lock')
-# What Codex prints when a subscription's limit is reached.
-LIMIT = re.compile(r'hit your usage limit', re.IGNORECASE)
+# What Codex, OpenRouter (Pi reviewer/proposer) or agy prints when a usage limit or quota is reached.
+LIMIT = re.compile(
+    r'hit your usage limit|requires more credits|openrouter_key_limit|openrouter_credits|'
+    r'rate limit exceeded|individual quota reached',
+    re.IGNORECASE,
+)
 LAND_ISSUE = 'https://github.com/existential-birds/code-review-benchmarks/issues/57'
 
 
@@ -98,7 +104,7 @@ def spend(cost: dict) -> float:
     return cost.get('cost_usd_equiv', 0) + cost.get('baseline_check', {}).get('cost_usd_equiv', 0)
 
 def prereqs() -> None:
-    """Docker and both logins, as ``make prereqs`` checks them, and the login folders the rounds mount."""
+    """Docker and the configured logins or keys, as ``make prereqs`` checks them, and the login folders the rounds mount."""
     # The Makefile's defaults, which loop.rounds needs set.
     os.environ.setdefault('REVIEWER_CODEX_AUTH_DIR', os.environ.get('CODEX_HOME') or str(Path.home() / '.codex'))
     os.environ.setdefault('JUDGE_PI_AUTH_DIR', os.environ.get('PI_CODING_AGENT_DIR') or str(Path.home() / '.pi/agent'))
@@ -474,8 +480,8 @@ def start(run: str, baseline_name: str | None, overrides: dict) -> int:
             return 1
         summary = baseline(run, baseline_name, loaded)
         ledger.append(folder, 'run-start', dict(
-            settings=effective(loaded), suite_commit=commit, judge=result['judge'],
-            baseline_commit=build.BUILD['source_commit'],
+            settings=effective(loaded), slots=dict(reviewer=loaded['reviewer'], judge=loaded['judge']),
+            suite_commit=commit, judge=result['judge'], baseline_commit=build.BUILD['source_commit'],
             baseline_summary_sha256=hashlib.sha256(summary.read_bytes()).hexdigest(), canary=result))
         return finish(run, loaded, resumed=False)
 
@@ -486,6 +492,9 @@ def resume(run: str, overrides: dict) -> int:
     if not entries:
         raise ValueError(f'No ledger at {folder / "ledger.jsonl"}; start a run without --resume')
     loaded = settings.load(**(entries[0]['settings'] | overrides))
+    configured = dict(reviewer=loaded['reviewer'], judge=loaded['judge'])
+    if 'slots' in entries[0] and entries[0]['slots'] != configured:
+        raise ValueError(f"The run started under the slots {entries[0]['slots']}, not the configured {configured}")
     _derived(loaded)
     prereqs()
     commit = repository()

@@ -124,6 +124,7 @@ def test_a_run_starts_with_the_effective_settings_and_stops_on_a_plateau(loop, c
     start, stop = entries[0], entries[-1]
     assert start['settings'] == looprun.effective(settings.load(plateau_iterations=2, auto_open_pr=False))
     assert start['settings']['plateau_iterations'] == 2 and start['settings']['sigma'] == 0.02
+    assert start['slots'] == dict(reviewer=settings.load()['reviewer'], judge=settings.load()['judge'])
     assert (start['baseline_commit'], start['suite_commit'], start['judge'], start['canary']) == (
         PIN, 's' * 40, 'pi/judge', STABLE)
     assert stop == stop | dict(reason='plateau', detail='2 iterations in a row with nothing accepted on dev '
@@ -238,6 +239,30 @@ def test_a_limit_shows_in_the_proposer_logs_and_the_trial_logs(loop):
     assert looprun.limited(['RuntimeError: Round 1 failed'], ['run-a-1-climb'])
 
 
+@pytest.mark.parametrize('message', [
+    LIMIT,
+    ('║ PiError: 402: {"message":"This request requires more credits, or fewer       ║\n'
+     '║ max_tokens. You requested up to 32768 tokens, but can only afford 2048.     ║\n'
+     '║ limit","code":402,"metadata":{"limit_source":"openrouter_key_limit","remedy_ ║\n'),
+    'PiError: 402: {"error":{"metadata":{"limit_source":"openrouter_credits"}}}',
+    'Error 429: Rate limit exceeded: free-models-per-min.',
+    '⚠ Individual quota reached. Please upgrade your subscription or try again later.',
+], ids=['codex', 'openrouter-402-box', 'openrouter-credits', 'openrouter-429', 'agy'])
+def test_provider_quota_and_rate_limit_messages_are_detected_in_logs(loop, message):
+    logs = loop.root / '.cache/loop/logs/run-a-2'
+    logs.mkdir(parents=True)
+    (logs / 'attempt-1.log').write_text(message)
+    assert looprun.limited(['The proposer exited 1'], [], logs)
+    (logs / 'attempt-1.log').unlink()
+    summary = loop.root / 'artifacts/loop/run-a-2-climb/summary.json'
+    summary.parent.mkdir(parents=True)
+    summary.write_text(json.dumps(dict(jobs=[dict(job='run-a-2-climb-round-1-attempt-1')])))
+    trial = loop.root / 'jobs/run-a-2-climb-round-1-attempt-1/case-a__x/agent'
+    trial.mkdir(parents=True)
+    (trial / 'daydream.stdout.log').write_text(message)
+    assert looprun.limited(['RuntimeError: Round 1 failed'], ['run-a-2-climb'])
+
+
 def test_a_confirmation_limit_gets_one_wait_too(loop):
     assert loop.run('--run', 'run-a', '--set', 'auto_open_pr=false', iterations=['accepted'],
                     confirms=[LIMIT, 'confirmed']) == 0
@@ -295,6 +320,39 @@ def test_one_loop_per_machine(loop, capsys):
         assert 'Another loop is running on this machine (run run-x, process 1)' in capsys.readouterr().err
     assert not (loop.root / 'loop-runs/run-a').exists() and loop.canary_names == []
     assert loop.run('--run', 'run-a', '--set', 'run_max_iterations=0') == 0
+
+
+def test_resume_refuses_mismatched_reviewer_or_judge_slots_before_canary(loop, capsys):
+    with pytest.raises(Killed):
+        loop.run('--run', 'run-a', iterations=['kill'])
+    started = loop.entries()[0]['slots']
+    proposer = settings.load()['proposer']
+    original = (loop.root / 'settings.toml').read_text()
+    loop.prereqs, loop.canary_names[:] = 0, []
+
+    (loop.root / 'settings.toml').write_text(original.replace('\neffort = "default"\n', '\neffort = "medium"\n', 1))
+    assert settings.load()['reviewer'] != started['reviewer']
+    assert loop.run('--resume', 'run-a') == 2
+    assert 'The run started under the slots' in capsys.readouterr().err
+    assert loop.prereqs == 0 and loop.canary_names == []
+    assert not (loop.root / 'loop-runs/run-a/resumes.jsonl').exists()
+    assert not any(entry['kind'] == 'stop' for entry in loop.entries())
+
+    (loop.root / 'settings.toml').write_text(original.replace('model = "gpt-6.1-sol"', 'model = "gpt-5.4"', 1))
+    assert settings.load()['judge'] != started['judge']
+    assert loop.run('--resume', 'run-a') == 2
+    assert 'The run started under the slots' in capsys.readouterr().err
+    assert loop.prereqs == 0 and loop.canary_names == []
+    assert not (loop.root / 'loop-runs/run-a/resumes.jsonl').exists()
+    assert not any(entry['kind'] == 'stop' for entry in loop.entries())
+
+    # Changing [proposer] leaves reviewer and judge slots unchanged, so the run resumes.
+    (loop.root / 'settings.toml').write_text(
+        original.replace('cli = "codex"\nmodel = "gpt-6.2-sol"\neffort = "high"',
+                         'cli = "agy"\nmodel = "gemini-4-neon-xhigh"\neffort = "xhigh"', 1))
+    assert settings.load()['proposer'] != proposer
+    assert loop.run('--resume', 'run-a', '--set', 'run_max_iterations=1', iterations=['rejected']) == 0
+    assert kinds(loop.entries()) == ['run-start', '#1 rejected', 'stop']
 
 
 def test_what_keeps_a_run_from_starting_or_resuming(loop, monkeypatch, capsys):
@@ -359,7 +417,6 @@ def test_the_run_prunes_between_iterations_through_loop_prune(loop, monkeypatch)
     monkeypatch.setitem(sys.modules, 'loop.prune', module)
     assert looprun.prune('run-a', loaded) == {} and calls == [('run-a', dict(between_iterations=True,
                                                                              root=loop.root))]
-
 
 
 def test_the_run_prunes_after_the_limit_check_has_read_the_trial_logs(loop, monkeypatch):

@@ -295,3 +295,13 @@ def test_an_iteration_whose_build_is_gone_is_built_again_before_it_is_scored(loo
     entry = loop.run(['base'])
     assert loop.builds == [commit, commit] and entry['gate']['accepted']
     assert entry['verdict']['verdict'] == 'rejected'
+
+
+def test_a_patch_with_bytes_that_are_not_utf8_is_saved_as_git_gave_it(loop, tmp_path):
+    run = loop.root / 'loop-runs/run-x'
+    ledger.append(run, 'run-start', dict(settings={}, suite_commit='a' * 40, judge='pi', baseline_commit='b' * 40,
+                                         baseline_summary_sha256='0' * 64, canary={}))
+    patch = b'+caf\xe9\n'.decode('utf-8', 'surrogateescape')
+    ledger.append(run, 'iteration', dict(iteration=1, verdict=dict(verdict='invalid', reasons=['x']),
+                                         candidate=dict(commit='c' * 40, patch_id='p' * 40)), patch=patch)
+    assert (run / 'patches/1.patch').read_bytes() == b'+caf\xe9\n'
