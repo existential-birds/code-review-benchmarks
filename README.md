@@ -14,7 +14,7 @@ see [score equivalence](docs/citing.md#score-equivalence).
 
 Every benchmark runs the one Daydream build pinned in
 [`benchmarks/daydream/build.json`](benchmarks/daydream/build.json), currently unreleased
-`main` at `84c37cd`, the first commit whose Pi backend takes Pi 1.6.0. To measure another
+`main` at `ca1b35e` (Daydream `0.38.1` plus the OpenRouter socket-retry fix). To measure another
 version, change that file, run `make setup` and regenerate the catalogs; Harbor
 refuses to run a task generated for a different pin. To score an unreleased commit
 without changing the pin, build it with `--candidate <commit>` and pass the
@@ -63,3 +63,6 @@ reviewer and logins on ReviewBench's pull requests.
 
 To tune Daydream with the loop, which proposes changes, scores them on dev cases and
 confirms kept ones on held-out, see [Run the loop](docs/loop.md).
+
+See [CHANGELOG.md](CHANGELOG.md) for release notes and [CONTRIBUTING.md](CONTRIBUTING.md)
+for contribution, versioning and release conventions.

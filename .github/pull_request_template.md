@@ -35,6 +35,7 @@ Issue: [Closes / Related to + full GitHub issue URL, or no linked issue — brie
 
 - [ ] Ran the relevant documented repository checks and recorded the outcome below, or explained why they are not applicable.
 - [ ] For custom code, recorded the Harbor-first evidence required by `CONTRIBUTING.md`, or explained why it is not applicable.
+- [ ] Updated `CHANGELOG.md` under `[Unreleased]` and noted SemVer impact, or explained why it is not applicable.
 
 <!-- Record only checks run on the final change: exact commands or steps, what you
 observed, and what each check shows. Keep fixture tests separate from live reviewer or
